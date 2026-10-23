@@ -1,0 +1,7 @@
+# Instalación mínima del CRM local. El bot conserva requirements.txt.
+Flask==3.1.2
+python-dotenv==1.0.1
+google-api-python-client==2.121.0
+google-auth-httplib2==0.2.0
+tzdata==2025.2
+pytest==8.1.1
