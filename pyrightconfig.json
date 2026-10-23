@@ -1,0 +1,11 @@
+{
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "venvPath": ".",
+      "venv": ".venv"
+    }
+  ]
+}
