@@ -1,0 +1,6 @@
+{% extends 'base.html' %}{% block content %}
+<section class="auth-intro"><div class="eyebrow">TU NEGOCIO, EN ORDEN</div><h1>Más tiempo para<br>tus pacientes.</h1><p>Tu equipo, tus oportunidades y tu agenda.<br>Un solo espacio para trabajar mejor.</p><div class="auth-decoration">✦</div><small>CRM local · {{ business }}</small></section>
+<section class="auth-panel"><div class="eyebrow">BIENVENIDO</div><h2>Ingresar al CRM</h2><p class="muted">Usa el acceso que te asignó el administrador.</p>{% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+<form method="post">{{ token() }}<label>Correo electrónico<input type="email" name="email" required autocomplete="username" maxlength="200"></label><label>Contraseña<input type="password" name="password" required autocomplete="current-password" maxlength="256"></label><button>Ingresar →</button></form>
+{% if configured is defined and not configured %}<p class="notice">Primera instalación: crea tu administrador desde la terminal siguiendo el README del proyecto.</p>{% endif %}<small class="muted">El acceso está disponible en esta computadora.</small></section>
+{% endblock %}

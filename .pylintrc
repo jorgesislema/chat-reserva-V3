@@ -1,0 +1,6 @@
+[MASTER]
+ignore=.venv
+
+[MESSAGES CONTROL]
+# Enable the minimum useful set for project
+disable=missing-module-docstring,missing-class-docstring,missing-function-docstring
