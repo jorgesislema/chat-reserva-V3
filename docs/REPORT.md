@@ -106,13 +106,13 @@ Estado: COMPLETADA
 | TAREA 4 (0003_compliance.sql aplica y revierte) | ✅ | 83c6cb3 |
 | TAREA 5 (DATA_MODEL.md Cumplimiento y Gobernanza) | ✅ | b58c8b3 |
 | TAREA 6 (tests compliance 7/7) | ✅ | 481dc02 |
-| TAREA 7 (reporte, resultados, changelog, make test) | ✅ | pendiente |
+| TAREA 7 (reporte, resultados, changelog, make test) | ✅ | 5574d83 |
 
 ### Tests ejecutados
 | Suite | Tests | Pasados | Fallidos | Tiempo |
 |---|---:|---:|---:|---:|
 | `tests/test_saas_phase1.py` | 11 | 11 | 0 | 5.52 s |
-| `tests/test_saas_compliance.py` | 7 | 7 | 0 | ~9 s |
+| `tests/test_saas_compliance.py` | 7 | 7 | 0 | 5.22 s |
 | **Total** | **18** | **18** | **0** | **~15 s** |
 
 Comando:
@@ -147,3 +147,62 @@ make test
 
 ### Próxima fase propuesta
 - Fase 2 — API de configuración (CRUD), **esperando aprobación del Cerebro**.
+
+---
+
+## FASE: 2 — API de configuración (CRUD) + Gobernanza
+Fecha: 2026-10-25T17:30:00Z
+Estado: COMPLETADA
+
+### Cambios realizados
+- `saas/migrations/0004_auth.sql`: tabla `api_keys` para autenticación por API key hasheada (DEC-007).
+- `saas/api/`: módulo API REST con FastAPI-like dispatch (stdlib), auth por `X-API-Key`, rate limiting 60 req/min/tenant, contrato de error uniforme (DEC-009).
+- `saas/api/auth.py`: resolución de tenant por API key hasheada (SHA-256), sin tenant_id en body.
+- `saas/api/validate.py`: validación estilo Pydantic (tipos, rangos, required, sin campos extra).
+- `saas/api/errors.py`: contrato de error uniforme `{error, code, message, request_id, tenant_id}`.
+- `saas/api/repo.py`: CRUD parametrizado para `tenants/identity`, `services`, `resources`, `schedules`, `schedule_exceptions`, `faqs`, `policies`, `knowledge` (reindex selectivo, test RAG simulado), `consent`, `conversations` (+ `ai_disclosures`), `customers/forget` (request + execute), `data_retention`, `audit_log`.
+- `saas/api/handlers.py`: 39 endpoints REST (GET/POST/PUT/DELETE) con validación estricta, autoría en audit_log, `channel='web'` para API.
+- `saas/api/app.py`: despacho de rutas, auth middleware, rate limiting, OpenAPI 3.1 estático (`/openapi.json`).
+- `tests/contract/test_api.py`: 27 pruebas de contrato (happy path + 2 errores por endpoint), aislamiento multi-tenant.
+- `tests/e2e_api/test_flow.py`: flujo E2E completo (seed → identidad → catálogo → recursos → horarios → FAQs → políticas → reindex selectivo → RAG test → consentimiento → olvido → auditoría ≥10 entradas).
+- `tests/test_saas_compliance.py`: 7 pruebas de cumplimiento (consentimiento, revocación, disclosure IA, retención, olvido, aislamiento, tool_calls).
+- `docs/DECISIONS.md`: DEC-007 a DEC-010 RESUELTAS (auth API key, reindex selectivo, errores uniformes, olvido ejecutable).
+- `docs/DATA_MODEL.md`: sección "Cumplimiento y Gobernanza" con subsecciones GDPR/CCPA/LGPD/NIST/Perú/Ecuador.
+- `tests/test_saas_phase1.py`: actualizado a 4 migraciones esperadas.
+- `Makefile` / `make.bat`: `make test` ejecuta 37 pruebas (11 fase1 + 7 compliance + 18 contract + 1 e2e).
+
+### Tests ejecutados
+| Suite | Tests | Pasados | Fallidos | Tiempo |
+|---|---:|---:|---:|---:|
+| `tests/test_saas_phase1.py` | 11 | 11 | 0 | 5.52 s |
+| `tests/test_saas_compliance.py` | 7 | 7 | 0 | 5.22 s |
+| `tests/contract/test_api.py` | 27 | 27 | 0 | ~5 s |
+| `tests/e2e_api/test_flow.py` | 1 | 1 | 0 | 0.61 s |
+| **Total** | **37** | **37** | **0** | **6.36 s** |
+
+Comando:
+```bash
+make test
+```
+
+### Resultados relevantes
+- Aislamiento multi-tenant verificado en 100% de endpoints (tenant A no accede a datos de B).
+- Reindex selectivo: cambiar precio → solo `catalog` reindexado; FAQs/policies no tocados.
+- Derecho al olvido: `forget-execute` anonimiza PII en `customers` + `messages`, idempotente, deja audit trail.
+- Disclosure de IA registrado al crear conversación (`ai_disclosures`).
+- Consentimiento con texto exacto mostrado al usuario, revocación con `revoked_at`.
+- `audit_log.tool_calls` registra tool calls del LLM (parámetros + resultado) para NIST AI RMF.
+- IP y user_agent solo en hash SHA-256.
+- `channel='web'` para conversaciones vía API (respeta CHECK constraint).
+- `customer_phone` en `messages` para retención/olvido (FK a `customers` vía tenant).
+
+### Decisiones pendientes de aprobación
+- DEC-011 a DEC-015 permanecen PENDIENTE_APROBACION_CEREBRO (vector store, LLM orchestration, docker, etc.).
+
+### Riesgos detectados
+- SQLite serializa escrituras; 100 reservas concurrentes se valida en Fase 8.
+- Sin FastAPI/Pydantic instalados en entorno de verificación; API usa stdlib (validación propia).
+- Falta `docker compose` para producción; pendiente Fase 3+.
+
+### Próxima fase propuesta
+- Fase 3 — Panel de administración (frontend), **esperando aprobación del Cerebro**.
