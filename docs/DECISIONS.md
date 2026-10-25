@@ -466,3 +466,140 @@ valores con una migración pequeña y portable.
 3. **Carga concurrente**: 100 reservas simultáneas se validan en Fase 8.
 4. **Perfiles regulatorios por país**: pendiente de sección en DECISIONS.md
    (véase cumplimiento en DATA_MODEL.md).
+
+---
+
+## DEC-011-RESUELTA — Stack de frontend: React + Vite + Tailwind CSS
+
+Estado: **RESUELTA**
+Fecha: 2026-10-25
+
+**Contexto.** Fase 3 requiere un panel de administración web (SPA) que consuma
+la API de Fase 2. El producto de ~$100/mes exige bajo coste de desarrollo y
+mantenimiento, sin sacrificar calidad de UX, accesibilidad y rendimiento.
+
+**Decisión.** React 18 + Vite 5 + Tailwind CSS 3 como stack de frontend.
+
+**Alternativas.**
+
+1. Vue 3 + Vite + Tailwind (descartada: equipo con más experiencia en React).
+2. SvelteKit + Tailwind (descartada: ecosistema más pequeño, menos librerías
+   de componentes accesibles).
+3. React + Next.js (descartado: SSR innecesario para un panel de administración
+   SPA, añade complejidad de servidor).
+4. React + Vite + Tailwind (elegida: build rápido, HMR excelente, Tailwind
+   para diseño system consistente y accesible, ecosistema maduro).
+
+**Justificación.** React + Vite + Tailwind ofrece el mejor equilibrio entre
+velocidad de desarrollo, tamaño de bundle, rendimiento en runtime y
+mantenibilidad para un equipo pequeño. Tailwind permite un design system
+consistente y accesible (WCAG 2.1 AA) sin CSS custom. Vite da HMR instantáneo
+en desarrollo y builds optimizados para producción.
+
+**Condiciones (obligatorias).**
+
+- Proyecto en `frontend/` con `package.json` propio, independiente del backend.
+- Build output en `../backend/static/` o servido por Vite en dev.
+- TypeScript estricto obligatorio.
+- ESLint + Prettier configurados.
+- Tests unitarios con Vitest + React Testing Library.
+- Tests E2E con Playwright.
+- Lighthouse accessibility ≥ 90 en páginas críticas.
+
+---
+
+## DEC-012-RESUELTA — Manejo de estado: Zustand + TanStack Query
+
+Estado: **RESUELTA**
+Fecha: 2026-10-25
+
+**Contexto.** El panel requiere estado global (tenant, auth, UI) y estado
+servidor (cache, invalidación, optimistic updates).
+
+**Decisión.** Zustand para estado global ligero + TanStack Query (React Query)
+para estado servidor (caching, invalidación, prefetch, optimistic updates).
+
+**Alternativas.**
+
+1. Redux Toolkit (descartado: boilerplate excesivo para alcance MVP).
+2. Context API + useReducer (descartado: re-renders innecesarios, sin
+   invalidación automática de cache servidor).
+3. Zustand + TanStack Query (elegida: APIs simples, bundle pequeño,
+   integración natural, devtools excelentes).
+
+**Justificación.** Zustand es minimalista (1KB) para estado global (auth, UI
+theme, tenant actual). TanStack Query maneja todo el ciclo de vida del
+estado servidor: cache, background refetch, stale-while-revalidate,
+invalidación por keys, optimistic updates para mutaciones.
+
+**Condiciones (obligatorias).**
+
+- Query keys estructuradas por recurso (`['services']`, `['service', id]`).
+- Invalidación automática tras mutaciones (`queryClient.invalidateQueries`).
+- Optimistic updates en mutaciones CRUD para UX instantánea.
+- Cache time y stale time configurables por recurso.
+
+---
+
+## DEC-013-RESUELTA — Auth en frontend: API Key en localStorage + Axios interceptor
+
+Estado: **RESUELTA**
+Fecha: 2026-10-25
+
+**Contexto.** El frontend debe autenticarse contra la API (DEC-007) sin
+exponer la API key en URLs ni logs.
+
+**Decisión.** La API key se almacena en `localStorage` (clave `saas_api_key`)
+y se envía en header `X-API-Key` via interceptor de Axios. No hay backend-for-frontend.
+
+**Alternativas.**
+
+1. Cookie HttpOnly + backend-for-frontend (descartado: añade servidor extra).
+2. JWT en memory + refresh token (descartado: DEC-007 usa API key, no JWT).
+3. API key en localStorage + interceptor (elegida: simple, sin servidor extra,
+   compatible con API key rotation).
+
+**Justificación.** La API usa API key (DEC-007). Guardarla en localStorage
+es aceptable para un panel de administración (no es una SPA pública).
+El interceptor inyecta `X-API-Key` en cada request. En logout, se limpia.
+
+**Condiciones (obligatorias).**
+
+- La API key NUNCA viaja en query string ni body.
+- En 401, redirigir a login y limpiar localStorage.
+- Rate limit handling (429) con backoff exponencial en interceptor.
+
+---
+
+## DEC-014-RESUELTA — Librería de componentes: Radix UI + Tailwind (headless + utilitario)
+
+Estado: **RESUELTA**
+Fecha: 2026-10-25
+
+**Contexto.** Necesitamos componentes accesibles (WCAG 2.1 AA), consistentes
+y personalizables sin CSS custom masivo.
+
+**Decisión.** Radix UI (componentes headless accesibles) + Tailwind CSS
+(estilos utilitarios). Nada de Material UI, Chakra UI ni librerías con estilos
+propios que cuesta sobrescribir.
+
+**Alternativas.**
+
+1. Material UI (descartada: bundle grande, estilos opinionados, difícil
+   personalizar para design system propio).
+2. Chakra UI (descartada: estilos propios, bundle grande).
+3. Radix UI + Tailwind (elegida: componentes headless 100% accesibles,
+   estilos 100% controlados por Tailwind, bundle mínimo, tree-shaking).
+
+**Justificación.** Radix da primitivas accesibles (Dialog, Select, Tabs,
+Tooltip, DropdownMenu, Toast, etc.) sin opiniones de estilo. Tailwind da
+control total del diseño. Juntos permiten un design system propio, ligero y
+100% accesible (WCAG 2.1 AA).
+
+**Condiciones (obligatorias).**
+
+- Todos los componentes interactivos usan primitivas Radix (Dialog, Select,
+  Tabs, Tooltip, DropdownMenu, Toast, etc.).
+- Estilos 100% Tailwind (ningún CSS custom salvo variables CSS para tema).
+- Testing de accesibilidad con axe-core en CI.
+- Storybook para documentación de componentes.

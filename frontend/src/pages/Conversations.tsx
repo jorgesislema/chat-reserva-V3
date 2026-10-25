@@ -1,0 +1,177 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
+import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Search, MessageSquare, AlertTriangle, Filter, X } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { useToast } from '@/hooks/use-toast'
+import { conversationsApi } from '@/services/api'
+import { cn } from '@/utils'
+import { formatRelativeTime } from '@/utils'
+
+interface Conversation {
+  id: string
+  tenant_id: string
+  channel: string
+  customer_phone: string
+  customer_name: string | null
+  status: string
+  state: string
+  last_message_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export function Conversations() {
+  const { toast } = useToast()
+  const [conversations, setConversations] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
+
+  const fetchConversations = async () => {
+    setIsLoading(true)
+    try {
+      const params: any = {}
+      if (statusFilter !== 'all') params.status = statusFilter
+      const response = await conversationsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined })
+      setConversations(response.conversations || [])
+    } catch (error: any) {
+      console.error(error)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchConversations()
+  }, [statusFilter])
+
+  const filteredConversations = conversations.filter(c =>
+    c.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
+    c.customer_phone.includes(search)
+  )
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">Conversaciones</h1>
+          <p className="text-text-secondary mt-1">Gestiona las conversaciones con tus clientes</p>
+        </div>
+      </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5" />
+              Conversaciones
+            </CardTitle>
+            <CardDescription>Gestiona y supervisa las conversaciones con tus clientes</CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
+              <Input
+                placeholder="Buscar por nombre o teléfono..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="pl-10 w-64"
+                placeholder="Buscar..."
+              />
+            </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-[180px]"><SelectValue placeholder="Todos los estados" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="idle">Inactivas</SelectItem>
+                <SelectItem value="pending_human">Pendientes humano</SelectItem>
+                <SelectItem value="booked">Con reserva</SelectItem>
+                <SelectItem value="closed">Cerradas</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Canal</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Último mensaje</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-8">
+                      <div className="flex justify-center gap-2">
+                        <div className="w-6 h-6 border-2 border-primary-500 border-t-transparent rounded-full animate-spin"></div>
+                        <span className="text-text-muted">Cargando...</span>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : filteredConversations.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-8 text-text-muted">
+                      No se encontraron conversaciones
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredConversations.map((conv) => (
+                    <TableRow key={conv.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{conv.customer_name || 'Sin nombre'}</p>
+                          <p className="text-sm text-text-muted">{conv.customer_phone}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={conv.channel === 'whatsapp' ? 'primary' : conv.channel === 'web' ? 'secondary' : 'outline'}>
+                          {conv.channel}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={
+                          conv.status === 'pending_human' ? 'warning' :
+                          conv.status === 'closed' ? 'secondary' :
+                          'success'
+                        }>
+                          {conv.status === 'pending_human' ? 'Pendiente humano' :
+                          conv.status === 'booked' ? 'Con reserva' :
+                          conv.status === 'idle' ? 'Inactiva' : 'Cerrada'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {conv.last_message_at ? formatRelativeTime(conv.last_message_at) : 'Sin mensajes'}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" onClick={() => { /* open detail */ }}>
+                          Ver
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+export { Conversations }
