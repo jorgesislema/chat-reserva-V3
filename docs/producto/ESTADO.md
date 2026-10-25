@@ -10,6 +10,20 @@ Estos documentos continúan el trabajo aunque se pierda el historial del chat.
 
 ## Punto actual
 
+**25-10-2026: Fase 1 del SaaS multi-tenant entregada en módulo aislado.**
+Se implementó `saas/` (migraciones SQL 0001/0002, runner transaccional con
+checksum, repositorio scopeado por tenant y seed dental idempotente) sin tocar
+`api/`, `crm/`, `ui/`, `database/` ni bases existentes. Pruebas actuales:
+`tests/test_saas_phase1.py`, 11/11 en verde (5.05 s, `.venv-verify`); seed demo
+verificado dos veces con 2 profesionales, 3 servicios, 20 franjas, 5 FAQs,
+3 políticas y 11 documentos de conocimiento. Documentos: `docs/DECISIONS.md`,
+`docs/DATA_MODEL.md`, `docs/REPORT.md`, `docs/TEST_RESULTS.json` y
+`docs/TEST_RESULTS.md`. Decisión crítica pendiente: el prompt multi-tenant
+contradice `PLAN.md` («No agregar multiempresa ahora»); se registró como
+DEC-000 y la Fase 1 queda aislada para poder retirarla sin impacto. No se avanza
+a Fase 2 sin aprobación del Cerebro. No hubo commit, push, migración de bases
+operativas ni uso de secretos/datos reales.
+
 **24-10-2026: Premium trasladado a proyecto independiente.**
 Por instrucción del propietario, `docs/producto/premium` y `docs/entregas`
 se movieron a `H:\git\Agente de reserva V4`, conservando esas rutas relativas.
