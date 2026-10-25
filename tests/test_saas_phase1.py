@@ -26,6 +26,10 @@ BUSINESS_TABLES = [
     "handoff_alerts",
     "audit_log",
     "idempotency_keys",
+    "customers",
+    "data_processing_records",
+    "consent_log",
+    "ai_disclosures",
 ]
 
 
@@ -48,9 +52,9 @@ def _tenant_pair(path):
 
 
 def test_migrations_are_versioned_and_idempotent(db_path):
-    assert db.schema_versions(db_path) == ["0001", "0002"]
+    assert db.schema_versions(db_path) == ["0001", "0002", "0003"]
     assert db.migrate(db_path) == []
-    assert db.schema_versions(db_path) == ["0001", "0002"]
+    assert db.schema_versions(db_path) == ["0001", "0002", "0003"]
 
 
 def test_migration_checksum_detects_tampering(tmp_path):
