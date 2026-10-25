@@ -85,11 +85,13 @@ CREATE INDEX IF NOT EXISTS idx_ai_disclosures_tenant ON ai_disclosures(tenant_id
 CREATE INDEX IF NOT EXISTS idx_ai_disclosures_tenant_conversation
   ON ai_disclosures(tenant_id, conversation_id);
 
--- Columnas de retención y anonimización en mensajes.
+-- Columnas de retención, anonimización y contacto en mensajes.
 ALTER TABLE messages ADD COLUMN data_retention_until TEXT;
 ALTER TABLE messages ADD COLUMN anonymized_at TEXT;
+ALTER TABLE messages ADD COLUMN customer_phone TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_messages_retention ON messages(data_retention_until);
+CREATE INDEX IF NOT EXISTS idx_messages_customer_phone ON messages(customer_phone);
 
 -- Auditoría de tool_calls del LLM (parámetros y resultado).
 ALTER TABLE audit_log ADD COLUMN tool_calls TEXT

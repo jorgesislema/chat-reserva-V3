@@ -13,9 +13,31 @@ objetivo no deben confundirse con las disponibles actualmente. Para retomar el t
    [REPORTE_P01.md](docs/producto/REPORTE_P01.md).
 
 El trabajo se realiza por entregas con cambios, pruebas y límites en el estado de continuidad.
-P01 y P02 están aceptadas; G01 está **aceptada por Codex tras G01B**
+P01 y P2 están aceptadas; G01 está **aceptada por Codex tras G01B**
 ([dictamen independiente](docs/producto/REVISION_G01B_CODEX.md)). P03 está implementada con
 pruebas simuladas y conserva pendiente su validación en calendario real exclusivo autorizado.
+
+## SaaS de reservas: modelo multi-tenant nativo
+
+El chat de reservas con IA es un producto SaaS de despliegue multi-tenant: un
+solo servidor atiende a N negocios y cada negocio es un **tenant lógico aislado**
+mediante la columna `tenant_id` en toda tabla de negocio. No hay instalaciones
+ni bases de datos separadas por cliente. Cada tenant dispone de su propia
+identidad, catálogo de servicios, recursos, horarios, excepciones, FAQs y
+políticas, todo configurable desde el panel web sin tocar código ni `.env`.
+
+### Modelo de despliegue
+
+- Un solo despliegue atiende a **N tenants**.
+- El aislamiento es lógico, por `tenant_id`, con filtrado a nivel de fila en
+  todas las consultas de negocio y claves foráneas compuestas
+  `(tenant_id, id)` que impiden cruces accidentales entre negocios.
+- Cada tenant tiene su propia configuración: identidad, catálogo, horarios,
+  excepciones, FAQs y políticas.
+- La configuración se gestiona mediante la API REST (`/api/...`) y el panel de
+  administración; no se instala una copia por cliente.
+
+---
 P04–P08 siguen pendientes; el producto completo todavía no está terminado.
 
 Aplicación local con acceso por contraseña, roles administrador/usuario, profesionales,
