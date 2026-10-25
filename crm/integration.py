@@ -1,14 +1,32 @@
-"""Puente del bot existente al CRM; sin importar la aplicación web."""
-from datetime import datetime, timedelta, timezone
+"""Puente del bot existente al CRM; sin importar la aplicación web.
+
+El adaptador valida las entradas propias del bot (nombre, teléfono y duración),
+captura el contacto y delega las reglas de reserva en
+:mod:`crm.reservation_service`. No vuelve a implementar SQL de conflictos ni
+validaciones de reserva. Las restricciones de horario propias del negocio se
+mantendrán aquí hasta la fase de configuración de horarios.
+"""
+from datetime import datetime, timedelta
 import os
 from pathlib import Path
 import re
-import uuid
 
+from crm import business_profile
+from crm import reservation_service
 from crm.calendar import utc
 from crm.store import connect, now
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _window_policy():
+    """Regla de horario del perfil configurado: la misma que usa la web."""
+    return business_profile.configured_profile().check_window
+
+
+def _zone():
+    """Zona del perfil (G01B R1): única autoridad, no CRM_TIMEZONE."""
+    return business_profile.configured_profile().zone
 
 
 def database_path():
@@ -59,7 +77,7 @@ def capture_lead(phone, name='', path=None):
 
 
 def local_availability(doctor, day):
-    zone = os.getenv('CRM_TIMEZONE') or 'America/Guayaquil'
+    zone = _zone()
     date = datetime.fromisoformat(day).date().isoformat()
     start = utc(date, zone)
     end = utc((datetime.fromisoformat(date) + timedelta(days=1)).isoformat(), zone)
@@ -70,30 +88,52 @@ def local_availability(doctor, day):
 
 
 def reserve(doctor, name, phone, start, minutes):
-    """Reserva localmente con ID estable. El bot informa el envío pendiente a Google."""
+    """Reserva localmente delegando en el servicio común.
+
+    Mantiene el contrato histórico del bot: devuelve un texto para el usuario y
+    lanza ``ValueError`` con el motivo cuando la reserva no es posible.
+    """
     if not 0 < minutes <= 1440:
         raise ValueError('Duración no válida')
-    zone = os.getenv('CRM_TIMEZONE') or 'America/Guayaquil'
-    begin = utc(start, zone)
-    end = (datetime.fromisoformat(begin) + timedelta(minutes=minutes)).isoformat()
-    if datetime.fromisoformat(begin) < datetime.now(timezone.utc):
-        raise ValueError('La cita debe estar en el futuro')
     phone = re.sub(r'[\s()+.-]', '', phone)
     if not name.strip() or not re.fullmatch(r'\d{7,15}', phone):
         raise ValueError('Nombre y teléfono válido son obligatorios')
+
+    zone = _zone()
+    try:
+        begin = reservation_service.to_utc(start, zone)
+    except (reservation_service.InvalidZone,
+            reservation_service.NonexistentLocalTime,
+            reservation_service.AmbiguousLocalTime):
+        # Mensajes de zona/hora estacional: se propagan tal cual al bot.
+        raise
+    except (ValueError, TypeError) as exc:
+        raise ValueError('La fecha y hora no son válidas') from exc
+    end = (begin + timedelta(minutes=minutes)).isoformat()
+
     capture_lead(phone, name)
-    with connect(database_path()) as db:
-        db.execute('BEGIN IMMEDIATE')
-        if db.execute("""SELECT 1 FROM crm_appointments WHERE professional_id=? AND
-            status='active' AND start<? AND end>?""", (doctor['id'], end, begin)).fetchone():
-            raise ValueError('Ese horario ya está ocupado')
-        lead = db.execute('SELECT id FROM crm_leads WHERE phone=?',
-                          (re.sub(r'[\s()+.-]', '', phone),)).fetchone()
-        db.execute("""INSERT INTO crm_appointments(professional_id,lead_id,title,start,end,event_id,updated_at)
-            VALUES (?,?,?,?,?,?,?)""", (doctor['id'], lead['id'] if lead else None,
-            f'Cita: {name} - {phone}'[:200], begin, end, uuid.uuid4().hex, now()))
-        if lead:
-            db.execute("UPDATE crm_leads SET stage='Cita agendada',updated_at=? WHERE id=? AND stage NOT IN ('Ganado','Perdido')", (now(), lead['id']))
-    return ('Cita guardada localmente con ' + doctor['name'] + '. ' +
-            ('Pendiente de sincronización con Google; no confirme todavía su registro en Google.'
-             if doctor['calendar_id'] else 'Agenda local, sin Google Calendar.'))
+    path = database_path()
+    with connect(path) as db:
+        lead = db.execute('SELECT id FROM crm_leads WHERE phone=?', (phone,)).fetchone()
+    lead_id = lead['id'] if lead else None
+
+    result = reservation_service.save_appointment(
+        path,
+        professional_id=doctor['id'],
+        start=begin.isoformat(),
+        end=end,
+        title=f'Cita: {name} - {phone}',
+        zone=zone,
+        lead_id=lead_id,
+        actor='bot',
+        channel='bot',
+        window_policy=_window_policy(),
+    )
+    if not result['ok']:
+        raise ValueError(result['message'])
+
+    if doctor['calendar_id']:
+        return ('Cita guardada localmente con ' + doctor['name'] + '. '
+                'Pendiente de sincronización con Google; no confirme todavía su registro en Google.')
+    return ('Cita guardada localmente con ' + doctor['name'] + '. '
+            'Agenda local, sin Google Calendar.')
