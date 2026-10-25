@@ -113,6 +113,8 @@ def split_sql(script: str) -> list[str]:
 def _migration_files() -> list[tuple[str, Path]]:
     files: list[tuple[str, Path]] = []
     for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if path.name.endswith(".down.sql"):
+            continue  # Script de reversión manual; no es una versión aplicable.
         version = path.name.split("_", 1)[0]
         if not version.isdigit():
             raise ValueError(f"Migración sin prefijo numérico: {path.name}")
