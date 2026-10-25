@@ -1,5 +1,6 @@
 """Pruebas del CRM local: sin credenciales ni llamadas a servicios reales."""
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -13,7 +14,16 @@ from crm.store import connect, now
 
 @pytest.fixture
 def crm(tmp_path):
-    app = create_app({'TESTING': True, 'DATABASE': str(tmp_path / 'crm.db'), 'SECRET_KEY': 'test-only'})
+    # G01: perfil 24×7 para que las pruebas de solapes/identidad no dependan
+    # de la hora del día ni del día de la semana (misma lección que la
+    # revisión P02B R2). El rechazo por horario se prueba en test_g01_reservas.
+    from crm import business_profile as bp
+    siempre = bp.from_dict({'nombre': 'Pruebas', 'rubro': 'pruebas',
+                            'rubro_etiqueta': 'pruebas', 'zona': 'America/Guayaquil',
+                            'moneda': 'USD',
+                            'horarios': {str(d): ['00:00', '24:00'] for d in range(7)}})
+    app = create_app({'TESTING': True, 'DATABASE': str(tmp_path / 'crm.db'),
+                      'SECRET_KEY': 'test-only', 'PROFILE': siempre})
     with connect(app.config['DATABASE']) as db:
         for role in ('admin', 'user'):
             db.execute('INSERT INTO crm_users(email,name,password_hash,role) VALUES (?,?,?,?)',
@@ -52,20 +62,23 @@ def test_auth_and_csrf(crm):
 def test_roles_enforced_on_server(crm):
     client = crm.test_client()
     login(client, 'user')
-    for tab in ('users', 'accounts', 'team', 'audit'):
+    for tab in ('users', 'accounts', 'team', 'audit', 'sync'):
         assert client.get('/?tab=' + tab).status_code == 403
     for endpoint in ('users', 'accounts', 'professionals', 'sync'):
         assert post(client, '/' + endpoint).status_code == 403
     assert client.get('/?tab=leads').status_code == 200
 
 
-@pytest.mark.parametrize('tab', ['overview', 'leads', 'agenda', 'analytics', 'team', 'accounts', 'users', 'audit', 'profile'])
+@pytest.mark.parametrize('tab', ['overview', 'leads', 'agenda', 'analytics', 'team', 'accounts', 'sync', 'users', 'audit', 'profile'])
 def test_all_pages_render(crm, tab):
     client = crm.test_client()
     login(client)
     response = client.get('/?tab=' + tab)
     assert response.status_code == 200
-    assert b"script-src 'none'" in response.headers['Content-Security-Policy'].encode()
+    csp = response.headers['Content-Security-Policy']
+    assert "script-src 'self'" in csp
+    assert "'unsafe-inline'" not in csp
+    assert "'unsafe-eval'" not in csp
 
 
 def test_bruteforce_limit(crm):
@@ -117,10 +130,14 @@ def test_overlaps_reprogramming_and_cancellation(crm):
     with connect(crm.config['DATABASE']) as db:
         assert db.execute('SELECT COUNT(*) FROM crm_appointments').fetchone()[0] == 1
         original = db.execute('SELECT event_id FROM crm_appointments').fetchone()[0]
-    post(client, '/appointments', **{**data, 'id': '1', 'title': 'Reprogramada'})
+        version = db.execute('SELECT row_version FROM crm_appointments').fetchone()[0]
+    post(client, '/appointments', **{**data, 'id': '1', 'title': 'Reprogramada',
+                                     'version': str(version)})
     with connect(crm.config['DATABASE']) as db:
-        assert db.execute('SELECT event_id FROM crm_appointments').fetchone()[0] == original
-    post(client, '/appointments/1/cancel')
+        row = db.execute('SELECT event_id,title,row_version FROM crm_appointments').fetchone()
+        assert row['event_id'] == original and row['title'] == 'Reprogramada'
+        version = row['row_version']
+    post(client, '/appointments/1/cancel', version=str(version))
     post(client, '/appointments', **data)
     with connect(crm.config['DATABASE']) as db:
         assert db.execute("SELECT COUNT(*) FROM crm_appointments WHERE status='active'").fetchone()[0] == 1
@@ -220,6 +237,12 @@ def test_cli_admin_and_empty_initial_database(tmp_path):
 def test_bot_selection_and_lead_capture(crm, monkeypatch):
     from crm.integration import capture_lead, professionals, reserve, selected_professional
     monkeypatch.setenv('CRM_DATABASE', crm.config['DATABASE'])
+    # G01: el bot usa el perfil configurado; en pruebas, disponibilidad continua
+    # para no depender de la hora del día (el rechazo por horario se prueba en
+    # tests/test_g01_reservas.py con el perfil restringido).
+    monkeypatch.setenv('CRM_PERFIL_NEGOCIO',
+                       str(Path(__file__).resolve().parent.parent / 'perfiles'
+                           / 'pruebas-24x7.json'))
     assert len(professionals()) == 1
     capture_lead('+593 999 222 111', 'Nombre original')
     capture_lead('593999222111', 'No sobrescribir')

@@ -1,0 +1,19 @@
+{
+  "nombre": "Pruebas 24x7",
+  "rubro": "pruebas",
+  "rubro_etiqueta": "instalación de pruebas",
+  "zona": "America/Guayaquil",
+  "moneda": "USD",
+  "horarios": {
+    "0": ["00:00", "24:00"],
+    "1": ["00:00", "24:00"],
+    "2": ["00:00", "24:00"],
+    "3": ["00:00", "24:00"],
+    "4": ["00:00", "24:00"],
+    "5": ["00:00", "24:00"],
+    "6": ["00:00", "24:00"]
+  },
+  "terminologia": {
+    "paciente": "paciente"
+  }
+}

@@ -7,15 +7,24 @@ import re
 import secrets
 import sqlite3
 import time
-import uuid
 from zoneinfo import ZoneInfo
 
 import click
 from dotenv import load_dotenv
-from flask import Flask, abort, flash, g, redirect, render_template, request, session, url_for
+from flask import (Flask, Response, abort, flash, g, jsonify, redirect,
+                   render_template, request, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from crm.calendar import sync, utc
+from crm import agenda_time
+from crm import business_profile
+from crm.calendar import queue_for_resend, sync
+from crm.reservation_service import (FORBIDDEN, NOT_FOUND, OVERLAP,
+                                     STATUS_LABELS, VERSION_CONFLICT, add_note,
+                                     admin_correct_status, appointment_detail,
+                                     cancel_appointment, confirm_appointment,
+                                     list_appointments, mark_attendance,
+                                     pending_closure, reprogram_appointment,
+                                     save_appointment)
 from crm.store import audit, connect, initialize, now
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -46,15 +55,37 @@ def password_hash(password):
 def create_app(test_config=None):
     load_dotenv(ROOT / '.env')
     app = Flask(__name__)
+    accent = (os.getenv('CRM_ACCENT') or '#18765b').strip()
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', accent):
+        accent = '#18765b'
     app.config.update(DATABASE=os.getenv('CRM_DATABASE') or str(ROOT / 'analitica.db'),
                       SECRET_KEY=os.getenv('CRM_SECRET_KEY') or secrets.token_hex(32),
-                      BUSINESS_NAME=os.getenv('CRM_BUSINESS_NAME', 'Clínica · CRM'),
-                      TIMEZONE=os.getenv('CRM_TIMEZONE', 'America/Guayaquil'),
+                      BUSINESS_NAME=os.getenv('CRM_BUSINESS_NAME', ''),
+                      ACCENT=accent,
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
                       PERMANENT_SESSION_LIFETIME=timedelta(hours=8), MAX_CONTENT_LENGTH=65536)
     if test_config:
         app.config.update(test_config)
-    ZoneInfo(app.config['TIMEZONE'])
+    # G01B R1: el perfil es la ÚNICA autoridad de zona y nombre operativo.
+    # CRM_TIMEZONE sólo alimenta el perfil interno cuando no hay perfil
+    # externo; un conflicto se rechaza en el arranque (nunca silencioso).
+    profile = test_config.get('PROFILE') if test_config else None
+    if profile is None:
+        # Una sola autoridad: el test TIMEZONE si lo trae; si no, el entorno
+        # (CRM_TIMEZONE alimenta el perfil interno; con perfil externo y
+        # CRM_TIMEZONE contradictoria hay error de arranque).
+        legacy = (test_config.get('TIMEZONE') if test_config
+                  else None) or os.getenv('CRM_TIMEZONE')
+        profile = business_profile.resolve_profile(legacy)
+    elif test_config.get('TIMEZONE') and test_config['TIMEZONE'] != profile.zone:
+        raise business_profile.ProfileError(
+            f"Conflicto de zona en pruebas: el perfil define {profile.zone} y "
+            f"la configuración indica {test_config['TIMEZONE']}")
+    app.config['PROFILE'] = profile
+    app.config['TIMEZONE'] = profile.zone
+    if not app.config.get('BUSINESS_NAME'):
+        # Sin CRM_BUSINESS_NAME (ni valor de pruebas), manda el perfil.
+        app.config['BUSINESS_NAME'] = os.getenv('CRM_BUSINESS_NAME') or profile.name
     initialize(app.config['DATABASE'])
 
     def db():
@@ -72,6 +103,20 @@ def create_app(test_config=None):
             return wrapper
         return decorator
 
+    def protected_api(admin=False):
+        def decorator(fn):
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if not g.user:
+                    return jsonify(error={'code': 'session_expired',
+                                          'message': 'Sesión vencida. Vuelva a ingresar.'}), 401
+                if admin and g.user['role'] != 'admin':
+                    return jsonify(error={'code': 'forbidden',
+                                          'message': 'Permiso insuficiente.'}), 403
+                return fn(*args, **kwargs)
+            return wrapper
+        return decorator
+
     @app.before_request
     def security():
         g.user = None
@@ -80,26 +125,37 @@ def create_app(test_config=None):
                                 (session.get('user_id'),)).fetchone()
         if user and user['session_version'] == session.get('version'):
             g.user = user
-        if request.method == 'POST' and not secrets.compare_digest(
-                session.get('csrf', '').encode(), request.form.get('csrf', '').encode()):
-            abort(400, 'Sesión vencida. Actualice la página.')
-        if request.method == 'POST' and not session.get('csrf'):
-            abort(400)
+        if request.method == 'POST':
+            token = request.form.get('csrf') or request.headers.get('X-CSRF-Token', '')
+            current = session.get('csrf', '')
+            if not current or not secrets.compare_digest(current.encode(), token.encode()):
+                if request.path.startswith('/api/'):
+                    return jsonify(error={'code': 'csrf',
+                                          'message': 'Sesión vencida. Actualice la página.'}), 400
+                abort(400, 'Sesión vencida. Actualice la página.')
 
     @app.after_request
     def headers(response):
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['Content-Security-Policy'] = "default-src 'self'; style-src 'self'; script-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+        response.headers['Content-Security-Policy'] = (
+            "default-src 'self'; style-src 'self'; script-src 'self'; "
+            "img-src 'self' data:; base-uri 'self'; form-action 'self'; "
+            "frame-ancestors 'none'")
         return response
+
+    @app.get('/theme.css')
+    def theme_css():
+        css = ":root{--accent:%s;}" % app.config['ACCENT']
+        return Response(css, mimetype='text/css')
 
     @app.context_processor
     def context():
         if 'csrf' not in session:
             session['csrf'] = secrets.token_hex(32)
         return dict(csrf=session['csrf'], business=app.config['BUSINESS_NAME'], stages=STAGES,
-                    user=g.user, zone=app.config['TIMEZONE'])
+                    user=g.user, zone=app.config['TIMEZONE'], accent=app.config['ACCENT'])
 
     @app.template_filter('localtime')
     def localtime(value):
@@ -107,11 +163,16 @@ def create_app(test_config=None):
 
     @app.errorhandler(ValueError)
     def bad_input(exc):
+        if request.path.startswith('/api/'):
+            return jsonify(error={'code': 'invalid', 'message': str(exc)}), 400
         flash(str(exc), 'error')
         return redirect(url_for('home', tab=request.args.get('tab', 'overview')))
 
     @app.errorhandler(sqlite3.IntegrityError)
     def duplicate(_exc):
+        if request.path.startswith('/api/'):
+            return jsonify(error={'code': 'integrity',
+                                  'message': 'Referencia no válida o registro duplicado.'}), 400
         flash('Ya existe un registro con esos datos o la referencia no es válida.', 'error')
         return redirect(url_for('home'))
 
@@ -154,7 +215,7 @@ def create_app(test_config=None):
     @protected()
     def home():
         tab = request.args.get('tab', 'overview')
-        if tab in ('team', 'users', 'accounts', 'audit') and g.user['role'] != 'admin':
+        if tab in ('team', 'users', 'accounts', 'audit', 'sync') and g.user['role'] != 'admin':
             abort(403)
         search = request.args.get('q', '').strip()[:100]
         stage = request.args.get('stage', '')
@@ -165,10 +226,10 @@ def create_app(test_config=None):
                 (l.name LIKE ? OR l.phone LIKE ? OR l.email LIKE ?)
                 AND (?='' OR l.stage=?) ORDER BY l.updated_at DESC""",
                 (*(['%' + search + '%'] * 3), stage, stage)).fetchall()
-            appointments = conn.execute("""SELECT a.*,p.name AS professional,p.calendar_id FROM crm_appointments a
-                JOIN crm_professionals p ON p.id=a.professional_id WHERE (?='' OR p.id=?)
-                ORDER BY a.start DESC LIMIT 300""", (doctor_filter, doctor_filter)).fetchall()
             professionals = conn.execute('SELECT * FROM crm_professionals ORDER BY name').fetchall()
+            agenda_leads = (conn.execute(
+                'SELECT id,name,phone FROM crm_leads ORDER BY updated_at DESC LIMIT 200').fetchall()
+                if tab == 'agenda' else [])
             users = conn.execute('SELECT id,email,name,role,active FROM crm_users ORDER BY name').fetchall()
             accounts = conn.execute('SELECT * FROM crm_accounts ORDER BY name').fetchall() if g.user['role'] == 'admin' else []
             funnel = dict(conn.execute('SELECT stage,COUNT(*) FROM crm_leads GROUP BY stage').fetchall())
@@ -183,9 +244,20 @@ def create_app(test_config=None):
                 ON p.id=a.professional_id WHERE a.sync_status!='synced' AND p.calendar_id IS NOT NULL""").fetchone()[0]
             logs = conn.execute("""SELECT a.*,u.name FROM crm_audit a LEFT JOIN crm_users u ON u.id=a.user_id
                 ORDER BY a.id DESC LIMIT 100""").fetchall() if tab == 'audit' else []
-        return render_template('dashboard.html', tab=tab, leads=leads, appointments=appointments,
+            sync_queue = (conn.execute("""SELECT a.id, a.title, a.start, a.end, a.status,
+                a.operational_status, a.sync_status, a.sync_error, a.sync_attempts,
+                a.sync_next_attempt, a.updated_at, p.name AS professional
+                FROM crm_appointments a JOIN crm_professionals p ON p.id=a.professional_id
+                WHERE a.sync_status!='synced'
+                ORDER BY a.sync_status, a.updated_at DESC LIMIT 200""").fetchall()
+                if tab == 'sync' else [])
+            sync_professionals = (conn.execute("""SELECT name, specialty, calendar_id, active,
+                last_sync, sync_error FROM crm_professionals ORDER BY name""").fetchall()
+                if tab == 'sync' else [])
+        return render_template('dashboard.html', tab=tab, leads=leads, agenda_leads=agenda_leads,
             professionals=professionals, users=users, accounts=accounts, funnel=funnel,
             sources=sources, total=total, pipeline=pipeline, overdue=overdue, pending=pending,
+            sync_queue=sync_queue, sync_professionals=sync_professionals,
             conversion=round(100 * funnel.get('Ganado', 0) / total, 1) if total else 0,
             q=search, stage=stage, professional_filter=doctor_filter, logs=logs, today=today)
 
@@ -297,46 +369,74 @@ def create_app(test_config=None):
     @app.post('/appointments')
     @protected()
     def appointment_save():
-        start = utc(required('start'), app.config['TIMEZONE'])
-        end = utc(required('end'), app.config['TIMEZONE'])
-        if end <= start:
-            raise ValueError('El fin debe ser posterior al inicio')
-        if datetime.fromisoformat(start) < datetime.now(ZoneInfo('UTC')):
-            raise ValueError('Seleccione una fecha futura')
-        doctor = required('professional_id')
         identifier = request.form.get('id') or None
-        with db() as conn:
-            conn.execute('BEGIN IMMEDIATE')
-            if not conn.execute('SELECT id FROM crm_professionals WHERE id=? AND active=1', (doctor,)).fetchone():
-                raise ValueError('Seleccione un profesional activo')
-            old = conn.execute('SELECT * FROM crm_appointments WHERE id=?', (identifier,)).fetchone() if identifier else None
-            if identifier and not old:
-                abort(404)
-            if old and str(old['professional_id']) != doctor:
-                raise ValueError('Para cambiar de profesional, cancele la cita y cree una nueva')
-            if conn.execute("""SELECT id FROM crm_appointments WHERE professional_id=? AND status='active'
-                    AND start<? AND end>? AND (? IS NULL OR id!=?)""", (doctor, end, start, identifier, identifier)).fetchone():
-                raise ValueError('Existe una cita que se superpone con ese horario')
-            values = (required('title'), start, end, request.form.get('lead_id') or None, now())
-            if old:
-                if old['status'] == 'cancelled':
-                    raise ValueError('Cree una cita nueva para reemplazar una cancelada')
-                conn.execute("UPDATE crm_appointments SET title=?,start=?,end=?,lead_id=?,updated_at=?,sync_status='pending',sync_error=NULL WHERE id=?", (*values, identifier))
-            else:
-                conn.execute('INSERT INTO crm_appointments(title,start,end,lead_id,updated_at,professional_id,event_id) VALUES (?,?,?,?,?,?,?)', (*values, doctor, uuid.uuid4().hex))
-            if values[3]:
-                conn.execute("UPDATE crm_leads SET stage='Cita agendada',updated_at=? WHERE id=? AND stage NOT IN ('Ganado','Perdido')", (now(), values[3]))
-            audit(conn, g.user['id'], 'Creación o reprogramación de cita')
+        doctor = required('professional_id')
+        try:
+            professional_id = int(doctor)
+            appointment_id = int(identifier) if identifier else None
+        except ValueError:
+            raise ValueError('Profesional o cita no válidos')
+        lead_id = request.form.get('lead_id') or None
+        version = request.form.get('version') or None
+        if appointment_id is not None and not version:
+            raise ValueError('Falta la versión de la cita; recargue la agenda')
+        result = save_appointment(
+            app.config['DATABASE'],
+            professional_id=professional_id,
+            start=required('start'),
+            end=required('end'),
+            title=required('title'),
+            zone=app.config['TIMEZONE'],
+            appointment_id=appointment_id,
+            lead_id=lead_id,
+            actor=g.user['id'],
+            expected_version=version,
+            reason=request.form.get('reason') or None,
+            role=g.user['role'],
+            channel='web',
+            window_policy=app.config['PROFILE'].check_window,
+        )
+        if not result['ok']:
+            raise ValueError(result['message'])
         flash('Cita guardada localmente. Sincronice para enviarla a Google.', 'success')
         return redirect(url_for('home', tab='agenda'))
 
     @app.post('/appointments/<int:identifier>/cancel')
     @protected()
     def appointment_cancel(identifier):
-        with db() as conn:
-            conn.execute("UPDATE crm_appointments SET status='cancelled',sync_status='pending',updated_at=? WHERE id=?", (now(), identifier))
-            audit(conn, g.user['id'], f'Cancelación de cita {identifier}')
+        version = request.form.get('version')
+        if not version:
+            raise ValueError('Falta la versión de la cita; recargue la agenda')
+        result = cancel_appointment(
+            app.config['DATABASE'], appointment_id=identifier, actor=g.user['id'],
+            expected_version=version,
+            reason=request.form.get('reason') or None)
+        if not result['ok']:
+            raise ValueError(result['message'])
+        flash(result['message'], 'success')
         return redirect(url_for('home', tab='agenda'))
+
+    @app.post('/appointments/<int:identifier>/sync-retry')
+    @protected(admin=True)
+    def appointment_sync_retry(identifier):
+        result = queue_for_resend(app.config['DATABASE'], appointment_id=identifier,
+                                  actor=g.user['id'])
+        if not result['ok'] and result['code'] == 'not_found':
+            abort(404)
+        flash(result['message'], 'success' if result['ok'] else 'info')
+        return redirect(url_for('home', tab='sync'))
+
+    @app.post('/analytics/rebuild')
+    @protected(admin=True)
+    def analytics_rebuild():
+        from crm import analytics
+        target = os.getenv('CRM_ANALYTICS_DB') or str(ROOT / 'analitica_bi.db')
+        summary = analytics.rebuild(app.config['DATABASE'], target,
+                                    app.config['TIMEZONE'])
+        flash(f"Base analítica reconstruida: {summary['fact_citas']} citas, "
+              f"{summary['dim_cliente']} clientes ({summary['desde']} a "
+              f"{summary['hasta']}).", 'success')
+        return redirect(url_for('home', tab='sync'))
 
     @app.post('/sync')
     @protected(admin=True)
@@ -350,6 +450,166 @@ def create_app(test_config=None):
         with db() as conn:
             audit(conn, g.user['id'], 'Sincronización Google Calendar')
         return redirect(url_for('home', tab='agenda'))
+
+    # --- API de agenda (JSON) ------------------------------------------------
+    def api_error(code, message, status=400):
+        return jsonify(error={'code': code, 'message': message}), status
+
+    def service_status(code):
+        if code == NOT_FOUND:
+            return 404
+        if code in (VERSION_CONFLICT, OVERLAP, 'too_late', 'too_early', 'already_closed'):
+            return 409
+        if code == FORBIDDEN:
+            return 403
+        return 400
+
+    def serialize_event(row):
+        tz = app.config['TIMEZONE']
+        start = agenda_time.local_label(row['start'], tz)
+        end = agenda_time.local_label(row['end'], tz)
+        has_notes = row['has_notes'] if 'has_notes' in row.keys() else False
+        return {
+            'id': row['id'], 'professional_id': row['professional_id'],
+            'professional_name': row['professional_name'], 'title': row['title'],
+            'start_utc': row['start'], 'end_utc': row['end'],
+            'start_local': start['date_time'], 'start_date': start['date'],
+            'start_time': start['time'], 'end_local': end['date_time'],
+            'end_date': end['date'], 'end_time': end['time'],
+            'operational_status': row['operational_status'],
+            'status_label': STATUS_LABELS.get(row['operational_status'], row['operational_status']),
+            'status': row['status'], 'sync_status': row['sync_status'],
+            'origin': row['origin'], 'row_version': row['row_version'],
+            'pending_closure': pending_closure(row), 'has_notes': bool(has_notes),
+        }
+
+    def serialize_detail(result):
+        tz = app.config['TIMEZONE']
+        appointment = result['appointment']
+        appointment.pop('calendar_id', None)
+        for key in ('start', 'end'):
+            appointment[key + '_local'] = agenda_time.local_label(appointment[key], tz)['date_time']
+        appointment['status_label'] = STATUS_LABELS.get(
+            appointment['operational_status'], appointment['operational_status'])
+        for note in result['notes']:
+            note['created_local'] = agenda_time.local_label(note['created_at'], tz)['date_time']
+        for entry in result['history']:
+            entry['created_local'] = agenda_time.local_label(entry['created_at'], tz)['date_time']
+        return {'appointment': appointment,
+                'pending_closure': result['pending_closure'],
+                'allowed_actions': result['allowed_actions'],
+                'notes': result['notes'], 'history': result['history']}
+
+    @app.get('/api/agenda')
+    @protected_api()
+    def api_agenda():
+        tz = app.config['TIMEZONE']
+        view = request.args.get('view', 'week')
+        date_value = request.args.get('date') or datetime.now(ZoneInfo(tz)).date().isoformat()
+        try:
+            rng = agenda_time.view_range(view, date_value, tz)
+            rows = list_appointments(
+                app.config['DATABASE'], start_utc=rng['start_utc'], end_utc=rng['end_utc'],
+                professional=request.args.get('professional', ''),
+                status=request.args.get('status', ''),
+                include_cancelled=request.args.get('cancelled', '0') in ('1', 'true', 'on'))
+        except (ValueError, TypeError) as exc:
+            return api_error('invalid_range', str(exc))
+        with db() as conn:
+            professionals = conn.execute(
+                'SELECT id,name,active FROM crm_professionals ORDER BY name').fetchall()
+        return jsonify(view=view, date=date_value, timezone=tz,
+                       label=agenda_time.period_label(rng),
+                       range={key: rng[key] for key in
+                              ('start_utc', 'end_utc', 'start_date', 'end_date')},
+                       days=rng['days'], professionals=[dict(p) for p in professionals],
+                       appointments=[serialize_event(row) for row in rows])
+
+    @app.get('/api/appointments/<int:identifier>')
+    @protected_api()
+    def api_appointment_detail(identifier):
+        result = appointment_detail(app.config['DATABASE'], appointment_id=identifier,
+                                    role=g.user['role'])
+        if not result['ok']:
+            return api_error(result['code'], result['message'], service_status(result['code']))
+        return jsonify(serialize_detail(result))
+
+    @app.post('/api/appointments')
+    @protected_api()
+    def api_appointment_create():
+        data = request.get_json(silent=True) or {}
+        try:
+            professional_id = int(data.get('professional_id'))
+        except (TypeError, ValueError):
+            return api_error('invalid', 'Seleccione un profesional')
+        result = save_appointment(
+            app.config['DATABASE'], professional_id=professional_id,
+            start=data.get('start'), end=data.get('end'),
+            title=data.get('title') or '', zone=app.config['TIMEZONE'],
+            lead_id=data.get('lead_id') or None, actor=g.user['id'],
+            role=g.user['role'], channel='web',
+            reason=data.get('reason') or None,
+            window_policy=app.config['PROFILE'].check_window)
+        if not result['ok']:
+            return api_error(result['code'], result['message'], service_status(result['code']))
+        detail = appointment_detail(app.config['DATABASE'],
+                                    appointment_id=result['appointment']['id'],
+                                    role=g.user['role'])
+        return jsonify(serialize_detail(detail)), 201
+
+    @app.post('/api/appointments/<int:identifier>/transition')
+    @protected_api()
+    def api_appointment_transition(identifier):
+        data = request.get_json(silent=True) or {}
+        action = data.get('action')
+        version = data.get('version')
+        if version in (None, ''):
+            return api_error('version_required',
+                             'Falta la versión de la cita; recargue la agenda', 409)
+        actor = g.user['id']
+        role = g.user['role']
+        database = app.config['DATABASE']
+        if action == 'confirm':
+            result = confirm_appointment(database, appointment_id=identifier,
+                                         expected_version=version, actor=actor)
+        elif action == 'reprogram':
+            result = reprogram_appointment(
+                database, appointment_id=identifier, start=data.get('start'),
+                end=data.get('end'), title=data.get('title'),
+                zone=app.config['TIMEZONE'], expected_version=version,
+                reason=data.get('reason'), actor=actor, role=role,
+                window_policy=app.config['PROFILE'].check_window)
+        elif action == 'cancel':
+            result = cancel_appointment(database, appointment_id=identifier,
+                                        expected_version=version, reason=data.get('reason'),
+                                        actor=actor)
+        elif action in ('attend', 'no_show'):
+            result = mark_attendance(
+                database, appointment_id=identifier,
+                outcome='attended' if action == 'attend' else 'no_show',
+                expected_version=version, actor=actor)
+        elif action == 'admin_correct':
+            result = admin_correct_status(
+                database, appointment_id=identifier, target=data.get('target'),
+                reason=data.get('reason'), expected_version=version, actor=actor, role=role)
+        else:
+            return api_error('invalid_action', 'Acción no válida')
+        if not result['ok']:
+            return api_error(result['code'], result['message'], service_status(result['code']))
+        detail = appointment_detail(database, appointment_id=identifier, role=role)
+        return jsonify(serialize_detail(detail))
+
+    @app.post('/api/appointments/<int:identifier>/notes')
+    @protected_api()
+    def api_appointment_notes(identifier):
+        data = request.get_json(silent=True) or {}
+        result = add_note(app.config['DATABASE'], appointment_id=identifier,
+                          body=data.get('body'), author=g.user['id'])
+        if not result['ok']:
+            return api_error(result['code'], result['message'], service_status(result['code']))
+        detail = appointment_detail(app.config['DATABASE'], appointment_id=identifier,
+                                    role=g.user['role'])
+        return jsonify(serialize_detail(detail)), 201
 
     @app.cli.command('create-admin')
     @click.option('--email', 'user_email', prompt='Correo del administrador')

@@ -1,14 +1,21 @@
 <!doctype html>
 <html lang="es">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ business }}</title><link rel="stylesheet" href="{{ url_for('static', filename='crm.css') }}"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ business }}</title>
+<meta name="csrf-token" content="{{ csrf }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='crm.css') }}">
+<link rel="stylesheet" href="{{ url_for('theme_css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='agenda.css') }}">
+</head>
 <body>
+<a class="skip-link" href="#main">Saltar al contenido</a>
 {% macro token() %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
 {% if user %}
 <aside class="sidebar"><a class="brand" href="/">✦ <span>{{ business }}</span></a><p class="nav-label">ESPACIO DE TRABAJO</p>
 <nav>{% for key,label,icon in [('overview','Resumen','◈'),('leads','Leads y clientes','◎'),('agenda','Agenda','▦'),('analytics','Análisis comercial','↗')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endfor %}
-{% if user.role=='admin' %}<p class="nav-label">ADMINISTRACIÓN</p>{% for key,label,icon in [('team','Profesionales','♧'),('accounts','Cuentas Google','⇄'),('users','Usuarios y acceso','◇'),('audit','Actividad','≡')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endfor %}{% endif %}
+{% if user.role=='admin' %}<p class="nav-label">ADMINISTRACIÓN</p>{% for key,label,icon in [('team','Profesionales','♧'),('accounts','Cuentas Google','⇄'),('sync','Sincronización','⟳'),('users','Usuarios y acceso','◇'),('audit','Actividad','≡')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endfor %}{% endif %}
 <a class="{{ 'selected' if tab=='profile' }}" href="{{ url_for('home',tab='profile') }}">Mi contraseña</a></nav>
 <div class="sidebar-bottom"><strong>{{ user.name }}</strong><small>{{ 'Administrador' if user.role=='admin' else 'Usuario' }}</small><form action="/logout" method="post">{{ token() }}<button class="ghost">Cerrar sesión →</button></form></div></aside>
 {% endif %}
-<main class="{{ 'workspace' if user else 'auth-layout' }}">{% for category,message in get_flashed_messages(with_categories=true) %}<div class="notice {{ category }}" role="alert">{{ message }}</div>{% endfor %}{% block content %}{% endblock %}</main>
+<main id="main" class="{{ 'workspace' if user else 'auth-layout' }}">{% for category,message in get_flashed_messages(with_categories=true) %}<div class="notice {{ category }}" role="alert">{{ message }}</div>{% endfor %}{% block content %}{% endblock %}</main>
+{% block scripts %}{% endblock %}
 </body></html>

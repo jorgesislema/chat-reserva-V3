@@ -1,0 +1,5 @@
+# Extra opcional para sincronizar Google Calendar desde el CRM.
+# El CRM inicia sin estos paquetes; sólo se importan al ejecutar la sincronización.
+-r requirements-crm.txt
+google-api-python-client==2.121.0
+google-auth-httplib2==0.2.0
