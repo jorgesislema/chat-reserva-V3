@@ -392,3 +392,87 @@ crea dos tenants y comprueba:
 - una conversación del tenant A no se obtiene desde el tenant B;
 - una reserva del tenant B que referencia un servicio del tenant A es rechazada
   por la FK compuesta.
+
+### Tablas de cumplimiento (migración `0003_compliance.sql`)
+
+#### `customers`
+
+Personas interesadas/clientes de un tenant. Añade campos de retención y
+derecho al olvido: `data_retention_until`, `anonymized_at` y
+`right_to_be_forgotten_requested_at`.
+
+#### `data_processing_records`
+
+Registro del tratamiento de datos por propósito y tenant (`booking`,
+`marketing`, `support`) con base legal (`consent`, `contract`,
+`legitimate_interest`), categorías de datos (`data_categories`, array JSON) y
+días de retención (`retention_days`). Una fila por `(tenant_id, purpose)`.
+
+#### `consent_log`
+
+Consentimientos explícitos. Almacena el texto exacto mostrado al usuario
+(`consent_text_shown`), si lo aceptó (`accepted`), cuándo
+(`accepted_at`) y cuándo lo revocó (`revoked_at`). La IP y el user agent se
+guardan solo con hash (`ip_hash`, `user_agent_hash`); nunca en claro.
+
+#### `ai_disclosures`
+
+Registro de que el bot se identificó como IA ante el usuario en una
+conversación (`disclosure_text`, `shown_at`). Una fila por divulgación.
+
+#### Columnas nuevas en tablas existentes
+
+- `messages`: `data_retention_until` (plazo de borrado/anonimización) y
+  `anonymized_at` (cuando se anonimizó).
+- `audit_log`: `tool_calls` (JSON) con la herramienta invocada por el LLM,
+  sus parámetros y su resultado, para trazabilidad de decisiones automatizadas.
+
+## Cumplimiento y Gobernanza
+
+### GDPR (Unión Europea)
+
+- **Base legal por propósito:** `data_processing_records` asocia cada
+  propósito a una base legal (`consent`, `contract`, `legitimate_interest`).
+- **Transparencia de IA (Art. 50 del EU AI Act):** `ai_disclosures` registra
+  que el usuario fue informado de que interactúa con una IA.
+- **Derecho al olvido:** `customers.right_to_be_forgotten_requested_at`
+  marca la solicitud; el proceso de anonimización borra o sustituye el texto
+  plano de PII (`messages.body`, `customers.phone/name/email`) y registra
+  `anonymized_at`.
+- **Retención definida:** `data_retention_until` en `customers` y
+  `messages` alimenta el job automático de purga; `data_processing_records.
+  retention_days` define el plazo por propósito.
+
+### CCPA / CPRA (Estados Unidos)
+
+- **Opt-out de venta y categorías de datos:** `data_processing_records.
+  purpose` y `data_categories` permiten responder solicitudes de acceso y
+  saber qué categorías de datos se tratan.
+- **DSAR:** `right_to_be_forgotten_requested_at` indexado soporta el job de
+  solicitudes de acceso y borrado del consumidor.
+
+### LGPD (Brasil) y normativa latinoamericana (Perú DS 115-2025-PCM,
+Ecuador en discusión)
+
+- **Base legal explícita** en `data_processing_records.legal_basis`.
+- **Derecho a revisión de decisiones automatizadas:**
+  `audit_log.tool_calls` registra cada invocación de herramienta del LLM con
+  parámetros y resultado, permitiendo auditar por qué se tomó una decisión
+  automatizada.
+- **Diseño extensible:** la sección "Perfiles regulatorios" de
+  `docs/DECISIONS.md` explica cómo añadir un perfil por país sin cambiar el
+  código.
+
+### NIST AI RMF (Estados Unidos)
+
+- **Trazabilidad de decisiones del LLM:** `audit_log` con `tool_calls`
+  (JSON: herramienta, parámetros, resultado) brinda trazabilidad y
+  rendición de cuentas de las acciones automatizadas del bot.
+
+### Medidas transversales implementadas
+
+- `ip_hash` y `user_agent_hash` solo en hash (no PII en claro).
+- `tenant_id` en toda tabla de cumplimiento con FK compuestas e índices;
+  aislamiento verificado por pruebas.
+- Borrado lógico de tenants (`status`); purgado físico solo por procedimiento
+  controlado.
