@@ -227,6 +227,124 @@ el borrado lógico permite reactivar o purgar de forma controlada.
 
 ---
 
+## DEC-007-RESUELTA — Mecanismo de auth: API key hasheada en cabecera X-API-Key
+
+Estado: **RESUELTA**
+Fecha: 2026-10-25
+
+**Contexto.** Fase 2 requiere autenticación por tenant. DEC-004 dejaba abierta
+JWT vs API key.
+
+**Decisión.** API key por tenant, almacenada hasheada (SHA-256) en tabla
+`api_keys`, enviada en cabecera `X-API-Key`. Cada request resuelve `tenant_id`
+desde la key; el `tenant_id` nunca se acepta del cuerpo de la petición.
+
+**Alternativas.**
+
+1. JWT con expiración corta + refresh y claim `tenant_id` (descartado para el
+   MVP: añade complejidad de gestión de secretos, expiración y refresh que un
+   producto de $100/mes no necesita operar aún).
+2. API key en texto plano (descartado: robo de la base expone claves activas).
+
+**Justificación.** Gama baja, simplicidad operativa y suficiente para el
+alcance inicial; el hash protege la base y la rotación es posible.
+
+**Condiciones (obligatorias).**
+
+- La clave se almacena hasheada, nunca en claro.
+- Rotación posible: varias claves activas por tenant, una puede desactivarse
+  sin romper la otra.
+- Middleware de auth resuelve `tenant_id` y lo inyecta en el contexto; sin key
+  válida se devuelve 401.
+
+---
+
+## DEC-008-RESUELTA — Reindexado selectivo por sección
+
+Estado: **RESUELTA**
+Fecha: 2026-10-25
+
+**Contexto.** `/api/knowledge/reindex` recibe `sections` y debe reindexar solo
+lo indicado, sin reconstruir todo el corpus.
+
+**Decisión.** Cada sección (`faqs`, `catalog`, `policies`) rastrea su estado de
+indexación en `knowledge_documents` mediante `content_hash` y
+`last_indexed_at`. El reindex compara el hash del contenido de la sección con
+el hash indexado: solo las filas cuyo hash cambió (o estado `pending`/`stale`)
+se reindexan. Cambiar un precio actualiza el `content_hash` del documento de
+catálogo y solo ese documento (sección `catalog`) se reindexa; FAQ y políticas
+no se tocan.
+
+**Alternativa.** Reindexar todo el corpus en cada cambio (descartado: costoso e
+innecesario para MVP).
+
+**Justificación.** Cumple el criterio de reindex incremental y es determinista
+para pruebas.
+
+---
+
+## DEC-009-RESUELTA — Contrato de error uniforme
+
+Estado: **RESUELTA**
+Fecha: 2026-10-25
+
+**Decisión.** Todos los errores de la API devuelven un cuerpo JSON estable:
+
+```json
+{
+  "error": "<código estable>",
+  "code": <HTTP status>,
+  "message": "<legible para el cliente>",
+  "request_id": "<UUID de la petición>",
+  "tenant_id": "<ofuscado o null cuando no se conoce>"
+}
+```
+
+Códigos estables: `validation_error`, `unauthorized`, `forbidden`,
+`not_found`, `conflict`, `internal_error`.
+
+**Alternativa.** Mensajes libres sin código (descartado: imposible de auditar
+y de probar contratos estables).
+
+**Justificación.** Permite tests de contrato deterministas y es compatible con
+la auditoría (request_id correlaciona con `audit_log`).
+
+**Condiciones (obligatorias).**
+
+- `tenant_id` se ofusca (o se omite) cuando el request no se ha autenticado.
+- Cada respuesta de error genera un `request_id` nuevo y se escribe en
+  `audit_log` cuando el tenant es conocido.
+
+---
+
+## DEC-010-RESUELTA — Derecho al olvido: endpoint + anonimización ejecutiva
+
+Estado: **RESUELTA**
+Fecha: 2026-10-25
+
+**Contexto.** No basta con marcar `right_to_be_forgotten_requested_at`; debe
+ejecutarse la anonimización.
+
+**Decisión.**
+
+- `POST /api/customers/{id}/forget-request` (cliente o admin): marca la fecha
+  de solicitud.
+- `POST /api/customers/{id}/forget-execute` (solo admin): anonimiza PII en
+  `customers` (teléfono, nombre, email → NULL) y en `messages` (cuerpo →
+  `[anonimizado]`), establece `anonymized_at`, deja `audit_log` con la acción
+  y sin PII, es idempotente (segunda ejecución no falla).
+
+**Justificación.** Cumple el derecho al olvido (GDPR/LGPD) y deja rastro de
+auditoría sin exponer datos personales.
+
+**Condiciones (obligatorias).**
+
+- Tras `execute`, no quede nombre/teléfono/email en claro en `customers` ni
+  `messages` de ese cliente.
+- `execute` es idempotente y registra cada intento en `audit_log`.
+
+---
+
 ## DEC-016 — Aislamiento reforzado en la base de datos
 
 Estado: **ACEPTADA** (regla 1 del prompt)
