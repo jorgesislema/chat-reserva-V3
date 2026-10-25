@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-25T15:22:33Z",
+  "timestamp": "2026-10-25T15:53:59Z",
   "phase": 1,
   "suites": [
     {
@@ -8,10 +8,17 @@
       "failed": 0,
       "skipped": 0,
       "duration_s": 5.52
+    },
+    {
+      "name": "tests/test_saas_compliance.py",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "duration_s": 5.22
     }
   ],
   "coverage": {},
-  "coverage_note": "No medida en Fase 1. El umbral >= 80% de modulos criticos se exige y medira en la Fase 8.",
+  "coverage_note": "No medida en esta entrega (sin herramienta de cobertura instalada). El umbral >= 80% de módulos críticos se exigirá y medirá en la Fase 8.",
   "failures": [],
   "environment": {
     "python": "3.13.1",
@@ -21,24 +28,7 @@
     "database": "SQLite temporal por prueba (tmp_path)"
   },
   "commands": [
-    ".venv-verify/Scripts/python.exe -m pytest tests/test_saas_phase1.py -q -p no:cacheprovider --basetemp=.pytest_cache/saas-phase1 --durations=5",
-    ".venv-verify/Scripts/python.exe scripts/seed_demo_saas.py --db .pytest_cache/saas-seed/demo.db"
-  ],
-  "manual_checks": [
-    {
-      "name": "seed_demo_idempotente",
-      "result": "ok",
-      "counts": {
-        "resources": 2,
-        "services": 3,
-        "schedules": 20,
-        "schedule_exceptions": 2,
-        "faqs": 5,
-        "policies": 3,
-        "knowledge_documents": 11,
-        "bookings": 0,
-        "handoff_alerts": 0
-      }
-    }
+    "make test",
+    ".venv-verify/Scripts/python.exe -m pytest tests/test_saas_phase1.py tests/test_saas_compliance.py -q -p no:cacheprovider --durations=5"
   ]
 }

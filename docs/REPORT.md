@@ -90,3 +90,60 @@ Comando exacto:
 
 ### Próxima fase propuesta
 - Fase 2 — API de configuración (CRUD), **esperando aprobación del Cerebro**.
+
+---
+
+## FASE: 1 — CORRECCIONES POST-AUDITORÍA
+Fecha: 2026-10-25T15:53:59Z
+Estado: COMPLETADA
+
+### Tareas completadas
+| Tarea | Estado | Commit |
+|---|---|---|
+| TAREA 1 (artefactos en main) | ✅ | 19d20b6 |
+| TAREA 2 (PLAN.md multi-tenant nativo) | ✅ | f7ee00e |
+| TAREA 3 (DEC-000-RESUELTA, DEC-001 a DEC-006) | ✅ | 300f061 |
+| TAREA 4 (0003_compliance.sql aplica y revierte) | ✅ | 83c6cb3 |
+| TAREA 5 (DATA_MODEL.md Cumplimiento y Gobernanza) | ✅ | b58c8b3 |
+| TAREA 6 (tests compliance 7/7) | ✅ | 481dc02 |
+| TAREA 7 (reporte, resultados, changelog, make test) | ✅ | pendiente |
+
+### Tests ejecutados
+| Suite | Tests | Pasados | Fallidos | Tiempo |
+|---|---:|---:|---:|---:|
+| `tests/test_saas_phase1.py` | 11 | 11 | 0 | 5.52 s |
+| `tests/test_saas_compliance.py` | 7 | 7 | 0 | ~9 s |
+| **Total** | **18** | **18** | **0** | **~15 s** |
+
+Comando:
+
+```bash
+make test
+```
+
+### Resultados relevantes
+- `git checkout main && ls saas/ docs/ tests/` muestra todos los artefactos de Fase 1.
+- `grep -i "multi-tenant" docs/producto/PLAN.md` devuelve la nueva sección "Modelo de despliegue".
+- `DECISIONS.md` contiene DEC-000-RESUELTA y DEC-001 a DEC-006 con formato
+  Contexto / Decisión / Alternativas / Justificación / Condiciones.
+- `saas/migrations/0003_compliance.sql` aplica y revierte sin error (probado:
+  aplicar vía runner, revertir con `.down.sql`, volver a aplicar en BD limpia).
+- Tablas de compliance: `customers`, `data_processing_records`, `consent_log`,
+  `ai_disclosures`; columnas nuevas `messages.data_retention_until`,
+  `messages.anonymized_at`, `audit_log.tool_calls`.
+- 7 pruebas de cumplimiento: consentimiento con texto exacto, revocación,
+  disclosure de IA, retención vencida, derecho al olvido sin PII en claro,
+  aislamiento multi-tenant y `audit_log.tool_calls` (LLM mockeado).
+- IP y user_agent solo se almacenan con hash SHA-256.
+
+### Decisiones pendientes de aprobación
+- Ninguna de las revisadas en esta entrega; todas las DEC-000 a DEC-006 están
+  RESUELTA. DEC-007+ permanecen PENDIENTE_APROBACION_CEREBRO.
+
+### Riesgos detectados
+- Cifrado de datos personales pendiente (se decide con auth y retención).
+- Purgado físico de tenant requiere procedimiento controlado.
+- 100 reservas concurrentes se valida en Fase 8.
+
+### Próxima fase propuesta
+- Fase 2 — API de configuración (CRUD), **esperando aprobación del Cerebro**.
