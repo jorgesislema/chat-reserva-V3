@@ -1,0 +1,172 @@
+{# Agenda comercial P02. Sin datos inline de citas: el JS consulta /api/agenda. #}
+<section class="agenda" id="agenda-app" data-timezone="{{ zone }}" data-role="{{ user.role }}" data-today="{{ today }}" aria-labelledby="agenda-title">
+  <header class="agenda-head">
+    <div>
+      <p class="eyebrow">{{ business }} / AGENDA</p>
+      <h1 id="agenda-title">Agenda</h1>
+      <p class="muted agenda-subtitle"><span data-period>—</span> · <span class="tz-pill" data-tz>{{ zone }}</span></p>
+    </div>
+    <div class="agenda-head-actions">
+      {% if user.role == 'admin' %}<form action="/sync" method="post" class="agenda-sync">{{ token() }}<button type="submit" class="secondary">Sincronizar Google</button></form>{% endif %}
+      <button type="button" class="button agenda-new" data-action="new">+ Nueva cita</button>
+    </div>
+  </header>
+
+  <div class="agenda-toolbar" role="toolbar" aria-label="Controles de la agenda">
+    <div class="agenda-nav">
+      <button type="button" class="secondary" data-nav="today">Hoy</button>
+      <button type="button" class="secondary icon-button" data-nav="prev" aria-label="Período anterior">‹</button>
+      <button type="button" class="secondary icon-button" data-nav="next" aria-label="Período siguiente">›</button>
+    </div>
+    <p class="agenda-period" data-period-long aria-live="polite">—</p>
+    <div class="segmented" role="group" aria-label="Vista de la agenda">
+      <button type="button" data-view="day" aria-pressed="false">Día</button>
+      <button type="button" data-view="week" aria-pressed="true">Semana</button>
+      <button type="button" data-view="month" aria-pressed="false">Mes</button>
+    </div>
+  </div>
+
+  <div class="agenda-filters">
+    <label class="agenda-field">Profesional
+      <select data-filter="professional" aria-label="Filtrar por profesional">
+        <option value="">Todos los profesionales</option>
+        {% for p in professionals %}<option value="{{ p.id }}">{{ p.name }}{% if not p.active %} (inactivo){% endif %}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="agenda-field">Estado
+      <select data-filter="status" aria-label="Filtrar por estado">
+        <option value="">Todos los estados</option>
+        <option value="pending">Pendiente</option>
+        <option value="confirmed">Confirmada</option>
+        <option value="attended">Atendida</option>
+        <option value="no_show">No asistió</option>
+        <option value="cancelled">Cancelada</option>
+      </select>
+    </label>
+    <label class="check agenda-check"><input type="checkbox" data-filter="cancelled"> Mostrar canceladas</label>
+    <button type="button" class="ghost agenda-refresh" data-action="refresh">Actualizar</button>
+  </div>
+
+  <p class="agenda-status" data-status role="status" aria-live="polite"></p>
+
+  <div class="agenda-surface" data-surface>
+    <div class="agenda-loading" data-loading> Cargando agenda…</div>
+  </div>
+
+  <noscript><div class="notice error">La agenda visual necesita JavaScript. Las citas siguen guardándose en SQLite; active JavaScript para usar día, semana y mes.</div></noscript>
+
+  <!-- Panel de detalle: lateral en escritorio, pantalla completa en móvil -->
+  <dialog id="appointment-detail" class="agenda-dialog" aria-labelledby="detail-title">
+    <div class="dialog-head">
+      <div><p class="eyebrow" data-field="professional"></p><h2 id="detail-title" data-field="title">Cita</h2></div>
+      <button type="button" class="icon-button secondary" data-close aria-label="Cerrar detalle">✕</button>
+    </div>
+    <div class="dialog-body">
+      <p class="badge warn" data-field="closure" hidden>Pendiente de cierre</p>
+      <p class="notice error" data-field="sync-error" hidden></p>
+      <dl class="detail-grid">
+        <div><dt>Cliente</dt><dd data-field="client">—</dd></div>
+        <div><dt>Estado operativo</dt><dd><span class="status-badge" data-field="status">—</span></dd></div>
+        <div><dt>Inicio</dt><dd data-field="start">—</dd></div>
+        <div><dt>Fin</dt><dd data-field="end">—</dd></div>
+        <div><dt>Sincronización</dt><dd data-field="sync">—</dd></div>
+        <div><dt>Versión</dt><dd data-field="version">—</dd></div>
+      </dl>
+      <div class="detail-actions" data-actions></div>
+
+      <section class="detail-section" aria-labelledby="notes-title">
+        <h3 id="notes-title">Observaciones internas</h3>
+        <ul class="note-list" data-notes></ul>
+        <form data-note-form class="note-form">
+          <label class="agenda-field">Nueva observación
+            <textarea name="body" maxlength="2000" rows="3" required></textarea>
+          </label>
+          <p class="muted">Internas: no se envían a Google, al bot ni a WhatsApp.</p>
+          <p class="notice error" data-note-error hidden role="alert"></p>
+          <button type="submit" class="secondary">Guardar observación</button>
+        </form>
+      </section>
+
+      <section class="detail-section" aria-labelledby="history-title">
+        <h3 id="history-title">Historial</h3>
+        <ol class="history-list" data-history></ol>
+      </section>
+
+      {% if user.role == 'admin' %}
+      <details class="admin-correct" data-admin-only>
+        <summary>Corrección excepcional de estado (solo administración)</summary>
+        <form data-correct-form>
+          <label class="agenda-field">Nuevo estado
+            <select name="target">
+              <option value="pending">Pendiente</option>
+              <option value="confirmed">Confirmada</option>
+              <option value="attended">Atendida</option>
+              <option value="no_show">No asistió</option>
+              <option value="cancelled">Cancelada</option>
+            </select>
+          </label>
+          <label class="agenda-field">Motivo obligatorio
+            <input name="reason" maxlength="300" required>
+          </label>
+          <p class="notice error" data-correct-error hidden role="alert"></p>
+          <button type="submit" class="danger">Guardar corrección</button>
+        </form>
+      </details>
+      {% endif %}
+    </div>
+  </dialog>
+
+  <!-- Alta y reprogramación -->
+  <dialog id="appointment-form-dialog" class="agenda-dialog agenda-form-dialog" aria-labelledby="form-title">
+    <form data-appointment-form>
+      <div class="dialog-head">
+        <h2 id="form-title" data-form-title>Nueva cita</h2>
+        <button type="button" class="icon-button secondary" data-close aria-label="Cerrar formulario">✕</button>
+      </div>
+      <div class="dialog-body">
+        <input type="hidden" name="id">
+        <input type="hidden" name="version">
+        <div class="form-grid">
+          <label class="agenda-field">Profesional
+            <select name="professional_id" required>
+              <option value="">Seleccionar</option>
+              {% for p in professionals if p.active %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="agenda-field">Cliente / lead
+            <select name="lead_id">
+              <option value="">Sin vincular</option>
+              {% for l in agenda_leads %}<option value="{{ l.id }}">{{ l.name }} · {{ l.phone }}</option>{% endfor %}
+            </select>
+          </label>
+          <label class="agenda-field">Detalle de la cita
+            <input name="title" maxlength="200" required placeholder="Consulta · Nombre">
+          </label>
+          <label class="agenda-field">Fecha de inicio
+            <input type="date" name="start_date" required>
+          </label>
+          <label class="agenda-field">Hora de inicio
+            <input type="time" name="start_time" required>
+          </label>
+          <label class="agenda-field">Fecha de fin
+            <input type="date" name="end_date" required>
+          </label>
+          <label class="agenda-field">Hora de fin
+            <input type="time" name="end_time" required>
+          </label>
+          <label class="agenda-field" data-reason-field hidden>Motivo del cambio
+            <input name="reason" maxlength="300">
+          </label>
+        </div>
+        <p class="muted" data-form-hint>La cita se guarda localmente; Google se actualiza al sincronizar.</p>
+        <p class="notice error" data-form-error hidden role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" class="secondary" data-close>Volver</button>
+          <button type="submit">Guardar cita</button>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="{{ url_for('static', filename='agenda.js') }}" defer></script>
+</section>
