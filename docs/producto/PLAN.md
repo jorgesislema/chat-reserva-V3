@@ -104,7 +104,7 @@ SQLite es el registro operativo. Google es integración externa con política de
 sin promesas de atomicidad entre sistemas. Usar outbox/reintentos e identidades estables; no mantener
 escritura SQLite bloqueada durante llamadas de red. Definir tratamiento de cambios externos concurrentes.
 Migraciones versionadas reversibles cuando sea posible; respaldo/restauración antes de cada actualización.
-Una base privada por instalación y aislamiento de archivos y conocimiento. No agregar multiempresa ahora.
+Modelo multi-tenant nativo: una sola base de datos atiende a N negocios; cada negocio es un tenant aislado mediante la columna tenant_id en toda tabla de negocio. No hay instalaciones físicas separadas por cliente.
 
 ## Secuencia de entregas
 
@@ -118,6 +118,14 @@ Una base privada por instalación y aislamiento de archivos y conocimiento. No a
 | P06 | Conocimiento y archivos, plantillas aprobadas | Publicación reversible, documentos privados, reglas de ventana y estados del proveedor |
 | P07 | Asistente interno y reportes básicos | Respuestas contrastadas con datos, fuentes, límites y permisos |
 | P08 | Paquete local/VPS y adaptación repetible | Instalar dos negocios vacíos y aislados; actualizar y restaurar ambos |
+
+## Modelo de despliegue
+
+Un solo despliegue del SaaS atiende a N tenants. El aislamiento es lógico, por
+tenant_id, con filtrado a nivel de fila en todas las consultas de negocio; cada
+tenant dispone de su propia configuración (identidad, catálogo de servicios,
+horarios, excepciones, FAQs y políticas). No se provisiona una instalación ni
+una base de datos separada por cliente.
 
 El diseño visual se especifica desde P02 y se reutiliza en entregas siguientes. Se permite un boceto
 antes de P01, pero no reemplaza las pruebas de consistencia. Ninguna fase convierte automáticamente
