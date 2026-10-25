@@ -137,144 +137,48 @@ async def verificar_webhook(request: Request) -> Response:
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
+def _invocar_grafo(telefono: str, texto_usuario: str) -> Dict[str, Any]:
+    """Poda memoria expirada y ejecuta el grafo; depende de las pruebas."""
+    podar_memoria_si_expirada(telefono)
+    return cast(
+        Dict[str, Any],
+        app_graph.invoke(
+            {"messages": [("user", texto_usuario)]},
+            {"configurable": {"thread_id": telefono}},
+        ),
+    )
+
+
 def procesar_mensaje_langgraph(telefono: str, texto_usuario: str) -> None:
-    """Procesa un mensaje de texto con LangGraph y registra analitica."""
-    inicio = time.time()
-    print(f"\n[AGENT] LangGraph inicio con mensaje de {telefono}: '{texto_usuario}'")
+    """Procesa un mensaje de texto y deja exactamente un registro (G01).
 
-    herramientas_usadas = ""
-    respuesta = ""
-    error = None
-
-    try:
-        podar_memoria_si_expirada(telefono)
-
-        resultado: Dict[str, Any] = cast(
-            Dict[str, Any],
-            app_graph.invoke(
-                {"messages": [("user", texto_usuario)]},
-                {"configurable": {"thread_id": telefono}},
-            ),
-        )
-
-        # Telemetria del razonamiento
-        print("\n--- RAZONAMIENTO DEL AGENTE ---")
-        for m in resultado["messages"]:
-            print(f"[{type(m).__name__}]: {m.content}")
-            if hasattr(m, "tool_calls") and m.tool_calls:
-                tool_names = [tc.get("name", "?") for tc in m.tool_calls]
-                herramientas_usadas = ", ".join(tool_names)
-                print(f"   Herramientas: {herramientas_usadas}")
-        print("--- FIN ---\n")
-
-        # Extraer respuesta final
-        for mensaje in reversed(resultado["messages"]):
-            if isinstance(mensaje, AIMessage) and mensaje.content:
-                respuesta = str(mensaje.content)
-                break
-
-        # Handoff
-        if "[HANDOFF]" in respuesta.upper():
-            print(f"\n[HANDOFF] Derivacion manual requerida para {telefono}")
-            duracion = time.time() - inicio
-            registrar_interaccion(
-                telefono=telefono,
-                mensaje_usuario=texto_usuario,
-                respuesta_agente=respuesta,
-                herramientas_usadas=herramientas_usadas,
-                duracion_segundos=duracion,
-                handoff_activado=True,
-            )
-            return
-
-        # Enviar respuesta por WhatsApp
-        if respuesta:
-            guardar_mensaje(telefono, respuesta, tipo="enviado")
-            enviar_mensaje_whatsapp(telefono, respuesta)
-            print("[AGENT] Mensaje entregado a WhatsApp.")
-        else:
-            print("[AGENT] Advertencia: respuesta vacia.")
-
-    except Exception as e:
-        error = str(e)
-        print(f"\n[ERROR LangGraph] {error}\n")
-
-    finally:
-        # Registrar analitica siempre
-        duracion = time.time() - inicio
-        registrar_interaccion(
-            telefono=telefono,
-            mensaje_usuario=texto_usuario,
-            respuesta_agente=respuesta,
-            herramientas_usadas=herramientas_usadas,
-            duracion_segundos=duracion,
-            handoff_activado=False,
-            error=error,
-        )
+    Antes del G01 la derivación HANDOFF registraba dos interacciones (True en
+    el try y False en el finally). La orquestación vive en
+    ``api/procesamiento.py`` con un único registro para todos los caminos.
+    """
+    print(f"\n[AGENT] LangGraph inicio con mensaje de {telefono}")
+    from api.procesamiento import procesar_mensaje
+    procesar_mensaje(
+        telefono,
+        texto_usuario,
+        invocar=_invocar_grafo,
+        registrar=registrar_interaccion,
+        enviar=enviar_mensaje_whatsapp,
+        registrar_envio=guardar_mensaje,
+    )
 
 
 async def procesar_mensaje_langgraph_async(telefono: str, texto_usuario: str) -> None:
-    """Version async para audios transcritos."""
-    inicio = time.time()
-    print(f"\n[AGENT ASYNC] Audio transcrito de {telefono}: '{texto_usuario}'")
-
-    herramientas_usadas = ""
-    respuesta = ""
-    error = None
-
-    try:
-        podar_memoria_si_expirada(telefono)
-
-        resultado: Dict[str, Any] = cast(
-            Dict[str, Any],
-            app_graph.invoke(
-                {"messages": [("user", texto_usuario)]},
-                {"configurable": {"thread_id": telefono}},
-            ),
-        )
-
-        for m in resultado["messages"]:
-            if hasattr(m, "tool_calls") and m.tool_calls:
-                tool_names = [tc.get("name", "?") for tc in m.tool_calls]
-                herramientas_usadas = ", ".join(tool_names)
-
-        for mensaje in reversed(resultado["messages"]):
-            if isinstance(mensaje, AIMessage) and mensaje.content:
-                respuesta = str(mensaje.content)
-                break
-
-        if "[HANDOFF]" in respuesta.upper():
-            print(f"\n[HANDOFF] Derivacion manual para {telefono}")
-            duracion = time.time() - inicio
-            registrar_interaccion(
-                telefono=telefono,
-                mensaje_usuario=texto_usuario,
-                respuesta_agente=respuesta,
-                herramientas_usadas=herramientas_usadas,
-                duracion_segundos=duracion,
-                handoff_activado=True,
-            )
-            return
-
-        if respuesta:
-            enviar_mensaje_whatsapp(telefono, respuesta)
-            print("[AGENT ASYNC] Respuesta enviada.")
-
-    except Exception as e:
-        error = str(e)
-        print(f"\n[ERROR LangGraph ASYNC] {error}\n")
-
-    finally:
-        duracion = time.time() - inicio
-        registrar_interaccion(
-            telefono=telefono,
-            mensaje_usuario=texto_usuario,
-            respuesta_agente=respuesta,
-            herramientas_usadas=herramientas_usadas,
-            duracion_segundos=duracion,
-            handoff_activado=False,
-            error=error,
-        )
+    """Versión async para audios transcritos; misma telemetría única."""
+    print(f"\n[AGENT ASYNC] Audio transcrito de {telefono}")
+    from api.procesamiento import procesar_mensaje
+    procesar_mensaje(
+        telefono,
+        texto_usuario,
+        invocar=_invocar_grafo,
+        registrar=registrar_interaccion,
+        enviar=enviar_mensaje_whatsapp,
+    )
 
 
 async def procesar_audio(telefono: str, media_id: str, wamid: str) -> None:

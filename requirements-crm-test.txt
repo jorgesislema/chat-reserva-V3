@@ -1,0 +1,4 @@
+# Entorno mínimo para ejecutar las pruebas del CRM.
+# Uso: python -m pytest tests/test_crm.py tests/test_reservation_service.py tests/test_demo_seed.py -q
+-r requirements-crm.txt
+pytest==8.1.1

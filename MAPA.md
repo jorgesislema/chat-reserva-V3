@@ -1,5 +1,19 @@
 # Mapa de Arquitectura: Chat Reservas Clinico Dental
 
+## Destino Premium documentado; todavía no implementado
+
+Actualización 24-10-2026: el destino Premium ahora es el proyecto independiente
+`H:\git\Agente de reserva V4`. Documentación y entregas fueron movidas allí.
+Consultar su MAPA.md y `docs/producto/premium/06_ESTRUCTURA_REPOSITORIO.md`.
+Las referencias siguientes describen la planificación anterior; V3 queda de base.
+
+Por petición del propietario, GLM comenzará Premium con un repositorio ordenado.
+Consultar `docs/producto/premium/06_ESTRUCTURA_REPOSITORIO.md` para el árbol
+`src/crm_premium`, responsabilidades y mapa de transición. PR00 diseña; PR00B
+crea la base mínima compatible; PR01 incorpora PostgreSQL. Codex especifica y
+revisa; GLM implementa y prueba. Las carpetas descritas allí son el destino,
+no una afirmación de que ya existan. El mapa actual siguiente se conserva.
+
 ## CRM local (actualización)
 
 El punto de entrada recomendado es `python run_crm.py` en `127.0.0.1:8050`.

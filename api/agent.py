@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Literal, Any, cast
 
-ZONA_HORARIA_ECUADOR = timezone(timedelta(hours=-5))
+from crm.business_profile import configured_profile as _load_profile
 
 # pylint: disable=import-outside-toplevel
 # pylint: disable=global-statement
@@ -45,6 +45,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
+
+def _profile():
+    """Perfil de negocio compartido con la web (misma regla y misma zona)."""
+    return _load_profile()
+
+
+def _zona_horaria():
+    return _profile().tz
+
 # ---------------------------------------------------------------------------
 # Wrappers decorados con @tool
 # ---------------------------------------------------------------------------
@@ -70,18 +79,26 @@ def wrapper_consultar_catalogo(query: str) -> str:
 
 @tool
 def consultar_horarios() -> str:
-    """Devuelve los horarios de atencion de la clinica dental.
+    """Devuelve los horarios de atencion del negocio.
 
     Usa esta herramienta cuando el paciente pregunte por los horarios,
     dias de atencion, o si se puede agendar en fin de semana.
     """
-    return (
-        "HORARIOS DE ATENCION - Clinica Dental:\n"
-        "- Lunes a Viernes: 08:00 a 18:00\n"
-        "- Sabados y Domingos: CERRADO\n"
-        "- La ultima cita se agenda a las 17:00\n"
-        "- Zona horaria: Ecuador (UTC-5)"
-    )
+    from crm import business_profile
+    profile = _profile()
+    cerrados = [business_profile.DAY_NAMES[d] for d in range(7)
+                if d not in profile.hours]
+    lineas = [f"HORARIOS DE ATENCION - {profile.name}:"]
+    for dia in sorted(profile.hours):
+        apertura, cierre = profile.hours[dia]
+        lineas.append(f"- {business_profile.DAY_NAMES[dia].capitalize()}: "
+                      f"{apertura // 60:02d}:{apertura % 60:02d} a "
+                      f"{cierre // 60:02d}:{cierre % 60:02d}")
+    if cerrados:
+        lineas.append(f"- Cerrado: {', '.join(cerrados)}")
+    lineas.append("- Las citas deben terminar antes del cierre de la jornada.")
+    lineas.append(f"- Zona horaria: {profile.zone}")
+    return "\n".join(lineas)
 
 
 @tool
@@ -94,36 +111,23 @@ def listar_profesionales() -> str:
 def wrapper_verificar_disponibilidad(fecha_iso: str, professional_id: int | None = None) -> str:
     """Verifica la disponibilidad de citas en una fecha especifica..."""
 
-    # --- ESCUDO TEMPORAL BACKEND ---
-    HORARIO_INICIO = 8
-    HORARIO_FIN = 18
-
+    # Regla compartida con la web: el perfil del negocio decide (G01).
     if "T" in fecha_iso:
         try:
+            from crm.reservation_service import to_utc
             fecha_solicitada = datetime.fromisoformat(fecha_iso)
-            ahora = datetime.now(ZONA_HORARIA_ECUADOR)
-
             if fecha_solicitada.tzinfo is None:
-                fecha_solicitada = fecha_solicitada.replace(tzinfo=ZONA_HORARIA_ECUADOR)
-
-            # Validar que no sea en el pasado
+                fecha_solicitada = fecha_solicitada.replace(tzinfo=_zona_horaria())
+            ahora = datetime.now(_zona_horaria())
             if fecha_solicitada < ahora:
                 return "⛔ ERROR: Esa hora ya pasó. Dile al paciente que elija un horario en el futuro."
-
-            # Validar dia de semana (L-V)
-            dia_semana = fecha_solicitada.weekday()
-            if dia_semana >= 5:
-                dias = ["Lunes","Martes","Miercoles","Jueves","Viernes","Sabado","Domingo"]
-                return f"⛔ La clinica no atiende los {dias[dia_semana]}. El horario es Lunes a Viernes de 08:00 a 18:00."
-
-            # Validar horario
-            hora = fecha_solicitada.hour
-            if hora < HORARIO_INICIO or hora >= HORARIO_FIN:
-                return f"⛔ Fuera de horario ({hora}:00). La clinica atiende de {HORARIO_INICIO}:00 a {HORARIO_FIN}:00, ultima cita a las 17:00."
-
+            motivo = _profile().check_window(
+                fecha_solicitada.astimezone(timezone.utc),
+                (fecha_solicitada + timedelta(minutes=30)).astimezone(timezone.utc))
+            if motivo:
+                return f"⛔ {motivo}"
         except ValueError:
             pass
-    # -------------------------------
 
     try:
         doctor = selected_professional(professional_id)
@@ -136,7 +140,7 @@ def wrapper_verificar_disponibilidad(fecha_iso: str, professional_id: int | None
         try:
             remote = verificar_disponibilidad(fecha_iso=fecha_iso[:10],
                 credenciales_path=os.getenv(doctor['credential_env'], ''), calendar_id=doctor['calendar_id'],
-                zona_horaria=os.getenv('CRM_TIMEZONE') or 'America/Guayaquil')
+                zona_horaria=_profile().zone)
             return local + '\nGoogle Calendar:\n' + remote
         except Exception:
             return local + '\nNo se pudo verificar Google. No asegure disponibilidad remota.'
@@ -159,31 +163,25 @@ def wrapper_agendar_cita(
 ) -> bool | str:
     """Agenda una cita en el calendario..."""
 
-    # --- VALIDACION DE HORARIO LABORAL ---
-    HORARIO_INICIO = 8
-    HORARIO_FIN = 18
+    # Regla compartida con la web (G01): el intervalo completo debe caber en
+    # la jornada del perfil; el servicio de reservas vuelve a validar lo mismo.
     try:
+        if duracion_minutos <= 0:
+            return 'La duración debe ser mayor que cero.'
         fecha_solicitada = datetime.fromisoformat(fecha_hora_inicio_iso)
-        ahora = datetime.now(ZONA_HORARIA_ECUADOR)
+        ahora = datetime.now(_zona_horaria())
 
         if fecha_solicitada.tzinfo is None:
-            fecha_solicitada = fecha_solicitada.replace(tzinfo=ZONA_HORARIA_ECUADOR)
+            fecha_solicitada = fecha_solicitada.replace(tzinfo=_zona_horaria())
 
         if fecha_solicitada < ahora:
             return "⛔ ERROR: No se puede agendar en el pasado."
 
-        dia_semana = fecha_solicitada.weekday()
-        if dia_semana >= 5:
-            dias = ["Lunes","Martes","Miercoles","Jueves","Viernes","Sabado","Domingo"]
-            return f"⛔ La clinica no atiende los {dias[dia_semana]}. Horario: L-V 08:00-18:00."
-
-        hora = fecha_solicitada.hour
-        if duracion_minutos <= 0:
-            return 'La duración debe ser mayor que cero.'
-        fin_solicitado = fecha_solicitada + timedelta(minutes=duracion_minutos)
-        cierre = fecha_solicitada.replace(hour=HORARIO_FIN, minute=0, second=0, microsecond=0)
-        if hora < HORARIO_INICIO or fin_solicitado > cierre:
-            return f"⛔ Fuera de horario ({hora}:00). La clinica atiende de {HORARIO_INICIO}:00 a {HORARIO_FIN}:00."
+        motivo = _profile().check_window(
+            fecha_solicitada.astimezone(timezone.utc),
+            (fecha_solicitada + timedelta(minutes=duracion_minutos)).astimezone(timezone.utc))
+        if motivo:
+            return f"⛔ {motivo}"
 
     except ValueError:
         return 'Fecha no válida. Use formato ISO con hora.'
@@ -230,12 +228,13 @@ def registrar_emergencia(
     """
     from tools.analitica import registrar_emergencia as _reg_emergencia
 
+    paciente = _profile().patient_noun()
     _reg_emergencia(telefono, mensaje_emergencia, nombre_paciente)
     return (
-        f"EMERGENCIA REGISTRADA para {nombre_paciente or 'paciente'} ({telefono}). "
+        f"EMERGENCIA REGISTRADA para {nombre_paciente or paciente} ({telefono}). "
         "Informa al paciente: "
         "'Lamento escuchar eso. He registrado su caso como emergencia. "
-        "Un medico se pondra en contacto con usted en los proximos minutos "
+        "Un responsable se pondra en contacto con usted en los proximos minutos "
         "para evaluar su situacion y coordinar la atencion.'"
     )
 
@@ -294,38 +293,34 @@ def _obtener_llm():
 
 
 def call_model(state: MessagesState) -> Dict[str, List]:
-    ahora = datetime.now(ZONA_HORARIA_ECUADOR)
+    profile = _profile()
+    ahora = datetime.now(profile.tz)
     fecha_hora_str = ahora.strftime("%Y-%m-%d %H:%M")
+    paciente = profile.patient_noun()
 
     system_message = SystemMessage(
         content=(
-            "Eres un asistente virtual de una clinica dental. "
-            f"ATENCIÓN - LA FECHA Y HORA ACTUAL ES: {fecha_hora_str} (Ecuador, UTC-5). "
-            "Tu funcion es ayudar a los pacientes con informacion sobre "
-            "tratamientos, precios, disponibilidad de citas y agendamiento. "
+            f"Eres un asistente virtual de {profile.name} ({profile.industry_label}). "
+            f"ATENCIÓN - LA FECHA Y HORA ACTUAL ES: {fecha_hora_str} ({profile.zone}). "
+            f"Tu funcion es ayudar a los {paciente}s con informacion sobre "
+            "servicios, precios, disponibilidad de citas y agendamiento. "
             "\n\n"
             "=== HORARIOS DE ATENCION (OBLIGATORIO) ===\n"
-            "- La clinica atiende UNICAMENTE de Lunes a Viernes.\n"
-            "- El horario es de 08:00 a 18:00 (ultima cita a las 17:00).\n"
-            "- NO se agendan citas en Sabados, Domingos ni feriados.\n"
-            "- NO se agendan citas fuera del horario 08:00-18:00.\n"
-            "- Si un paciente pide una cita fuera de horario o en fin de semana, "
+            f"- Atencion: {profile.schedule_text()}.\n"
+            "- Toda cita debe terminar antes del cierre de la jornada.\n"
+            "- Si un paciente pide una cita fuera de horario o en un dia cerrado, "
             "informale amablemente el horario y preguntale por otra fecha/hora.\n"
             "\n"
             "=== PROTOCOLO DE EMERGENCIAS (MUY IMPORTANTE) ===\n"
-            "Si el paciente describe una URGENCIA dental (diente roto, dolor muy intenso, "
-            "sangrado abundante, golpe fuerte en la boca, infeccion con hinchazon, "
-            "o cualquier situacion que el paciente describa como urgente/emergencia), "
+            f"Si el {paciente} describe una URGENCIA ({profile.emergency_examples()}, "
+            "o cualquier situacion que describa como urgente/emergencia), "
             "DEBES usar la herramienta 'registrar_emergencia' INMEDIATAMENTE.\n"
             "NO intentes agendar una cita normal en estos casos.\n"
-            "ANTES de registrar la emergencia, si el paciente no dio su nombre, preguntale: "
-            "'Para registrar su emergencia, me puede decir su nombre completo?'\n"
+            f"ANTES de registrar la emergencia, si el {paciente} no dio su nombre, "
+            f"preguntale: 'Para registrar su emergencia, me puede decir su nombre completo?'\n"
             "Una vez tengas el nombre, llama a registrar_emergencia con nombre y telefono.\n"
-            "La herramienta registrara el caso con alarma roja para que un medico "
-            "se comunique con el paciente en los proximos minutos.\n"
-            "Ejemplos de emergencias: 'se me rompio un diente', 'me acabo de golpear "
-            "la boca', 'tengo un dolor insoportable', 'necesito cita para HOY es urgente', "
-            "'me estoy desangrando', 'tengo la cara hinchada'.\n"
+            "La herramienta registrara el caso con alarma roja para que un responsable "
+            f"se comunique con el {paciente} en los proximos minutos.\n"
             "\n"
             "=== REGLAS TEMPORALES ===\n"
             "REGLA DE ORO: NUNCA ofrezcas ni agendes un turno en una hora que ya paso el dia de hoy. "
