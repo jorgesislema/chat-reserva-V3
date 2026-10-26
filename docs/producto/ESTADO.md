@@ -21,7 +21,7 @@ verificado dos veces con 2 profesionales, 3 servicios, 20 franjas, 5 FAQs,
 `docs/TEST_RESULTS.md`. Decisión crítica pendiente: el prompt multi-tenant
 contradice `PLAN.md` («No agregar multiempresa ahora»); se registró como
 DEC-000 y la Fase 1 queda aislada para poder retirarla sin impacto. No se avanza
-a Fase 2 sin aprobación del Cerebro. No hubo commit, push, migración de bases
+a Fase 2 sin aprobación del Cerebro. **FASE 2 BLOQUEADA: No avanzar sin aprobación explícita del Cerebro.**
 operativas ni uso de secretos/datos reales.
 
 **24-10-2026: Premium trasladado a proyecto independiente.**
