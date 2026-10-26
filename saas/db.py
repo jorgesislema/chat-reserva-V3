@@ -161,7 +161,15 @@ def migrate(db_path: str | Path = DEFAULT_DB_PATH) -> list[str]:
                     )
                 continue
             for statement in split_sql(script):
-                db.execute(statement)
+                try:
+                    db.execute(statement)
+                except sqlite3.OperationalError as e:
+                    msg = str(e).lower()
+                    # Migración idempotente: si la columna o tabla ya existe,
+                    # saltar y continuar con el resto de la migración.
+                    if "duplicate column" in msg or "already exists" in msg:
+                        continue
+                    raise
             db.execute(
                 f"INSERT INTO {MIGRATIONS_TABLE} (version, name, checksum, applied_at) "
                 "VALUES (?, ?, ?, ?)",
