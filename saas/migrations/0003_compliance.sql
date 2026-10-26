@@ -40,10 +40,10 @@ CREATE TABLE IF NOT EXISTS data_processing_records (
 );
 CREATE INDEX IF NOT EXISTS idx_data_processing_records_tenant ON data_processing_records(tenant_id);
 
--- consent_log (tabla nueva, idempotente vía IF NOT EXISTS)
+-- consent_log (tabla nueva, idempotente vía IF NOT exists)
 CREATE TABLE IF NOT EXISTS consent_log (
   id TEXT PRIMARY KEY,
-  tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
+  tenant_id TEXT NOT NULL,
   customer_id TEXT NOT NULL,
   purpose TEXT NOT NULL,
   consent_text_shown TEXT NOT NULL CHECK (length(trim(consent_text_shown)) > 0),
@@ -53,7 +53,9 @@ CREATE TABLE IF NOT EXISTS consent_log (
   user_agent_hash TEXT NOT NULL,
   revoked_at TEXT,
   created_at TEXT NOT NULL,
-  UNIQUE (tenant_id, id)
+  UNIQUE (tenant_id, id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE RESTRICT,
+  FOREIGN KEY (tenant_id, customer_id) REFERENCES customers(tenant_id, id) ON DELETE RESTRICT
 );
 CREATE INDEX IF NOT EXISTS idx_consent_log_tenant ON consent_log(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_consent_log_tenant_customer ON consent_log(tenant_id, customer_id);
@@ -71,7 +73,7 @@ CREATE TABLE IF NOT EXISTS ai_disclosures (
 CREATE INDEX IF NOT EXISTS idx_ai_disclosures_tenant ON ai_disclosures(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_ai_disclosures_tenant_conversation ON ai_disclosures(tenant_id, conversation_id);
 
--- messages: añadir data_retention_until y anonymized_at (idempotente vía recreación de tabla)
+-- messages: añadir data_retention_until, anonymized_at y customer_phone (idempotente vía recreación de tabla)
 CREATE TABLE IF NOT EXISTS messages_tmp (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -86,12 +88,13 @@ CREATE TABLE IF NOT EXISTS messages_tmp (
   created_at TEXT NOT NULL,
   data_retention_until TEXT,
   anonymized_at TEXT,
+  customer_phone TEXT,
   FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations(tenant_id, id) ON DELETE CASCADE,
   UNIQUE (tenant_id, id)
 );
 DELETE FROM messages_tmp;
 INSERT INTO messages_tmp
-  SELECT id, tenant_id, conversation_id, direction, author_type, author_id, body, external_id, delivery_status, metadata_json, created_at, NULL, NULL
+  SELECT id, tenant_id, conversation_id, direction, author_type, author_id, body, external_id, delivery_status, metadata_json, created_at, NULL, NULL, NULL
   FROM messages;
 DROP TABLE messages;
 ALTER TABLE messages_tmp RENAME TO messages;

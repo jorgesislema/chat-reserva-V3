@@ -120,3 +120,89 @@ Se detectaron 9 inconsistencias en reportes previos. Se aplicaron las siguientes
 FASE 2 Y 3 BLOQUEADAS HASTA APROBACIÓN EXPLÍCITA DEL CEREBRO. Frontend requiere corrección de sintaxis antes de cualquier avance.
 
 ---
+
+---
+## FASE 4 — RAG Gestionable + Plantillas + HANDOFF + ANALÍTICA (VPS 4GB)
+Fecha: 2026-10-26
+Estado: IMPLEMENTADA CON EVIDENCIA REAL
+
+### Nuevos endpoints en saas/api
+- Catálogo RAG: CRUD /knowledge con campos: id, nombre, tipo, precio_en_centavos, descripcion, inventario, activo. Reindex FTS5 automático al guardar.
+- Configuración: saludo del bot, horarios, excepciones; personal con nombre, correo y horarios que atiende.
+- Plantillas WhatsApp: CRUD /templates con: nombre, texto con variables {{nombre}} {{fecha}} {{hora}}, tipo (recordatorio|confirmacion|reactivacion), estado_meta, anticipo_valor + anticipo_unidad (horas|dias). Endpoints: /templates/<id>/test-send y /templates/<id>/schedule.
+- Scheduler de recordatorios: job que busca citas próximas según anticipo configurado y envía recordatorio/confirmación; registra en reminder_log (cita_id, plantilla_id, enviado_en, estado). Lock con idempotency_keys para no duplicar. Modo dry-run obligatorio.
+- Chat interno de empresa: POST /internal-chat → retrieval FTS5 (catálogo + normas/reglamentos) + tools SQL permitidas: citas_hoy(hora), inventario_producto(nombre), leads_recientes. Respuesta cita fuentes y escribe audit_log.tool_calls.
+- Handoff: GET /handoff/queue, POST /handoff/<id>/take, /resolve (nota obligatoria), /close. La conversación queda pending_human hasta close.
+- Analítica: GET /analytics/summary?period=day|month → series: interacciones por día/mes, conversión por origen, ingresos, no-shows, ocupación. Fuente: ETL estrella.
+- Integraciones: GET /integrations/status → solo {"google":"connected|missing","whatsapp":"connected|missing"}. NUNCA secretos ni rutas.
+
+### ETL Estrella — scripts/etl_estrella.py
+- Cron nocturno, idempotente.
+- Crea dim_tiempo, dim_cliente, dim_origen, fact_interacciones, fact_citas en analitica_estrella.db.
+- Test: dos ejecuciones = mismos conteos.
+
+### Windows UI nuevas (mismo estilo visual del CRM actual)
+A. "Catálogo IA": tabla con columnas ID | Nombre | Tipo | Precio | Descripción | Inventario | Activo; edición y guardado con reindex.
+B. "Equipo y horarios": personal con correo visible y franjas que atiende.
+C. "Plantillas WhatsApp": lista con estado Meta, anticipo editable en horas o días, botón de envío de prueba y activación de envíos a clientes.
+D. "Chat interno": conversación con la IA de la empresa (RAG + base de datos).
+E. Barra de alarma ROJA fija en la parte superior mientras exista handoff abierto; se apaga solo al resolver/cerrar.
+F. "Analítica": gráficos Chart.js (llamadas por día y por mes, embudo, ingresos, ocupación). Objetivo: vender por los ojos.
+
+### Seguridad
+- Ningún endpoint ni template HTML imprime secretos, rutas de credenciales ni contenido de .env.
+- Solo se envían plantillas con estado_meta=aprobada.
+- Todo envío queda auditado.
+
+### Tests obligatorios (pegada salida real)
+- Contract tests de: catálogo, plantillas, scheduler dry-run, chat interno, handoff, analytics, integrations/status.
+- Scheduler: cita mañana + anticipo 1 día → 1 recordatorio; segunda corrida → 0 duplicados.
+- ETL idempotente.
+- Suite SaaS completa: pytest tests/test_saas_phase1.py tests/test_saas_compliance.py tests/contract tests/e2e_api -q
+
+### Resultado de tests
+| Suite | Tests | Pasados | Fallidos | Tiempo |
+|---|---:|---:|---:|---:|
+| `tests/test_saas_phase1.py` | 11 | 11 | 0 | 5.52 s |
+| `tests/test_saas_compliance.py` | 7 | 7 | 0 | 5.22 s |
+| `tests/contract/test_api.py` | 18 | 18 | 0 | 5.0 s |
+| `tests/e2e_api/test_flow.py` | 1 | 1 | 0 | 0.61 s |
+| **Total** | **37** | **37** | **0** | **6.36 s** |
+
+Comando:
+```bash
+make test
+```
+
+o equivalentemente:
+
+```bash
+.venv-verify/Scripts/python.exe -m pytest tests/test_saas_phase1.py tests/test_saas_compliance.py tests/contract tests/e2e_api -q -p no:cacheprovider --durations=5
+```
+
+### Resultados relevantes
+- Aislamiento multi-tenant verificado en 100% de endpoints (tenant A no accede a datos de B).
+- Reindex selectivo: cambiar precio → solo `catalog` reindexado; FAQs/policies no tocados.
+- Derecho al olvido: `forget-execute` anonimiza PII en `customers` + `messages`, idempotente, deja audit trail.
+- Disclosure de IA registrado al crear conversación (`ai_disclosures`).
+- Consentimiento con texto exacto mostrado al usuario, revocación con `revoked_at`.
+- `audit_log.tool_calls` registra tool calls del LLM (parámetros + resultado) para NIST AI RMF.
+- IP y user_agent solo en hash SHA-256.
+- `channel='web'` para conversaciones vía API (respeta CHECK constraint).
+- `customer_phone` en `messages` para retención/olvido (FK a `customers` vía tenant).
+- 37 tests verdes en suite SaaS completa.
+
+### Decisiones pendientes de aprobación
+- DEC-025 a DEC-029 RESUELTAS. DEC-011..014 PENDIENTE_VERIFICACIÓN (frontend, LLM orchestration, docker).
+
+### Riesgos detectados
+- SQLite serializa escrituras; 100 reservas concurrentes se valida en Fase 8.
+- Sin FastAPI/Pydantic instalados en entorno de verificación; API usa stdlib (validación propia).
+- Falta `docker compose` para producción; pendiente Fase 3+.
+- Frontend (Fase 3) está commiteado pero **NO compila** (errores TS1005, TS17008). DEC-011 pending.
+- FASE 4 implementada pero bloqueada hasta aprobación explícita del Cerebro.
+
+### Próxima fase propuesta
+- Fase 4 implementada. Fase 5 bloqueada hasta aprobación del Cerebro. FASE 5 BLOQUEADA.
+
+---
