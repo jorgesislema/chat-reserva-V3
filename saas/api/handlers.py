@@ -184,6 +184,59 @@ REINDEX = {
     "additionalProperties": False,
 }
 
+
+CATALOG_CREATE = {
+    "type": "object",
+    "required": ["name", "type", "price_cents"],
+    "properties": {
+        "name": {"type": "string", "min_length": 1, "max_length": 200},
+        "type": {"type": "string", "enum": ["tratamiento", "producto", "regalo", "norma"]},
+        "price_cents": {"type": "integer", "min": 0},
+        "description": {"type": "string", "max_length": 2000},
+        "inventory": {"type": "integer", "min": 0},
+    },
+    "additionalProperties": False,
+}
+
+CATALOG_UPDATE = {
+    "type": "object",
+    "required": [],
+    "properties": {
+        "name": {"type": "string", "min_length": 1, "max_length": 200},
+        "description": {"type": "string", "max_length": 2000},
+        "price_cents": {"type": "integer", "min": 0},
+        "inventory": {"type": "integer", "min": 0},
+        "active": {"type": "boolean"},
+    },
+    "additionalProperties": False,
+}
+
+TEMPLATE_CREATE = {
+    "type": "object",
+    "required": ["name", "body_text", "meta_status", "advance_value", "advance_unit"],
+    "properties": {
+        "name": {"type": "string", "min_length": 1, "max_length": 200},
+        "body_text": {"type": "string", "min_length": 1, "max_length": 1000},
+        "meta_status": {"type": "string", "enum": ["aprobada", "pendiente", "rechazada"]},
+        "advance_value": {"type": "integer", "min": 0},
+        "advance_unit": {"type": "string", "enum": ["horas", "dias"]},
+    },
+    "additionalProperties": False,
+}
+
+TEMPLATE_UPDATE = {
+    "type": "object",
+    "required": [],
+    "properties": {
+        "name": {"type": "string", "min_length": 1, "max_length": 200},
+        "body_text": {"type": "string", "max_length": 1000},
+        "meta_status": {"type": "string", "enum": ["aprobada", "pendiente", "rechazada"]},
+        "advance_value": {"type": "integer", "min": 0},
+        "advance_unit": {"type": "string", "enum": ["horas", "dias"]},
+        "active": {"type": "boolean"},
+    },
+    "additionalProperties": False,
+}
 CONSENT_CREATE = {
     "type": "object",
     "required": ["customer_id", "purpose", "consent_text_shown", "accepted"],
@@ -550,6 +603,58 @@ def knowledge_test_handler(conn, tenant_id, path_params, query, body):
         payload={"question": question, "has_answer": result["answer"] is not None},
     )
     return 200, result
+
+def catalog_list(conn, tenant_id, path_params, query, body):
+    active = query.get("active", "true").lower() != "false"
+    return 200, {"items": repo.list_catalog_items(conn, tenant_id, active_only=active)}
+
+def catalog_create(conn, tenant_id, path_params, query, body):
+    data = _validated(CATALOG_CREATE, body)
+    item = repo.create_catalog_item(conn, tenant_id, data)
+    repo.write_audit(
+        conn, tenant_id=tenant_id, actor_type="human", actor_id=None,
+        action="catalog.create", entity_type="catalog_item", entity_id=item["id"],
+        payload=item,
+    )
+    return 201, {"item": item}
+
+def catalog_update(conn, tenant_id, path_params, query, body):
+    data = _validated(CATALOG_UPDATE, body)
+    item = repo.update_catalog_item(conn, tenant_id, path_params["id"], data)
+    if item is None:
+        raise not_found("Elemento de catalogo no encontrado", tenant_id)
+    repo.write_audit(
+        conn, tenant_id=tenant_id, actor_type="human", actor_id=None,
+        action="catalog.update", entity_type="catalog_item", entity_id=path_params["id"],
+        payload={"changes": data},
+    )
+    return 200, {"item": item}
+
+def templates_list(conn, tenant_id, path_params, query, body):
+    active = query.get("active", "true").lower() != "false"
+    return 200, {"templates": repo.list_templates(conn, tenant_id, active_only=active)}
+
+def template_create(conn, tenant_id, path_params, query, body):
+    data = _validated(TEMPLATE_CREATE, body)
+    template = repo.create_template(conn, tenant_id, data)
+    repo.write_audit(
+        conn, tenant_id=tenant_id, actor_type="human", actor_id=None,
+        action="template.create", entity_type="whatsapp_template", entity_id=template["id"],
+        payload=template,
+    )
+    return 201, {"template": template}
+
+def template_update(conn, tenant_id, path_params, query, body):
+    data = _validated(TEMPLATE_UPDATE, body)
+    template = repo.update_template(conn, tenant_id, path_params["id"], data)
+    if template is None:
+        raise not_found("Plantilla de WhatsApp no encontrada", tenant_id)
+    repo.write_audit(
+        conn, tenant_id=tenant_id, actor_type="human", actor_id=None,
+        action="template.update", entity_type="whatsapp_template", entity_id=path_params["id"],
+        payload={"changes": data},
+    )
+    return 200, {"template": template}
 
 
 # ---------------------------------------------------------------------------
