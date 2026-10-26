@@ -473,6 +473,142 @@ def knowledge_reindex(conn, tenant_id: str, sections: list[str]):
     return knowledge_status(conn, tenant_id)
 
 
+def list_catalog_items(conn, tenant_id: str, active_only: bool = True):
+    sql = "SELECT * FROM catalog_items WHERE tenant_id = ?"
+    params: list[Any] = [tenant_id]
+    if active_only:
+        sql += " AND active = 1"
+    sql += " ORDER BY type, name"
+    return _rows(conn.execute(sql, params).fetchall())
+
+
+def create_catalog_item(conn, tenant_id: str, data: dict):
+    from saas.db import new_id
+
+    item_id = new_id()
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO catalog_items
+          (id, tenant_id, name, type, price_cents, description, inventory, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        """,
+        (
+            item_id,
+            tenant_id,
+            data["name"],
+            data["type"],
+            data["price_cents"],
+            data.get("description", ""),
+            data.get("inventory", 0),
+            now,
+            now,
+        ),
+    )
+    return _row(
+        conn.execute(
+            "SELECT * FROM catalog_items WHERE tenant_id = ? AND id = ?",
+            (tenant_id, item_id),
+        ).fetchone()
+    )
+
+
+def update_catalog_item(conn, tenant_id: str, item_id: str, data: dict):
+    fields = []
+    params: list[Any] = []
+    allowed = ("name", "description", "price_cents", "inventory", "active")
+    for field in allowed:
+        if field in data:
+            fields.append(f"{field} = ?"); params.append(data[field])
+    if not fields:
+        return _row(
+            conn.execute(
+                "SELECT * FROM catalog_items WHERE tenant_id = ? AND id = ?",
+                (tenant_id, item_id),
+            ).fetchone()
+        )
+    params.extend([_now(), tenant_id, item_id])
+    conn.execute(
+        f"UPDATE catalog_items SET {', '.join(fields)}, updated_at = ? "
+        "WHERE tenant_id = ? AND id = ?",
+        params,
+    )
+    return _row(
+        conn.execute(
+            "SELECT * FROM catalog_items WHERE tenant_id = ? AND id = ?",
+            (tenant_id, item_id),
+        ).fetchone()
+    )
+
+
+def list_templates(conn, tenant_id: str, active_only: bool = True):
+    sql = "SELECT * FROM whatsapp_templates WHERE tenant_id = ?"
+    params: list[Any] = [tenant_id]
+    if active_only:
+        sql += " AND active = 1"
+    sql += " ORDER BY meta_status, name"
+    return _rows(conn.execute(sql, params).fetchall())
+
+
+def create_template(conn, tenant_id: str, data: dict):
+    from saas.db import new_id
+
+    tid = new_id()
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO whatsapp_templates
+          (id, tenant_id, name, body_text, meta_status, advance_value, advance_unit, active, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        """,
+        (
+            tid,
+            tenant_id,
+            data["name"],
+            data["body_text"],
+            data["meta_status"],
+            data["advance_value"],
+            data["advance_unit"],
+            now,
+            now,
+        ),
+    )
+    return _row(
+        conn.execute(
+            "SELECT * FROM whatsapp_templates WHERE tenant_id = ? AND id = ?",
+            (tenant_id, tid),
+        ).fetchone()
+    )
+
+
+def update_template(conn, tenant_id: str, template_id: str, data: dict):
+    fields = []
+    params: list[Any] = []
+    allowed = ("name", "body_text", "meta_status", "advance_value", "advance_unit", "active")
+    for field in allowed:
+        if field in data:
+            fields.append(f"{field} = ?"); params.append(data[field])
+    if not fields:
+        return _row(
+            conn.execute(
+                "SELECT * FROM whatsapp_templates WHERE tenant_id = ? AND id = ?",
+                (tenant_id, template_id),
+            ).fetchone()
+        )
+    params.extend([_now(), tenant_id, template_id])
+    conn.execute(
+        f"UPDATE whatsapp_templates SET {', '.join(fields)}, updated_at = ? "
+        "WHERE tenant_id = ? AND id = ?",
+        params,
+    )
+    return _row(
+        conn.execute(
+            "SELECT * FROM whatsapp_templates WHERE tenant_id = ? AND id = ?",
+            (tenant_id, template_id),
+        ).fetchone()
+    )
+
+
 def knowledge_test(conn, tenant_id: str, question: str):
     """RAG simulado por solapamiento de tokens sobre faqs, catalog (services)
     y policies. Devuelve la mejor coincidencia sin consumir WhatsApp."""
