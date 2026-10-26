@@ -1,5 +1,9 @@
 -- Revertido de 0003_compliance.sql.
--- Ejecutar DESPUÉS de haber aplicado la migración arriba. No gestionado por
+-- ADVERTENCIA: esta migración elimina tablas y columnas (customers,
+-- data_processing_records, consent_log, ai_disclosures,
+-- messages.data_retention_until, messages.anonymized_at,
+-- audit_log.tool_calls). LOS DATOS SE PIERDEN IRREVERSIBLEMENTE.
+-- Ejecutar DESPUÉS de haber aplicado la migración arriba. No gestionada por
 -- el runner automático (se ejecuta manualmente en pruebas de reversión).
 
 DROP INDEX IF EXISTS idx_messages_retention;
