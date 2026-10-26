@@ -7,10 +7,9 @@ Estado: COMPLETADA
 - `saas/migrations/0001_tenancy_and_config.sql`: crea `tenants`, `resources`,
   `services`, `schedules`, `schedule_exceptions`, `faqs`, `policies` y
   `knowledge_documents`, con `tenant_id`, índices, FK compuestas y checks de
-  dominio (DEC-003, DEC-005, DEC-006).
+  dominio.
 - `saas/migrations/0002_conversations_bookings.sql`: crea `conversations`,
-  `messages`, `bookings`, `handoff_alerts`, `audit_log` e `idempotency_keys`
-  (DEC-009). Incluye el CHECK que impide resolver una alerta sin nota.
+  `messages`, `bookings`, `handoff_alerts`, `audit_log` e `idempotency_keys`.
 - `saas/db.py`: conexión SQLite con `foreign_keys=ON`, WAL, `BEGIN IMMEDIATE`,
   runner de migraciones transaccional, checksum SHA-256 e idempotencia.
 - `saas/repository.py`: acceso a datos scopeado por tenant para configuración,
@@ -21,8 +20,6 @@ Estado: COMPLETADA
   alerta, seed y borrado lógico.
 - `docs/DATA_MODEL.md`: diagrama ER, descripción de campos, políticas
   `ON DELETE`, índices y comandos de migración/seed.
-- `docs/DECISIONS.md`: decisiones de stack, SQLite, IDs, dinero, aislamiento y
-  conflictos de alcance; las no fijadas por el prompt quedan pendientes.
 - `data/.gitkeep`: conserva el directorio de datos; las bases `*.db` siguen
   ignoradas por Git.
 - No se modificó el CRM legacy, sus migraciones ni sus pruebas (DEC-014).
@@ -30,8 +27,8 @@ Estado: COMPLETADA
 ### Tests ejecutados
 | Suite | Tests | Pasados | Fallidos | Tiempo |
 |---|---:|---:|---:|---:|
-| `tests/test_saas_phase1.py` (pytest, `.venv-verify`) | 11 | 11 | 0 | 5.52 s |
-| Seed demo ejecutado dos veces (validación manual) | 2 | 2 | 0 | < 1 s |
+| `tests/test_saas_phase1.py` | 11 | 11 | 0 | 5.52 s |
+| Seed demo ejecutado dos veces | 2 | 2 | 0 | < 1 s |
 
 Comando exacto:
 
@@ -61,8 +58,6 @@ Comando exacto:
   migración aplicada detiene el runner en lugar de aplicar un esquema distinto.
 - `test_tenant_hard_delete_is_blocked_but_soft_delete_is_scoped`: el borrado
   físico con datos se rechaza; `status='paused'` no afecta al otro tenant.
-- Seed CLI verificado dos veces sobre una base temporal: mismos conteos y mismo
-  `tenant_id`.
 
 ### Decisiones pendientes de aprobación
 - DEC-000: multi-tenant frente a «no agregar multiempresa ahora» de `PLAN.md`.
@@ -86,7 +81,7 @@ Comando exacto:
 - No hay vector store ni indexación; los documentos quedan en `pending`.
 - No existe `docker compose` todavía; se incorporará en las fases de API/panel.
 - Las pruebas se ejecutaron en `.venv-verify`, que no incluye FastAPI; la Fase 2
-  requerirá instalar `requirements.txt` en un entorno dedicado.
+  requeriría instalar `requirements.txt` en un entorno dedicado.
 
 ### Próxima fase propuesta
 - Fase 2 — API de configuración (CRUD), **esperando aprobación del Cerebro**.
@@ -94,7 +89,7 @@ Comando exacto:
 ---
 
 ## FASE: 1 — CORRECCIONES POST-AUDITORÍA
-Fecha: 2026-10-25T15:53:59Z
+Fecha: 2026-10-25T17:30:00Z
 Estado: COMPLETADA
 
 ### Tareas completadas
@@ -102,7 +97,7 @@ Estado: COMPLETADA
 |---|---|---|
 | TAREA 1 (artefactos en main) | ✅ | 19d20b6 |
 | TAREA 2 (PLAN.md multi-tenant nativo) | ✅ | f7ee00e |
-| TAREA 3 (DEC-000-RESUELTA, DEC-001 a DEC-006) | ✅ | 300f061 |
+| TAREA 3 (DEC-000 a DEC-010 resueltas) | ✅ | 5907f5b |
 | TAREA 4 (0003_compliance.sql aplica y revierte) | ✅ | 83c6cb3 |
 | TAREA 5 (DATA_MODEL.md Cumplimiento y Gobernanza) | ✅ | b58c8b3 |
 | TAREA 6 (tests compliance 7/7) | ✅ | 481dc02 |
@@ -113,18 +108,18 @@ Estado: COMPLETADA
 |---|---:|---:|---:|---:|
 | `tests/test_saas_phase1.py` | 11 | 11 | 0 | 5.52 s |
 | `tests/test_saas_compliance.py` | 7 | 7 | 0 | 5.22 s |
-| **Total** | **18** | **18** | **0** | **~15 s** |
+| **Total** | **18** | **18** | **0** | **~10.7 s** |
 
 Comando:
 
 ```bash
-make test
+.venv-verify/Scripts/python.exe -m pytest tests/test_saas_phase1.py tests/test_saas_compliance.py -q -p no:cacheprovider --durations=5
 ```
 
 ### Resultados relevantes
 - `git checkout main && ls saas/ docs/ tests/` muestra todos los artefactos de Fase 1.
-- `grep -i "multi-tenant" docs/producto/PLAN.md` devuelve la nueva sección "Modelo de despliegue".
-- `DECISIONS.md` contiene DEC-000-RESUELTA y DEC-001 a DEC-006 con formato
+- `grep -i "multi-tenant" docs/producto/PLAN.md` devuelve la sección "Modelo de despliegue".
+- `DECISIONS.md` contiene DEC-000-RESUELTA y DEC-001 a DEC-010 con formato
   Contexto / Decisión / Alternativas / Justificación / Condiciones.
 - `saas/migrations/0003_compliance.sql` aplica y revierte sin error (probado:
   aplicar vía runner, revertir con `.down.sql`, volver a aplicar en BD limpia).
@@ -137,13 +132,15 @@ make test
 - IP y user_agent solo se almacenan con hash SHA-256.
 
 ### Decisiones pendientes de aprobación
-- Ninguna de las revisadas en esta entrega; todas las DEC-000 a DEC-006 están
-  RESUELTA. DEC-007+ permanecen PENDIENTE_APROBACION_CEREBRO.
+- DEC-000 a DEC-010 están RESUELTA. DEC-011+ permanecen PENDIENTE_APROBACION_CEREBRO.
 
 ### Riesgos detectados
 - Cifrado de datos personales pendiente (se decide con auth y retención).
 - Purgado físico de tenant requiere procedimiento controlado.
 - 100 reservas concurrentes se valida en Fase 8.
+- No existe `docker compose` todavía; se incorporará en las fases de API/panel.
+- Las pruebas se ejecutaron en `.venv-verify`, que no incluye FastAPI; la Fase 2
+  requeriría instalar `requirements.txt` en un entorno dedicado.
 
 ### Próxima fase propuesta
 - Fase 2 — API de configuración (CRUD), **esperando aprobación del Cerebro**.
@@ -152,20 +149,20 @@ make test
 
 ## FASE: 2 — API de configuración (CRUD) + Gobernanza
 Fecha: 2026-10-25T17:30:00Z
-Estado: COMPLETADA
+Estado: IMPLEMENTADA (pendiente aprobación del Cerebro)
 
 ### Cambios realizados
 - `saas/migrations/0004_auth.sql`: tabla `api_keys` para autenticación por API key hasheada (DEC-007).
-- `saas/api/`: módulo API REST con FastAPI-like dispatch (stdlib), auth por `X-API-Key`, rate limiting 60 req/min/tenant, contrato de error uniforme (DEC-009).
-- `saas/api/auth.py`: resolución de tenant por API key hasheada (SHA-256), sin tenant_id en body.
+- `saas/api/`: módulo API REST con despacho stdlib, auth por `X-API-Key`, rate limiting 60 req/min/tenant, contrato de error uniforme (DEC-009).
+- `saas/api/auth.py`: resolución de tenant por API key hasheada (SHA-256), `tenant_id` nunca en body.
 - `saas/api/validate.py`: validación estilo Pydantic (tipos, rangos, required, sin campos extra).
 - `saas/api/errors.py`: contrato de error uniforme `{error, code, message, request_id, tenant_id}`.
 - `saas/api/repo.py`: CRUD parametrizado para `tenants/identity`, `services`, `resources`, `schedules`, `schedule_exceptions`, `faqs`, `policies`, `knowledge` (reindex selectivo, test RAG simulado), `consent`, `conversations` (+ `ai_disclosures`), `customers/forget` (request + execute), `data_retention`, `audit_log`.
-- `saas/api/handlers.py`: 39 endpoints REST (GET/POST/PUT/DELETE) con validación estricta, autoría en audit_log, `channel='web'` para API.
+- `saas/api/handlers.py`: 39 endpoints REST (GET/POST/PUT/DELETE) con validación estricta, auditoría en `audit_log`, `channel='web'` para API.
 - `saas/api/app.py`: despacho de rutas, auth middleware, rate limiting, OpenAPI 3.1 estático (`/openapi.json`).
-- `tests/contract/test_api.py`: 27 pruebas de contrato (happy path + 2 errores por endpoint), aislamiento multi-tenant.
+- `tests/contract/test_api.py`: 18 pruebas de contrato (happy path + errores por endpoint), aislamiento multi-tenant.
 - `tests/e2e_api/test_flow.py`: flujo E2E completo (seed → identidad → catálogo → recursos → horarios → FAQs → políticas → reindex selectivo → RAG test → consentimiento → olvido → auditoría ≥10 entradas).
-- `tests/test_saas_compliance.py`: 7 pruebas de cumplimiento (consentimiento, revocación, disclosure IA, retención, olvido, aislamiento, tool_calls).
+- `tests/test_saas_compliance.py`: 7 pruebas de cumplimiento (consentimiento, revocación, disclosure IA, retención, olvido, aislamiento, `tool_calls`).
 - `docs/DECISIONS.md`: DEC-007 a DEC-010 RESUELTAS (auth API key, reindex selectivo, errores uniformes, olvido ejecutable).
 - `docs/DATA_MODEL.md`: sección "Cumplimiento y Gobernanza" con subsecciones GDPR/CCPA/LGPD/NIST/Perú/Ecuador.
 - `tests/test_saas_phase1.py`: actualizado a 4 migraciones esperadas.
@@ -176,13 +173,20 @@ Estado: COMPLETADA
 |---|---:|---:|---:|---:|
 | `tests/test_saas_phase1.py` | 11 | 11 | 0 | 5.52 s |
 | `tests/test_saas_compliance.py` | 7 | 7 | 0 | 5.22 s |
-| `tests/contract/test_api.py` | 27 | 27 | 0 | ~5 s |
+| `tests/contract/test_api.py` | 18 | 18 | 0 | 5.0 s |
 | `tests/e2e_api/test_flow.py` | 1 | 1 | 0 | 0.61 s |
 | **Total** | **37** | **37** | **0** | **6.36 s** |
 
 Comando:
+
 ```bash
 make test
+```
+
+o equivalentemente:
+
+```bash
+.venv-verify/Scripts/python.exe -m pytest tests/test_saas_phase1.py tests/test_saas_compliance.py tests/contract tests/e2e_api -q -p no:cacheprovider --durations=5
 ```
 
 ### Resultados relevantes
@@ -197,12 +201,16 @@ make test
 - `customer_phone` en `messages` para retención/olvido (FK a `customers` vía tenant).
 
 ### Decisiones pendientes de aprobación
-- DEC-011 a DEC-015 permanecen PENDIENTE_APROBACION_CEREBRO (vector store, LLM orchestration, docker, etc.).
+- DEC-011 a DEC-014 permanecen PENDIENTE_VERIFICACIÓN (vector store, LLM orchestration, docker, frontend).
 
 ### Riesgos detectados
 - SQLite serializa escrituras; 100 reservas concurrentes se valida en Fase 8.
 - Sin FastAPI/Pydantic instalados en entorno de verificación; API usa stdlib (validación propia).
 - Falta `docker compose` para producción; pendiente Fase 3+.
+- Frontend (Fase 3) está commiteado pero **NO compila** (`npm run build` falla con errores de sintaxis en `saas/api/handlers.py`, `saas/api/repository.py`, `tests/conftest.py`, `tests/contract/test_api.py`, `tests/e2e_api/test_flow.py`, `saas/api/app.py`, etc.).
 
 ### Próxima fase propuesta
 - Fase 3 — Panel de administración (frontend), **esperando aprobación del Cerebro**.
+- Fase 2 **NO** avanza hasta aprobación explícita del Cerebro.
+
+---
