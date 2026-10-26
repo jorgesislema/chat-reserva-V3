@@ -61,6 +61,13 @@ _ROUTES = [
     ("GET", "/api/data-retention", handlers.data_retention_expired, False),
     ("POST", "/api/data-retention/purge", handlers.data_retention_purge, False),
     ("GET", "/api/audit-log", handlers.audit_log_list, False),
+    # Phase 4, Bloque 1: Catálogo RAG y Plantillas WhatsApp
+    ("GET", "/api/catalog", handlers.catalog_list, False),
+    ("POST", "/api/catalog", handlers.catalog_create, False),
+    ("PUT", "/api/catalog/{id}", handlers.catalog_update, False),
+    ("GET", "/api/templates", handlers.templates_list, False),
+    ("POST", "/api/templates", handlers.template_create, False),
+    ("PUT", "/api/templates/{id}", handlers.template_update, False),
     ("GET", "/openapi.json", None, False),
 ]
 
