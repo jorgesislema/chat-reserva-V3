@@ -1,0 +1,96 @@
+
+## DEC-025-RESUELTA — Frontend React congelado; UI nueva server-rendered
+
+Estado: **RESUELTA**
+
+**Contexto:** Fase 4 requiere reemplazar el frontend React propuesto por una alternativa de server-rendered debido a que el frontend commiteado no compila (errores TS1005, TS17008).
+
+**Decisión:** Interfaz server-rendered con Jinja2 + htmx + Chart.js, reutilizando el diseño visual del CRM actual. No se usa React en esta fase.
+
+**Alternativas:**
+1. React + Vite + Tailwind (descartado: frontend no compila, DEC-011 falla).
+2. Server-rendered con Jinja2 + htmx (elegida: compatible con stack ligero, sin dependencias pesadas).
+
+**Justificación:** Mantener consistencia visual con el CRM actual y evitar bloqueos de compilación. El diseño visual ya está probado en el CRM legacy.
+
+**Condiciones (obligatorias):**
+- UI renderizada en el servidor, sin SPA.
+- htmx para interacciones parciales sin recarga completa.
+- Chart.js para gráficos de analítica.
+- Sin dependencias de Node/npm en el backend.
+
+---
+
+## DEC-026-RESUELTA — RAG ligero: SQLite FTS5 (+ sqlite-vec opcional)
+
+Estado: **RESUELTA**
+
+**Contexto:** Fase 4 necesita capacidades de RAG (Search Augmented Generation) sin añadir servicios de vectoriales adicionales ni dependencias pesadas.
+
+**Decisión:** Motor de búsqueda FTS5 sobre SQLite. Opcionalmente, sqlite-vec para búsquedas de vectoría ligera dentro del mismo archivo de base de datos.
+
+**Alternativas:**
+1. Qdrant/Docker (descartado: servicio adicional que operar y monitorear, contra DEC-005).
+2. pgvector (descartado: requiere PostgreSQL, stack más pesado).
+3. FTS5 sobre SQLite (elegida: cero dependencias adicionales, ya forma parte del stack).
+
+**Justificación:** Cumple el requisito de RAG con mínimo overhead, integra directamente con la base de datos existente. La interfaz de retrieval abstracta (DEC-005) permite migrar a Qdrant o pgvector en futuras fases sin cambiar la lógica de negocio.
+
+**Condición (obligatoria):** Interfaz de retrieval abstracta mantenida para poder migrar a Qdrant o pgvector sin cambiar la lógica de negocio.
+
+---
+
+## DEC-027-RESUELTA — LMS fuera del plan base
+
+Estado: **RESUELTA**
+
+**Contexto:** El módulo de Learning Management System (LMS) fue propuesto como parte del scope base, pero el producto de $100/mes no puede costear la infraestructura y desarrollo necesario.
+
+**Decisión:** LMS queda fuera del plan base. Se catalogará como módulo premium futuro, desactivado por defecto en la instalación estándar.
+
+**Alternativas:**
+1. LMS incluido en el plan base (descartado: costo prohibitivo).
+2. LMS como módulo premium futuro (elegido).
+3. Funcionalidades básicas de tracking en el módulo actual (descartado: insuficiente).
+
+**Justificación:** El enfoque MVP prioriza funcionalidades core de reserva y gestión consultorial. El LMS puede ser evaluado en una fase posterior con modelo de suscripción distinto.
+
+**Condición (obligatoria):** Módulo LMS desactivado por defecto; solo disponible si se contrata como módulo premium adicional.
+
+---
+
+## DEC-028-RESUELTA — Modelado estrella interno (ETL nocturno)
+
+Estado: **RESUELTA**
+
+**Contexto:** Se requiere un modelo de datos optimizado para gráficos de analítica y reportes pagados, sin afectar la operatividad del sistema de reservas.
+
+**Decisión:** ETL nocturno que genera una base de datos estrella (`analitica_estrella.db`) con tablas `dim_tiempo`, `dim_cliente`, `dim_origen`, `fact_interacciones`, `fact_citas`. Este modelo es invisible al cliente y alimenta futuros reportes pagados.
+
+**Alternativas:**
+1. Modelado en tiempo real sobre la base operativa (descartado: afecta rendimiento de reservas).
+2. ETL nocturno a base estrella (elegida): aislamiento completo, sin impacto en operación.
+3. Ningún modelado de analítica (descartado: requisito de carretera).
+
+**Justificación:** Separa la carga de analítica del sistema operativo de reservas, permite pre-calcular indicadores para vender "por los ojos" sin complicar el workflow diario.
+
+**Condición (obligatoria):** Dos ejecuciones consecutivas del ETL deben producir los mismos conteos (idempotencia). La base `analitica_estrella.db` debe estar en `data/`.
+
+---
+
+## DEC-029-RESUELTA — Credenciales Google/WhatsApp SOLO en VPS
+
+Estado: **RESUELTA**
+
+**Contexto:** El sistema necesita integrar con Google (agenda) y WhatsApp (recordatorios), pero las credenciales no pueden almacenarse en el entorno de desarrollo/shared.
+
+**Decisión:** Las credenciales de Google y WhatsApp solo se aceptarán en el entorno VPS (Variable de Entorno del Servidor) y nunca se mostrarán en el panel de administración. El panel solo mostrará estado conectado/no conectado.
+
+**Alternativas:**
+1. Credenciales en variables de entorno locales (descartado: riesgo de exposición en repositorio).
+2. Credenciales en el panel de administración (descartado: violaría política de seguridad).
+3. Credenciales solo en VPS, panel muestra solo estado conectado/no conectado (elegida: cumple política de seguridad).
+
+**Justificación:** Cumple la regla 4 del prompt: "Credenciales Google/WhatsApp SOLO en VPS (ruta por variable de entorno); el panel solo muestra estado conectado/no conectado". Evita filtros de .env en repositorios públicos o shared environments.
+
+**Condición (obligatoria):** `integrations/status` endpoint retorna `{"google":"connected|missing","whatsapp":"connected|missing"}`. Nunca se imprimen secretos ni rutas de credenciales en HTML ni logs.
