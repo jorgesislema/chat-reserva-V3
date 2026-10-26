@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-10-25T17:30:00Z",
-  "phase": 2,
+  "timestamp": "2026-10-25T17:45:00Z",
+  "phase": "1+2",
   "suites": [
     {
       "name": "tests/test_saas_phase1.py",
@@ -18,7 +18,7 @@
     },
     {
       "name": "tests/contract/test_api.py",
-      "passed": 27,
+      "passed": 18,
       "failed": 0,
       "skipped": 0,
       "duration_s": 5.0
@@ -31,8 +31,14 @@
       "duration_s": 0.61
     }
   ],
+  "total": {
+    "passed": 37,
+    "failed": 0,
+    "skipped": 0,
+    "errors": 0
+  },
   "coverage": {},
-  "coverage_note": "No medido en esta entrega (sin herramienta de cobertura instalada). El umbral >= 80% de módulos críticos se exigirá y medirá en la Fase 8.",
+  "coverage_note": "No medido en esta entrega (sin herramienta de cobertura instalada). El umbral >= 80% de módulos críticos se exigirá y medirá en Fase 8.",
   "failures": [],
   "environment": {
     "python": "3.13.1",
@@ -42,12 +48,11 @@
     "database": "SQLite temporal por prueba (tmp_path)"
   },
   "commands": [
-    "make test",
-    ".venv-verify/Scripts/python.exe -m pytest tests/test_saas_phase1.py tests/test_saas_compliance.py tests/contract tests/e2e_api -q -p no:cacheprovider --durations=5"
+    "python -m pytest tests/test_saas_phase1.py tests/test_saas_compliance.py tests/contract tests/e2e_api -q"
   ],
   "manual_checks": [
     {
-      "name": "seed_demo_idempotente",
+      "name": "seed_demo_saas.py idempotente",
       "result": "ok",
       "counts": {
         "resources": 2,
@@ -61,5 +66,6 @@
         "handoff_alerts": 0
       }
     }
-  ]
+  ],
+  "notes": "Duración real medida ejecutando pytest. Conteo de contract/test_api.py corregido a 18 (anteriormente se decía 27 erróneamente)."
 }
