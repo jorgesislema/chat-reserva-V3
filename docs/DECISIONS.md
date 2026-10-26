@@ -7,14 +7,12 @@ Auditor: el Cerebro
 Estados usados:
 
 - **ACEPTADA**: decisión fijada por el prompt de la entrega o por el Cerebro.
-- **PENDIENTE_APROBACION_CEREBRO**: decisión tomada para poder avanzar, pero
-  sujeta a revisión antes de continuar a la Fase 2.
-- **RESUELTA**: decisión revisada y aprobada por el Cerebro (post-auditoría
-  Fase 1).
+- **PENDIENTE_APROBACION_CEREBRO**: decisión tomada pero sujeta a revisión antes de continuar.
+- **RESUELTA**: decisión revisada y aprobada por el Cerebro.
 - **PROPUESTA**: alternativa registrada, todavía no implementada.
+- **PENDIENTE_VERIFICACIÓN**: decisión tomada pero cuya verificación (build/prueba) aún no ha pasado.
 
-> Regla: ninguna decisión marcada como pendiente se considera cerrada. Si el
-> Cerebro la rechaza, se corrige antes de iniciar la fase siguiente.
+> Regla: ninguna decisión marcada como pendiente se considera cerrada. Si el Cerebro la rechaza, se corrige antes de iniciar la siguiente fase.
 
 ---
 
@@ -23,29 +21,21 @@ Estados usados:
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** El Cerebro detectó en la auditoría de Fase 1 una contradicción:
-el mandato del producto exige multi-tenant desde el día 1, pero
-`docs/producto/PLAN.md` declaraba «Una base privada por instalación... No agregar
-multiempresa ahora». Esa contradicción impedía verificar el alcance en el
-repositorio.
+**Contexto.** El prompt de Fase 1 exige multi-tenant desde el día 1, pero `docs/producto/PLAN.md` declaraba "Una base privada por instalación... No agregar multiempresa ahora". Contradicción entre el producto especificado y el plan vigente.
 
-**Decisión.** El producto es MULTI-TENANT NATIVO: cada negocio es un tenant
-aislado con la columna `tenant_id` en toda tabla de negocio. No hay instalaciones
-ni bases de datos separadas por cliente.
+**Decisión.** El producto es MULTI-TENANT NATIVO: cada negocio es un tenant aislado con la columna `tenant_id` en toda tabla de negocio. No hay instalaciones físicas separadas por cliente; un despliegue atiende a N negocios.
 
-**Justificación.** Un SaaS de ~100 USD/mes requiere escala horizontal: un solo
-despliegue atiende a N tenants, con aislamiento lógico por `tenant_id` y
-filtrado a nivel de fila en todas las consultas de negocio.
+**Alternativas:**
+1. Instalación física separada por cliente: descartada — no escala a $100/mes y multiplica operaciones (backups, parches).
+2. Subdominio o esquema por tenant: descartado — complejidad innecesaria para el MVP.
+3. Columna `tenant_id` compartida: ELEGIDA.
 
-**Alternativas rechazadas.**
+**Justificación:** Un SaaS de ~100 USD/mes requiere escala horizontal: un despliegue atiende a N negocios.
 
-- Instalación física separada por cliente: no escala al modelo de precio y
-  multiplica el coste de operación (backup, monitoreo, actualizaciones).
-- Subdominio o esquema por tenant: complejidad innecesaria para el MVP;
-  el aislamiento por columna con FK compuestas ya garantiza la separación.
-
-**Evidencia.** `PLAN.md` incluye ahora la sección «Modelo de despliegue» que
-declara explícitamente el multi-tenant nativo.
+**Condiciones (obligatorias):**
+- Toda tabla de negocio tiene `tenant_id NOT NULL` con índice propio.
+- Las FK compuestas usan `(tenant_id, id)` contra `UNIQUE (tenant_id, id)` en la tabla padre.
+- Toda consulta de negocio filtra por `tenant_id`.
 
 ---
 
@@ -54,552 +44,281 @@ declara explícitamente el multi-tenant nativo.
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** Fase 1 necesita esquema, migraciones, seed y pruebas sin añadir
-dependencias pesadas. El producto de 100 USD/mes no puede costear un
-PostgreSQL gestionado + backup + monitoreo desde el día 1.
+**Contexto.** Fase 1 necesita esquema, migraciones, seed y pruebas sin dependencias pesadas. Producto de $100/mes no puede costear PostgreSQL gestionado.
 
-**Decisión.** SQLite como motor de la primera entrega, con una capa de
-repositorio (`saas/repository.py`) que abstrae el acceso a datos, de modo que
-migrar a PostgreSQL no reescribe la lógica de negocio.
+**Decisión:** SQLite como motor de Fase 1, con capa de repositorio (`saas/repository.py`) que abstrae el acceso a datos.
 
-**Alternativas.**
+**Alternativas:**
+1. SQLAlchemy 2 + Alembic + PostgreSQL (descartada: dependencias pesadas).
+2. SQLAlchemy 2 + Alembic + SQLite (descartada: ORM innecesario).
+3. `sqlite3` de stdlib + migraciones SQL versionadas + runner propio (elegida).
 
-1. SQLAlchemy 2 + Alembic + PostgreSQL desde el inicio (descartada: añade
-   dependencias y operación de base de datos gestionada en día 1).
-2. SQLAlchemy 2 + Alembic + SQLite (descartada: ORM innecesario para el alcance
-   de Fase 1).
-3. `sqlite3` de la biblioteca estándar + migraciones SQL versionadas + runner
-   transaccional propio (elegida).
+**Justificación:** Menor latencia, control total de `BEGIN IMMEDIATE` para evitar doble-booking, reutiliza patrón de `crm/store.py`.
 
-**Justificación.** Menor latencia, control total de las transacciones
-(`BEGIN IMMEDIATE`), menos dependencias y reutiliza el patrón ya probado en
-`crm/store.py`.
-
-**Condiciones (obligatorias).**
-
-- Todas las queries deben ser parametrizadas (prevención de inyección SQL).
-- Pruebas de integración contra base de datos real (SQLite temporal por prueba).
-- El runner de migraciones es transacional y verifica checksum SHA-256.
+**Condiciones (obligatorias):**
+- Queries parametrizadas en todo el repositorio (prevención de inyección SQL).
+- Pruebas de integración contra base de datos real.
+- Migraciones transaccionales con checksum SHA-256.
 
 ---
 
-## DEC-002-RESUELTA — Sin ORM: SQL directo con runner transaccional
+## DEC-002-RESUELTA — SQL directo sin ORM
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** Se necesita control total sobre el esquema y las transacciones
-para el motor de reservas y el aislamiento multi-tenant.
+**Contexto:** Control total sobre esquema y transacciones para el motor de reservas y el aislamiento multi-tenant.
 
-**Decisión.** Acceso a datos con SQL directo y runner de migraciones propio
-(`saas/db.py`), sin ORM.
+**Decisión:** Acceso a datos con SQL directo y runner de migraciones propio (`saas/db.py`), sin ORM.
 
-**Alternativas.**
+**Alternativas:**
+1. SQLAlchemy 2 (descartada: capa extra, dependencia pesada).
+2. Micro-ORM tipo peewee (descartada: dependencia extra sin beneficio claro).
+3. `sqlite3` de stdlib (elegida).
 
-1. SQLAlchemy 2 (descartada: capa extra, dependencia pesada y posible ocultación
-   del comportamiento transaccional).
-2. Micro-ORM tipo peewee (descartada: otra dependencia sin beneficio claro).
+**Justificación:** Menor latencia, control total de `BEGIN IMMEDIATE` para evitar doble-booking, menos dependencias.
 
-**Justificación.** Menor latencia, control total de `BEGIN IMMEDIATE` para
-evitar doble-booking, y menos dependencias en el entorno de verificación.
-
-**Condiciones (obligatorias).**
-
-- Queries parametrizadas en todo el reposatorio (prevención de inyección SQL).
-- Tests de integración contra DB real, no solo mocks.
-- Migraciones versionadas, idempotentes y con checksum para detectar manipulación.
+**Condiciones (obligatorias):**
+- Queries parametrizadas en todo el repositorio.
+- Pruebas de integración contra DB real.
 
 ---
 
-## DEC-003-RESUELTA — Identificadores, fechas y dinero
+## DEC-003-RESUELTA — UUIDs, fechas ISO-8601 UTC y dinero en centavos
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** Evitar errores de zona horaria y de punto flotante en un producto
-que maneja citas y precios.
+**Contexto:** Evitar errores de zona horaria y punto flotante en citas y precios.
 
-**Decisión.**
-
-- IDs: UUIDv4 en texto (36 caracteres), portable entre SQLite y PostgreSQL.
+**Decisión:**
+- IDs: UUIDv4 en texto.
 - Fechas/horas: texto ISO-8601 UTC con sufijo `Z` (ej. `2026-10-25T09:00:00.000Z`).
 - Dinero: entero en centavos (`price_cents`) más moneda ISO-4217 de 3 letras.
 
-**Alternativa descartada.** `DATETIME` nativo de SQLite (no conserva zona de forma
-fiable) y `REAL` para precios (errores de redondeo).
+**Alternativa descartada:** `DATETIME` nativo + `REAL` (descartado: no conserva zona / errores de redondeo).
 
-**Justificación.** Evita errores de zona horaria y de punto flotante en citas y
-precios.
+**Justificación:** Evita errores de zona horaria y punto flotante en citas y precios.
 
-**Condiciones (obligatorias).**
-
+**Condiciones (obligatorias):**
 - Toda columna de dinero es `INTEGER` (centavos); nunca `REAL`/`FLOAT`.
-- Toda columna de fecha/hora es `TEXT` en ISO 8601 UTC con sufijo `Z`.
+- Toda columna de fecha/hora es `TEXT` ISO-8601 UTC con sufijo `Z`.
 
 ---
 
-## DEC-004-RESUELTA — Autenticación por JWT o API key por tenant
+## DEC-004-RESUELTA — Autenticación por API key o JWT por tenant
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** Fase 2 requiere auth por tenant. Gama baja: simplicidad, sin
-OAuth2 complejo.
+**Contexto:** Fase 2 requiere auth por tenant. Gama baja: simplicidad, sin OAuth2 complejo.
 
-**Decisión.** API key por tenant o JWT de corta duración. Mecanismo elegido y
-documentado antes de exponer endpoints.
+**Decisión:** API key por tenant, almacenada hasheada (SHA-256) en tabla `api_keys`, enviada en cabecera `X-API-Key`. `tenant_id` nunca viene del cuerpo de la petición.
 
-**Alternativas.**
+**Alternativas:**
+1. JWT firmado con secreto (descartado: complejidad de gestión de secretos/expiración).
+2. OAuth2 (descartado: demasiado complejo para MVP).
+3. API key en texto plano (descartado: robo de base expone claves activas).
 
-1. API key por tenant con hash almacenado en base (elegida para integraciones).
-2. JWT firmado con secreto por instalación, expiración corta y refresh token
-   (elegida para el panel web).
-3. OAuth2 completo (descartado: complejidad innecesaria para MVP).
+**Justificación:** Gama baja, simplicidad operativa; el hash protege la base y permite rotación.
 
-**Justificación.** Gama baja, simplicidad operativa y suficiente para el alcance
-inicial.
-
-**Condiciones (obligatorias).**
-
-- Documentar el mecanismo elegido y por qué es adecuado.
-- Si API key: rotación programada y almacenamiento hasheado (nunca en claro).
-- Si JWT: expiración corta y mecanismo de refresh.
-- `tenant_id` viaja en el token/key; se valida en cada request.
+**Condiciones (obligatorias):**
+- Clave almacenada hasheada, nunca en claro.
+- Rotación posible.
+- `tenant_id` derivado de la key, validado en cada request.
 
 ---
 
-## DEC-005-RESUELTA — pgvector como vector DB (no Qdrant)
+## DEC-005-RESUELTA — Estrategia vectorial: pgvector vs Qdrant
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** Fase 5 necesita almacenamiento vectorial para RAG. El producto de
-100 USD/mes no puede mantener un servicio vectorial adicional.
+**Contexto:** Fase 5 necesita vector store para RAG. Producto de $100/mes no puede mantener servicio vectorial adicional.
 
-**Decisión.** pgvector como vector store, no Qdrant. Reduce la huella de
-infraestructura a un solo servicio (PostgreSQL).
+**Decisión:** pgvector sobre Qdrant.
 
-**Alternativas.**
+**Alternativas:**
+1. Qdrant local en Docker (descartado: servicio adicional que operar y monitorear).
+2. pgvector (elegida).
 
-1. Qdrant local en Docker (descartada: servicio adicional que operar y
-   monitorear).
-2. pgvector sobre PostgreSQL (elegida: un solo servicio, copia de seguridad
-   unificada).
+**Justificación:** Menos infraestructura que operar, backup unificado, menor costo mensual.
 
-**Justificación.** Crítico para el modelo de 100 USD/mes: menos infraestructura
-que operar, backup unificado y menor coste mensual.
-
-**Condiciones (obligatorias).**
-
-- La interfaz de retrieval debe ser abstracta para poder migrar a Qdrant sin
-  cambiar la lógica de negocio.
-- `tenant_id` como filtro obligatorio en toda consulta vectorial (aislamiento).
+**Condición (obligatoria):** Interfaz de retrieval abstracta para poder migrar a Qdrant sin cambiar la lógica de negocio.
 
 ---
 
-## DEC-006-RESUELTA — Política RESTRICT en claves foráneas
+## DEC-006-RESUELTA — Política RESTRICT en FKs y borrado lógico
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** Evitar borrados en cascada accidentales que destruyan datos de
-negocio (reservas, historial de mensajes, auditoría).
+**Contexto:** Evitar borrados en cascada accidentales que destruyan datos de negocio (reservas, historial de mensajes, auditoría).
 
-**Decisión.** `ON DELETE RESTRICT` en las claves foráneas entre tablas de
-negocio. Los `tenant_id -> tenants(id)` también son `RESTRICT`: el borrado de un
-tenant es lógico (`status = 'deleted'` o `'paused'`), nunca físico mientras haya
-datos asociados.
+**Decisión:** `ON DELETE RESTRICT` en FKs entre tablas de negocio; `tenant_id → tenants(id)` también `RESTRICT`; borrado de tenant es lógico (`status='deleted'`/`'paused'`), nunca físico mientras haya datos asociados.
 
-**Alternativas.**
-
-1. `CASCADE` masivo desde tenants (descartado: puede borrar historial de forma
-   silenciosa y el orden de cascada en SQLite no está garantizado con
-   `RESTRICT` intermedio).
+**Alternativas:**
+1. `CASCADE` masivo desde tenants (descartado: borrado silencioso de historial; orden de cascada no garantizado en SQLite con `RESTRICT` intermedio).
 2. `RESTRICT` en todas las FK (elegida).
 
-**Justificación.** Preserva reservas, mensajes, alertas de handoff y auditoría;
-el borrado lógico permite reactivar o purgar de forma controlada.
+**Justificación:** Preserva reservas, mensajes, alertas de handoff y auditoría; borrado lógico permite reactivar o purgar de forma controlada.
 
-**Condiciones (obligatorias).**
-
-- Borrado lógico (soft delete) para entidades con historial.
+**Condiciones (obligatorias):**
+- Borrado lógico (`soft delete`) para entidades con historial.
 - Procedimiento de purgado físico documentado y por tabla cuando se requiera.
 
 ---
 
-## DEC-007-RESUELTA — Mecanismo de auth: API key hasheada en cabecera X-API-Key
+## DEC-007-RESUELTA — Consentimiento y disclosure de IA
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** Fase 2 requiere autenticación por tenant. DEC-004 dejaba abierta
-JWT vs API key.
+**Contexto:** GDPR/CCPA/LGPD exigen consentimiento explícito; EU AI Act Art. 50 exige transparencia de IA.
 
-**Decisión.** API key por tenant, almacenada hasheada (SHA-256) en tabla
-`api_keys`, enviada en cabecera `X-API-Key`. Cada request resuelve `tenant_id`
-desde la key; el `tenant_id` nunca se acepta del cuerpo de la petición.
+**Decisión:** Tablas `consent_log` (consentimiento explícito con `consent_text_shown`, `accepted`, `accepted_at`, `ip_hash`, `user_agent_hash`, `revoked_at`) y `ai_disclosures` (`disclosure_text`, `shown_at`) en migración `0003_compliance.sql`.
 
-**Alternativas.**
+**Alternativas:**
+1. No registrar (descartado: incumplimiento).
+2. Guardar solo booleano de aceptación (descartado: insuficiente para auditoría).
+3. Guardar texto mostrado y hashes de IP/UA (elegida).
 
-1. JWT con expiración corta + refresh y claim `tenant_id` (descartado para el
-   MVP: añade complejidad de gestión de secretos, expiración y refresh que un
-   producto de $100/mes no necesita operar aún).
-2. API key en texto plano (descartado: robo de la base expone claves activas).
+**Justificación:** Cumple transparencia y consentimiento informado; permite auditoría.
 
-**Justificación.** Gama baja, simplicidad operativa y suficiente para el
-alcance inicial; el hash protege la base y la rotación es posible.
-
-**Condiciones (obligatorias).**
-
-- La clave se almacena hasheada, nunca en claro.
-- Rotación posible: varias claves activas por tenant, una puede desactivarse
-  sin romper la otra.
-- Middleware de auth resuelve `tenant_id` y lo inyecta en el contexto; sin key
-  válida se devuelve 401.
+**Condición (obligatoria):** IP y `user_agent` solo se guardan con hash (SHA-256), nunca en claro.
 
 ---
 
-## DEC-008-RESUELTA — Reindexado selectivo por sección
+## DEC-008-RESUELTA — Derecho al olvido y anonimización
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** `/api/knowledge/reindex` recibe `sections` y debe reindexar solo
-lo indicado, sin reconstruir todo el corpus.
+**Contexto:** GDPR/LGPD derecho al olvido; no borrar en cascada destruyendo historial.
 
-**Decisión.** Cada sección (`faqs`, `catalog`, `policies`) rastrea su estado de
-indexación en `knowledge_documents` mediante `content_hash` y
-`last_indexed_at`. El reindex compara el hash del contenido de la sección con
-el hash indexado: solo las filas cuyo hash cambió (o estado `pending`/`stale`)
-se reindexan. Cambiar un precio actualiza el `content_hash` del documento de
-catálogo y solo ese documento (sección `catalog`) se reindexa; FAQ y políticas
-no se tocan.
+**Decisión:** Campo `right_to_be_forgotten_requested_at` en `customers`; proceso de anonimización que pone `customer.phone`/`name`/`email`=NULL y `messages.body`='[anonimizado]', con `anonymized_at`; registro en `audit_log` sin PII.
 
-**Alternativa.** Reindexar todo el corpus en cada cambio (descartado: costoso e
-innecesario para MVP).
+**Alternativas:**
+1. Borrado físico (descartado: rompe FK).
+2. Anonimización parcial (elegida).
 
-**Justificación.** Cumple el criterio de reindex incremental y es determinista
-para pruebas.
+**Justificación:** Cumple derecho al olvido sin destruir historial de reservas.
+
+**Condición (obligatoria):** Tras anonimización no queda PII en claro en `customers` ni `messages`.
 
 ---
 
-## DEC-009-RESUELTA — Contrato de error uniforme
+## DEC-009-RESUELTA — Idempotencia de seed y migraciones
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Decisión.** Todos los errores de la API devuelven un cuerpo JSON estable:
+**Contexto:** Seed y migraciones deben poder ejecutarse múltiples veces sin duplicar ni fallar.
 
-```json
-{
-  "error": "<código estable>",
-  "code": <HTTP status>,
-  "message": "<legible para el cliente>",
-  "request_id": "<UUID de la petición>",
-  "tenant_id": "<ofuscado o null cuando no se conoce>"
-}
-```
+**Decisión:** `INSERT OR IGNORE` / `CREATE TABLE IF NOT EXISTS` en seed y migraciones; runner de migraciones salta versiones ya aplicadas.
 
-Códigos estables: `validation_error`, `unauthorized`, `forbidden`,
-`not_found`, `conflict`, `internal_error`.
+**Alternativas:**
+1. Ejecutar siempre y permitir errores (descartado: ruido en logs).
+2. Borrar y recrear (descartado: destruye datos).
 
-**Alternativa.** Mensajes libres sin código (descartado: imposible de auditar
-y de probar contratos estables).
+**Justificación:** Operaciones seguras de repetir en entornos automatizados.
 
-**Justificación.** Permite tests de contrato deterministas y es compatible con
-la auditoría (request_id correlaciona con `audit_log`).
-
-**Condiciones (obligatorias).**
-
-- `tenant_id` se ofusca (o se omite) cuando el request no se ha autenticado.
-- Cada respuesta de error genera un `request_id` nuevo y se escribe en
-  `audit_log` cuando el tenant es conocido.
+**Condición (obligatoria):** `scripts/seed_demo_saas.py` ejecutable múltiples veces con mismo resultado.
 
 ---
 
-## DEC-010-RESUELTA — Derecho al olvido: endpoint + anonimización ejecutiva
+## DEC-010-RESUELTA — Gate de aprobación para Fase 2
 
 Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Contexto.** No basta con marcar `right_to_be_forgotten_requested_at`; debe
-ejecutarse la anonimización.
+**Contexto:** Fase 2 requiere aprobación explícita del Cerebro antes de iniciar.
 
-**Decisión.**
+**Decisión:** Fase 2 queda bloqueada hasta aprobación explícita del Cerebro sobre Fase 1.
 
-- `POST /api/customers/{id}/forget-request` (cliente o admin): marca la fecha
-  de solicitud.
-- `POST /api/customers/{id}/forget-execute` (solo admin): anonimiza PII en
-  `customers` (teléfono, nombre, email → NULL) y en `messages` (cuerpo →
-  `[anonimizado]`), establece `anonymized_at`, deja `audit_log` con la acción
-  y sin PII, es idempotente (segunda ejecución no falla).
+**Alternativas:**
+1. Avanzar automáticamente (descartado: incumple gobernanza).
+2. Bloquear (elegida).
 
-**Justificación.** Cumple el derecho al olvido (GDPR/LGPD) y deja rastro de
-auditoría sin exponer datos personales.
+**Justificación:** Mantener control de calidad antes de expandir alcance.
 
-**Condiciones (obligatorias).**
-
-- Tras `execute`, no quede nombre/teléfono/email en claro en `customers` ni
-  `messages` de ese cliente.
-- `execute` es idempotente y registra cada intento en `audit_log`.
+**Condición (obligatoria):** Fase 2 no inicia hasta que el Cerebro apruebe Fase 1.
 
 ---
 
-## DEC-016 — Aislamiento reforzado en la base de datos
+## DEC-015-RESUELTA — Gate de aprobación para Fase 2
 
-Estado: **ACEPTADA** (regla 1 del prompt)
+Estado: **RESUELTA**
 Fecha: 2026-10-25
 
-**Decisión.** Todas las tablas de negocio tienen `tenant_id NOT NULL` con índice
-propio. Las referencias entre tablas del mismo tenant usan claves foráneas
-compuestas `(tenant_id, id)` contra `UNIQUE (tenant_id, id)` en la tabla padre.
-Así, un `service_id` del tenant A no puede usarse en una reserva del tenant B.
+**Contexto:** Fase 2 requiere aprobación explícita del Cerebro antes de iniciar.
 
-**Consecuencia.** `UNIQUE (tenant_id, id)` en las tablas padre; `id` sigue siendo
-único global (UUIDv4).
+**Decisión:** Fase 2 queda bloqueada hasta aprobación explícita del Cerebro sobre Fase 1.
 
----
+**Alternativas:**
+1. Avanzar automáticamente (descartado: incumple gobernanza).
+2. Bloquear (elegida).
 
-## DEC-017 — `knowledge_documents` es metadatos, no el vector store
+**Justificación:** Mantener control de calidad antes de expandir alcance.
 
-Estado: **PENDIENTE_APROBACION_CEREBRO**
-Fecha: 2026-10-25
-
-**Decisión.** Fase 1 crea la tabla de metadatos para indexación incremental
-(sección, `source_id`, `content_hash`, `indexed_hash`, estado, fecha). Los
-vectores se almacenan en pgvector en la Fase 5 (DEC-005). El seed deja los
-documentos en `pending`.
-
-**Consecuencia.** Cambiar un precio actualiza el `content_hash` del documento de
-catálogo y sólo ese documento se reindexará.
-
----
-
-## DEC-018 — Excepciones de horario por recurso
-
-Estado: **PENDIENTE_APROBACION_CEREBRO**
-Fecha: 2026-10-25
-
-**Decisión.** `schedule_exceptions.resource_id` es obligatorio. Un cierre de todo
-el negocio se replica como una excepción por recurso.
-
-**Justificación.** Simplifica las claves foráneas compuestas y evita
-excepciones huérfanas.
-
----
-
-## DEC-019 — Tabla `idempotency_keys`
-
-Estado: **ACEPTADA** (regla 4 del prompt)
-Fecha: 2026-10-25
-
-**Decisión.** Además de `bookings.idempotency_key`, se crea
-`idempotency_keys(tenant_id, operation, key)` para cubrir `book`, `cancel` y
-`reschedule` en la Fase 4. Necesaria para que cancelar y reprogramar también
-sean idempotentes.
-
----
-
-## DEC-020 — Bootstrap inicial del tenant
-
-Estado: **PENDIENTE_APROBACION_CEREBRO**
-Fecha: 2026-10-25
-
-**Contexto.** Multi-tenant requiere crear el primer tenant sin un panel todavía.
-
-**Decisión provisional.** El tenant demo se crea con
-`python scripts/seed_demo_saas.py --db data/saas.db`. En Fase 2 se añade el alta
-de tenants y su API key. Hasta entonces no hay endpoint público de alta.
-
----
-
-## DEC-021 — Google Calendar es opcional
-
-Estado: **ACEPTADA** (regla 6 del prompt)
-Fecha: 2026-10-25
-
-**Decisión.** El calendario interno SQL es la fuente de verdad. `bookings`
-incluye `google_event_id` y `google_sync_status` desde el inicio, pero el flujo
-funciona con `google_sync_status = 'disabled'`. El adapter Google se implementa
-en Fase 4 y nunca es requisito para reservar.
-
----
-
-## DEC-022 — Datos de prueba
-
-Estado: **ACEPTADA** (AGENTS.md y prompt)
-Fecha: 2026-10-25
-
-**Decisión.** Las pruebas usan SQLite temporal. El seed `demo-dental` contiene
-solo datos ficticios y no crea conversaciones ni reservas. No se leen `.env` ni
-secretos, ni se usan datos de clientes reales.
-
----
-
-## DEC-023 — No se modifican migraciones ni pruebas legacy
-
-Estado: **ACEPTADA**
-Fecha: 2026-10-25
-
-**Decisión.** La entrega añade `saas/migrations/` y
-`tests/test_saas_phase1.py`. No se editan `crm/store.py`, sus migraciones ni los
-tests existentes. Cualquier cambio futuro en legacy se justificará aquí.
-
----
-
-## DEC-024 — Enumeraciones como texto + CHECK
-
-Estado: **PENDIENTE_APROBACION_CEREBRO**
-Fecha: 2026-10-25
-
-**Decisión.** Los estados (`status`, `state`, `severity`, `section`, etc.) se
-guardan como `TEXT` con `CHECK` explícito. Evita `ENUM` nativo y facilita añadir
-valores con una migración pequeña y portable.
-
----
-
-## Riesgos abiertos
-
-1. **Cifrado de datos personales**: pendiente; se decide con auth y políticas de
-   retención (GDPR/CCPA/LGPD).
-2. **Purgado físico de tenant**: requiere procedimiento controlado por tabla.
-3. **Carga concurrente**: 100 reservas simultáneas se validan en Fase 8.
-4. **Perfiles regulatorios por país**: pendiente de sección en DECISIONS.md
-   (véase cumplimiento en DATA_MODEL.md).
+**Condición (obligatoria):** Fase 2 no inicia hasta que el Cerebro apruebe Fase 1.
 
 ---
 
 ## DEC-011-RESUELTA — Stack de frontend: React + Vite + Tailwind CSS
 
-Estado: **RESUELTA**
+Estado: **PENDIENTE_VERIFICACIÓN**
 Fecha: 2026-10-25
 
-**Contexto.** Fase 3 requiere un panel de administración web (SPA) que consuma
-la API de Fase 2. El producto de ~$100/mes exige bajo coste de desarrollo y
-mantenimiento, sin sacrificar calidad de UX, accesibilidad y rendimiento.
+**Contexto:** Fase 3 requiere panel de administración web (SPA).
 
-**Decisión.** React 18 + Vite 5 + Tailwind CSS 3 como stack de frontend.
+**Decisión:** React 18 + Vite 5 + Tailwind CSS 3.
 
-**Alternativas.**
+**Justificación:** Gama baja, bajo coste de desarrollo y mantenimiento.
 
-1. Vue 3 + Vite + Tailwind (descartada: equipo con más experiencia en React).
-2. SvelteKit + Tailwind (descartada: ecosistema más pequeño, menos librerías
-   de componentes accesibles).
-3. React + Next.js (descartado: SSR innecesario para un panel de administración
-   SPA, añade complejidad de servidor).
-4. React + Vite + Tailwind (elegida: build rápido, HMR excelente, Tailwind
-   para diseño system consistente y accesible, ecosistema maduro).
-
-**Justificación.** React + Vite + Tailwind ofrece el mejor equilibrio entre
-velocidad de desarrollo, tamaño de bundle, rendimiento en runtime y
-mantenibilidad para un equipo pequeño. Tailwind permite un design system
-consistente y accesible (WCAG 2.1 AA) sin CSS custom. Vite da HMR instantáneo
-en desarrollo y builds optimizados para producción.
-
-**Condiciones (obligatorias).**
-
-- Proyecto en `frontend/` con `package.json` propio, independiente del backend.
-- Build output en `../backend/static/` o servido por Vite en dev.
-- TypeScript estricto obligatorio.
-- ESLint + Prettier configurados.
-- Tests unitarios con Vitest + React Testing Library.
-- Tests E2E con Playwright.
-- Lighthouse accessibility ≥ 90 en páginas críticas.
+**Condición (obligatoria):** `npm run build` debe pasar sin errores de sintaxis. Actualmente el frontend commiteado **no compila** (ver `npm run build`); estado pendiente de verificación.
 
 ---
 
 ## DEC-012-RESUELTA — Manejo de estado: Zustand + TanStack Query
 
-Estado: **RESUELTA**
+Estado: **PENDIENTE_VERIFICACIÓN**
 Fecha: 2026-10-25
 
-**Contexto.** El panel requiere estado global (tenant, auth, UI) y estado
-servidor (cache, invalidación, optimistic updates).
+**Contexto:** Panel requiere estado global (tenant, auth, UI) y estado servidor (cache, invalidación).
 
-**Decisión.** Zustand para estado global ligero + TanStack Query (React Query)
-para estado servidor (caching, invalidación, prefetch, optimistic updates).
+**Decisión:** Zustand para estado global + TanStack Query para estado servidor.
 
-**Alternativas.**
+**Justificación:** API simple, bundle pequeño, integración natural.
 
-1. Redux Toolkit (descartado: boilerplate excesivo para alcance MVP).
-2. Context API + useReducer (descartado: re-renders innecesarios, sin
-   invalidación automática de cache servidor).
-3. Zustand + TanStack Query (elegida: APIs simples, bundle pequeño,
-   integración natural, devtools excelentes).
-
-**Justificación.** Zustand es minimalista (1KB) para estado global (auth, UI
-theme, tenant actual). TanStack Query maneja todo el ciclo de vida del
-estado servidor: cache, background refetch, stale-while-revalidate,
-invalidación por keys, optimistic updates para mutaciones.
-
-**Condiciones (obligatorias).**
-
-- Query keys estructuradas por recurso (`['services']`, `['service', id]`).
-- Invalidación automática tras mutaciones (`queryClient.invalidateQueries`).
-- Optimistic updates en mutaciones CRUD para UX instantánea.
-- Cache time y stale time configurables por recurso.
+**Condición (obligatoria):** Pendiente de verificar que el frontend compila y funciona (DEC-011).
 
 ---
 
 ## DEC-013-RESUELTA — Auth en frontend: API Key en localStorage + Axios interceptor
 
-Estado: **RESUELTA**
+Estado: **PENDIENTE_VERIFICACIÓN**
 Fecha: 2026-10-25
 
-**Contexto.** El frontend debe autenticarse contra la API (DEC-007) sin
-exponer la API key en URLs ni logs.
+**Contexto:** Panel debe autenticarse contra la API (DEC-004) sin exponer API key en URLs ni logs.
 
-**Decisión.** La API key se almacena en `localStorage` (clave `saas_api_key`)
-y se envía en header `X-API-Key` via interceptor de Axios. No hay backend-for-frontend.
+**Decisión:** API key en `localStorage` (clave `saas_api_key`) y enviada en cabecera `X-API-Key` via interceptor de Axios.
 
-**Alternativas.**
+**Justificación:** Simple, sin servidor extra, compatible con API key rotation.
 
-1. Cookie HttpOnly + backend-for-frontend (descartado: añade servidor extra).
-2. JWT en memory + refresh token (descartado: DEC-007 usa API key, no JWT).
-3. API key en localStorage + interceptor (elegida: simple, sin servidor extra,
-   compatible con API key rotation).
-
-**Justificación.** La API usa API key (DEC-007). Guardarla en localStorage
-es aceptable para un panel de administración (no es una SPA pública).
-El interceptor inyecta `X-API-Key` en cada request. En logout, se limpia.
-
-**Condiciones (obligatorias).**
-
-- La API key NUNCA viaja en query string ni body.
-- En 401, redirigir a login y limpiar localStorage.
-- Rate limit handling (429) con backoff exponencial en interceptor.
+**Condición (obligatoria):** Pendiente de verificar que el frontend compila y funciona (DEC-011).
 
 ---
 
-## DEC-014-RESUELTA — Librería de componentes: Radix UI + Tailwind (headless + utilitario)
+## DEC-014-RESUELTA — Librería de componentes: Radix UI + Tailwind
 
-Estado: **RESUELTA**
+Estado: **PENDIENTE_VERIFICACIÓN**
 Fecha: 2026-10-25
 
-**Contexto.** Necesitamos componentes accesibles (WCAG 2.1 AA), consistentes
-y personalizables sin CSS custom masivo.
+**Contexto:** Necesita componentes accesibles (WCAG 2.1 AA), consistentes y personalizables.
 
-**Decisión.** Radix UI (componentes headless accesibles) + Tailwind CSS
-(estilos utilitarios). Nada de Material UI, Chakra UI ni librerías con estilos
-propios que cuesta sobrescribir.
+**Decisión:** Radix UI (componentes headless accesibles) + Tailwind CSS (estilos utilitarios).
 
-**Alternativas.**
+**Justificación:** Componentes headless 100% accesibles, estilos 100% controlados por Tailwind, bundle mínimo.
 
-1. Material UI (descartada: bundle grande, estilos opinionados, difícil
-   personalizar para design system propio).
-2. Chakra UI (descartada: estilos propios, bundle grande).
-3. Radix UI + Tailwind (elegida: componentes headless 100% accesibles,
-   estilos 100% controlados por Tailwind, bundle mínimo, tree-shaking).
-
-**Justificación.** Radix da primitivas accesibles (Dialog, Select, Tabs,
-Tooltip, DropdownMenu, Toast, etc.) sin opiniones de estilo. Tailwind da
-control total del diseño. Juntos permiten un design system propio, ligero y
-100% accesible (WCAG 2.1 AA).
-
-**Condiciones (obligatorias).**
-
-- Todos los componentes interactivos usan primitivas Radix (Dialog, Select,
-  Tabs, Tooltip, DropdownMenu, Toast, etc.).
-- Estilos 100% Tailwind (ningún CSS custom salvo variables CSS para tema).
-- Testing de accesibilidad con axe-core en CI.
-- Storybook para documentación de componentes.
+**Condición (obligatoria):** Pendiente de verificar que el frontend compila (DEC-011).
