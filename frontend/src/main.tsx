@@ -38,7 +38,7 @@ createRoot(document.getElementById('root')!).render(
             <QueryProvider client={queryClient}>
               <AuthGuard>
                 <App />
-                <Toaster position="top-right" />
+                <Toaster />
               </AuthGuard>
             </QueryProvider>
           </AuthProvider>
