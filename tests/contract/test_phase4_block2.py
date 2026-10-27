@@ -74,8 +74,9 @@ def test_handoff_take_resolve_close_via_api(app):
     assert body["alert"]["resolved_at"] is not None
 
     # la conversación vuelve a idle tras close... resolve no la toca
-    status, body = call(app_obj, "GET", "/api/handoff", key)
-    # si el endpoint de listado no existe, lo tolera el resto de asserts
+    status, body = call(app_obj, "GET", "/api/alerts", key)
+    assert status == 200
+    assert isinstance(body["alerts"], list)
 
 
 def test_handoff_close_returns_conversation_to_idle(app):
@@ -133,19 +134,50 @@ def test_reminder_schedule_dry_run_and_execute(app):
 
     status, body = call(app_obj, "POST", "/api/reminders/execute", key)
     assert status == 200
-    assert body["sent"] == 1
+    assert body["simulated"] == 1
+    assert body["delivered"] == 0
     assert body["total"] == 1
 
-    # segunda ejecución: ya no hay pendientes
+    # segunda ejecución: el recordatorio sigue pendiente (la simulación NO consume)
     status, body = call(app_obj, "POST", "/api/reminders/execute", key)
     assert status == 200
-    assert body["sent"] == 0
-    assert body["total"] == 0
+    assert body["simulated"] == 1
+    assert body["total"] == 1
 
     with db.read(path) as conn:
-        row = conn.execute("SELECT status, sent_at FROM reminder_log").fetchone()
+        row = conn.execute("SELECT status, sent_at, transport FROM reminder_log").fetchone()
+        assert row["status"] == "pending"
+        assert row["sent_at"] is None
+        assert row["transport"] is None
+        attempts = conn.execute(
+            "SELECT transport, kind FROM reminder_send_attempts"
+        ).fetchall()
+        assert len(attempts) == 2
+        assert all(a["transport"] == "simulated" for a in attempts)
+
+    # entrega real confirmada: solo aquí el estado pasa a 'sent'
+    from saas.api import repo
+
+    with db.transaction(path) as conn:
+        ok = repo.mark_reminder_delivered(conn, tenant_id, "b1", "tmpl1",
+                                          "Entrega confirmada por transporte real")
+    assert ok is True
+    with db.read(path) as conn:
+        row = conn.execute("SELECT * FROM reminder_log").fetchone()
         assert row["status"] == "sent"
         assert row["sent_at"] is not None
+        assert row["transport"] == "whatsapp"
+        assert row["delivered_at"] is not None
+
+    # tras la entrega real ya no hay pendientes (elegibilidad consumida)
+    status, body = call(app_obj, "POST", "/api/reminders/dry-run", key)
+    assert body["due_count"] == 0
+
+    # el listado de intentos distingue simulado de entrega real
+    status, body = call(app_obj, "GET", "/api/reminders/attempts", key)
+    assert status == 200
+    kinds = [a["kind"] for a in body["attempts"]]
+    assert "delivery" in kinds and "simulated" in kinds
 
 
 def test_reminder_isolation_across_tenants(tmp_path):
@@ -183,7 +215,7 @@ def test_reminder_isolation_across_tenants(tmp_path):
 
     status, body = call(app_a, "POST", "/api/reminders/execute", key_a)
     assert status == 200
-    assert body["sent"] == 1
+    assert body["simulated"] == 1
 
 
 def test_internal_chat_citas_hoy_from_bookings(app):
