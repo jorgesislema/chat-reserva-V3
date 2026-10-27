@@ -1,8 +1,7 @@
-# Dependencias mínimas del CRM local (Flask/Jinja + SQLite).
-# No incluye IA, Qdrant, Dash/Streamlit ni Google: el CRM inicia y opera sin ellas.
-# Para pruebas: -r requirements-crm-test.txt
-# Para sincronización Google: -r requirements-crm-sync.txt
-# El bot y las interfaces anteriores conservan requirements.txt.
-Flask==3.1.2
-python-dotenv==1.0.1
-tzdata==2025.2
+# Instalación mínima del CRM local. El bot conserva requirements.txt.
+Flask>=3.1.3,<4.0
+python-dotenv>=1.2.3,<2.0
+google-api-python-client>=2.201.0,<3.0
+google-auth-httplib2>=0.4.1,<1.0
+tzdata>=2026.3,<2027
+pytest>=9.1.1,<10.0
