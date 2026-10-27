@@ -1,39 +1,30 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { Search, MessageSquare, AlertTriangle, Filter, X } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Search, MessageSquare } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { conversationsApi } from '@/services/api'
-import { cn } from '@/utils'
+import { extractError } from '@/lib/api'
 import { formatRelativeTime } from '@/utils'
 
 interface Conversation {
   id: string
-  tenant_id: string
   channel: string
   customer_phone: string
   customer_name: string | null
   status: string
-  state: string
   last_message_at: string | null
-  created_at: string
-  updated_at: string
 }
 
 export function Conversations() {
   const { toast } = useToast()
-  const [conversations, setConversations] = useState<any[]>([])
+  const [conversations, setConversations] = useState<Conversation[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -41,12 +32,12 @@ export function Conversations() {
   const fetchConversations = async () => {
     setIsLoading(true)
     try {
-      const params: any = {}
-      if (statusFilter !== 'all') params.status = statusFilter
-      const response = await conversationsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined })
+      const response = await conversationsApi.list(
+        statusFilter !== 'all' ? { status: statusFilter } : undefined
+      )
       setConversations(response.conversations || [])
-    } catch (error: any) {
-      console.error(error)
+    } catch (error) {
+      toast({ title: 'Error', description: extractError(error), variant: 'error' })
     } finally {
       setIsLoading(false)
     }
@@ -56,10 +47,14 @@ export function Conversations() {
     fetchConversations()
   }, [statusFilter])
 
-  const filteredConversations = conversations.filter(c =>
-    c.customer_name?.toLowerCase().includes(search.toLowerCase()) ||
-    c.customer_phone.includes(search)
-  )
+  const filteredConversations = conversations.filter((c) => {
+    if (!search) return true
+    const needle = search.toLowerCase()
+    return (
+      c.customer_name?.toLowerCase().includes(needle) ||
+      c.customer_phone.toLowerCase().includes(needle)
+    )
+  })
 
   return (
     <div className="space-y-6">
@@ -72,13 +67,10 @@ export function Conversations() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5" />
-              Conversaciones
-            </CardTitle>
-            <CardDescription>Gestiona y supervisa las conversaciones con tus clientes</CardDescription>
-          </div>
+          <CardTitle className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5" />
+            Conversaciones
+          </CardTitle>
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted" />
@@ -87,7 +79,6 @@ export function Conversations() {
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className="pl-10 w-64"
-                placeholder="Buscar..."
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -159,12 +150,13 @@ export function Conversations() {
                         {conv.last_message_at ? formatRelativeTime(conv.last_message_at) : 'Sin mensajes'}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" onClick={() => { /* open detail */ }}>
+                        <Button variant="ghost" size="sm" onClick={() => toast({ title: 'Detalle de conversación', description: `ID: ${conv.id}`, variant: 'default' })}>
                           Ver
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  ))
+                )}
               </TableBody>
             </Table>
           </div>
