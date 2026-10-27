@@ -57,6 +57,18 @@ def read(db_path: str | Path):
         db.close()
 
 
+def list_tenants(db_path: str | Path = DEFAULT_DB_PATH) -> list[dict[str, str]]:
+    """Tenants activos, ordenados por slug. Usado por el scheduler global."""
+    rows = []
+    with read(db_path) as db:
+        for row in db.execute(
+            "SELECT id, slug, name, timezone FROM tenants "
+            "WHERE status = 'active' ORDER BY slug"
+        ).fetchall():
+            rows.append(dict(row))
+    return rows
+
+
 @contextmanager
 def transaction(db_path: str | Path):
     """Transacción de escritura serializada con ``BEGIN IMMEDIATE``.
@@ -79,32 +91,87 @@ def transaction(db_path: str | Path):
 
 
 def split_sql(script: str) -> list[str]:
-    """Divide un script SQL por ``;`` respetando comillas simples/dobles.
+    """Divide un script SQL por ``;`` top-level respetando comillas, comentarios
+    y bloques ``BEGIN ... END`` de triggers.
 
     Las migraciones no usan ``executescript`` porque esa función confirma de
-    forma implícita y rompería la atomicidad exigida.
+    forma implícita y rompería la atomicidad exigida. Un ``;`` dentro del cuerpo
+    de un trigger (BEGIN...END) no separa sentencias.
     """
     statements: list[str] = []
     buffer: list[str] = []
     quote: str | None = None
-    for char in script:
+    in_line_comment = False
+    in_block_comment = False
+    begin_depth = 0
+    i, n = 0, len(script)
+    while i < n:
+        char = script[i]
+        nxt = script[i + 1] if i + 1 < n else ""
         if quote:
             buffer.append(char)
             if char == quote:
                 quote = None
+            i += 1
+            continue
+        if in_line_comment:
+            buffer.append(char)
+            if char == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            buffer.append(char)
+            if char == "*" and nxt == "/":
+                buffer.append(nxt)
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
             continue
         if char in ("'", '"'):
             quote = char
             buffer.append(char)
+            i += 1
+            continue
+        if char == "-" and nxt == "-":
+            in_line_comment = True
+            buffer.append(char)
+            buffer.append(nxt)
+            i += 2
+            continue
+        if char == "/" and nxt == "*":
+            in_block_comment = True
+            buffer.append(char)
+            buffer.append(nxt)
+            i += 2
+            continue
+        if char.isalpha() or char == "_":
+            j = i
+            while j < n and (script[j].isalnum() or script[j] == "_"):
+                j += 1
+            word = script[i:j]
+            upper = word.upper()
+            if upper == "BEGIN":
+                begin_depth += 1
+            elif upper == "END":
+                begin_depth = max(0, begin_depth - 1)
+            buffer.append(word)
+            i = j
             continue
         if char == ";":
-            candidate = "".join(buffer).strip()
-            if candidate:
-                statements.append(candidate)
-            buffer = []
+            if begin_depth == 0:
+                candidate = "".join(buffer).strip().rstrip(";").strip()
+                if candidate:
+                    statements.append(candidate)
+                buffer = []
+            else:
+                buffer.append(char)
+            i += 1
             continue
         buffer.append(char)
-    candidate = "".join(buffer).strip()
+        i += 1
+    candidate = "".join(buffer).strip().rstrip(";").strip()
     if candidate:
         statements.append(candidate)
     return statements
