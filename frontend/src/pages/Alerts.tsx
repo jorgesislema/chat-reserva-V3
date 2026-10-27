@@ -1,33 +1,26 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
-import { Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { AlertTriangle, CheckCircle, XCircle, Clock, User, MessageSquare, Filter, Loader2 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { AlertTriangle } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { alertsApi } from '@/services/api'
-import { cn } from '@/utils'
+import { extractError } from '@/lib/api'
 import { formatRelativeTime } from '@/utils'
 
 interface Alert {
   id: string
-  tenant_id: string
-  conversation_id: string
   reason: string
   severity: 'low' | 'medium' | 'high' | 'urgent'
   status: 'pending' | 'in_progress' | 'resolved'
-  assigned_to: string | null
   created_at: string
-  taken_at: string | null
-  resolved_at: string | null
-  resolution_note: string | null
   conversation?: {
     customer_name: string | null
     customer_phone: string
@@ -36,20 +29,22 @@ interface Alert {
 
 export function Alerts() {
   const { toast } = useToast()
-  const [alerts, setAlerts] = useState<any[]>([])
+  const [alerts, setAlerts] = useState<Alert[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState('all')
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [selectedAlert, setSelectedAlert] = useState<any>(null)
+  const [selectedAlert, setSelectedAlert] = useState<Alert | null>(null)
   const [resolutionNote, setResolutionNote] = useState('')
 
   const fetchAlerts = async () => {
     setIsLoading(true)
     try {
-      const response = await alertsApi.list({ status: statusFilter !== 'all' ? statusFilter : undefined })
+      const response = await alertsApi.list(
+        statusFilter !== 'all' ? { status: statusFilter } : undefined
+      )
       setAlerts(response.alerts || [])
-    } catch (error: any) {
-      console.error(error)
+    } catch (error) {
+      toast({ title: 'Error', description: extractError(error), variant: 'error' })
     } finally {
       setIsLoading(false)
     }
@@ -59,39 +54,35 @@ export function Alerts() {
     fetchAlerts()
   }, [statusFilter])
 
-  const handleTake = async (alert: any) => {
+  const handleTake = async (alert: Alert) => {
     try {
-      await alertsApi.take(alert.id, 'current_user')
+      await alertsApi.take(alert.id)
       toast({ title: 'Alerta tomada', variant: 'success' })
       fetchAlerts()
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'error' })
+    } catch (error) {
+      toast({ title: 'Error', description: extractError(error), variant: 'error' })
     }
   }
 
   const handleResolve = async () => {
     if (!selectedAlert || !resolutionNote.trim()) return
     try {
-      await alertsApi.resolve(selectedAlert.id, resolutionNote, 'current_user')
+      await alertsApi.resolve(selectedAlert.id, resolutionNote)
       toast({ title: 'Alerta resuelta', variant: 'success' })
       setDialogOpen(false)
       setResolutionNote('')
       setSelectedAlert(null)
       fetchAlerts()
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'error' })
+    } catch (error) {
+      toast({ title: 'Error', description: extractError(error), variant: 'error' })
     }
   }
 
-  const openResolveDialog = (alert: any) => {
+  const openResolveDialog = (alert: Alert) => {
     setSelectedAlert(alert)
     setResolutionNote('')
     setDialogOpen(true)
   }
-
-  const filteredAlerts = alerts.filter(alert =>
-    statusFilter === 'all' || alert.status === statusFilter
-  )
 
   return (
     <div className="space-y-6">
@@ -104,13 +95,10 @@ export function Alerts() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between flex-wrap gap-4">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5" />
-              Alertas de Handoff
-            </CardTitle>
-            <CardDescription>Gestiona las derivaciones a humano pendientes</CardDescription>
-          </div>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5" />
+            Alertas de Handoff
+          </CardTitle>
           <div className="flex items-center gap-2">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[180px]"><SelectValue placeholder="Todos los estados" /></SelectTrigger>
@@ -153,52 +141,46 @@ export function Alerts() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  alerts
-                    .filter(a => statusFilter === 'all' || a.status === statusFilter)
-                    .map((alert) => (
-                      <TableRow key={alert.id}>
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{alert.conversation?.customer_name || 'Sin nombre'}</p>
-                            <p className="text-sm text-text-muted">{alert.conversation?.customer_phone}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell className="max-w-xs truncate">{alert.reason}</TableCell>
-                        <TableCell>
-                          <Badge variant={
-                            alert.severity === 'urgent' ? 'destructive' :
-                            alert.severity === 'high' ? 'destructive' :
-                            alert.severity === 'medium' ? 'warning' : 'secondary'
-                          }>
-                            {alert.severity}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={
-                            alert.status === 'pending' ? 'warning' :
-                            alert.status === 'in_progress' ? 'secondary' : 'success'
-                          }>
-                            {alert.status === 'pending' ? 'Pendiente' :
-                            alert.status === 'in_progress' ? 'En progreso' : 'Resuelta'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>{formatRelativeTime(alert.created_at)}</TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            {alert.status === 'pending' && (
-                              <Button size="sm" onClick={() => handleTake(alert)}>
-                                Tomar
-                              </Button>
-                            )}
-                            {alert.status === 'in_progress' && (
-                              <Button size="sm" variant="outline" onClick={() => openResolveDialog(alert)}>
-                                Resolver
-                              </Button>
-                            )}
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                  alerts.map((alert) => (
+                    <TableRow key={alert.id}>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{alert.conversation?.customer_name || 'Sin nombre'}</p>
+                          <p className="text-sm text-text-muted">{alert.conversation?.customer_phone}</p>
+                        </div>
+                      </TableCell>
+                      <TableCell className="max-w-xs truncate">{alert.reason}</TableCell>
+                      <TableCell>
+                        <Badge variant={
+                          alert.severity === 'urgent' || alert.severity === 'high' ? 'destructive' :
+                          alert.severity === 'medium' ? 'warning' : 'secondary'
+                        }>
+                          {alert.severity}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={
+                          alert.status === 'pending' ? 'warning' :
+                          alert.status === 'in_progress' ? 'secondary' : 'success'
+                        }>
+                          {alert.status === 'pending' ? 'Pendiente' :
+                          alert.status === 'in_progress' ? 'En progreso' : 'Resuelta'}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{formatRelativeTime(alert.created_at)}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {alert.status === 'pending' && (
+                            <Button size="sm" onClick={() => handleTake(alert)}>Tomar</Button>
+                          )}
+                          {alert.status === 'in_progress' && (
+                            <Button size="sm" variant="outline" onClick={() => openResolveDialog(alert)}>Resolver</Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </div>
@@ -210,23 +192,22 @@ export function Alerts() {
           <DialogHeader>
             <DialogTitle>Resolver alerta</DialogTitle>
             <DialogDescription>
-              Escribe una nota de resolución para la alerta de <strong>{selectedAlert?.conversation?.customer_name}</strong>
+              Escribe una nota de resolución para la alerta de{' '}
+              <strong>{selectedAlert?.conversation?.customer_name || 'este cliente'}</strong>
             </DialogDescription>
           </DialogHeader>
-          <DialogContent>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="resolution_note">Nota de resolución *</Label>
-                <Textarea
-                  id="resolution_note"
-                  value={resolutionNote}
-                  onChange={e => setResolutionNote(e.target.value)}
-                  placeholder="Describe cómo se resolvió el caso..."
-                  rows={4}
-                />
-              </div>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="resolution_note">Nota de resolución *</Label>
+              <Textarea
+                id="resolution_note"
+                value={resolutionNote}
+                onChange={e => setResolutionNote(e.target.value)}
+                placeholder="Describe cómo se resolvió el caso..."
+                rows={4}
+              />
             </div>
-          </DialogContent>
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setDialogOpen(false); setResolutionNote(''); setSelectedAlert(null); }}>
               Cancelar
