@@ -648,23 +648,147 @@ def schedule_reminder(conn, tenant_id: str, booking_id: str, template_id: str,
     )
 
 
-def log_reminder_sent(conn, tenant_id: str, booking_id: str, template_id: str, status: str):
-    """Marca el recordatorio como enviado (pendiente -> otorgado).
+def simulate_reminder_send(conn, tenant_id: str, booking_id: str, template_id: str, detail: str | None = None):
+    """Registra un intento de envío SIMULADO sin consumir el recordatorio real.
 
-    Idempotente: actualiza la fila existente en lugar de insertar otra (la
-    clave UNIQUE (tenant, booking, template) no admite duplicados).
+    reminder_log.status permanece 'pending' y sent_at/delivered_at quedan
+    NULL: la simulación no se cuenta como entrega y el recordatorio sigue
+    siendo elegible para una entrega real.
     """
+    from saas.db import new_id
+
+    row = conn.execute(
+        """
+        SELECT id FROM reminder_log
+        WHERE tenant_id = ? AND booking_id = ? AND template_id = ?
+        """,
+        (tenant_id, booking_id, template_id),
+    ).fetchone()
+    if row is None:
+        return False
+    conn.execute(
+        """
+        INSERT INTO reminder_send_attempts
+          (id, tenant_id, reminder_log_id, transport, kind, detail, created_at)
+        VALUES (?, ?, ?, 'simulated', 'simulated', ?, ?)
+        """,
+        (new_id(), tenant_id, row["id"], detail, _now()),
+    )
+    return True
+
+
+def mark_reminder_delivered(conn, tenant_id: str, booking_id: str, template_id: str, detail: str | None = None):
+    """Marca el recordatorio como entregado DE VERDAD (pendiente -> sent).
+
+    Solo una entrega real confirmada cambia el estado: fija sent_at,
+    delivered_at y transport='whatsapp', y registra el intento como delivery.
+    Idempotente: no vuelve a reenviar una fila ya 'sent'.
+    """
+    from saas.db import new_id
+
+    row = conn.execute(
+        """
+        SELECT id FROM reminder_log
+        WHERE tenant_id = ? AND booking_id = ? AND template_id = ?
+        """,
+        (tenant_id, booking_id, template_id),
+    ).fetchone()
+    if row is None:
+        return False
     now = _now()
     cur = conn.execute(
         """
         UPDATE reminder_log
-        SET status = ?, sent_at = ?
+        SET status = 'sent', sent_at = ?, transport = 'whatsapp', delivered_at = ?
         WHERE tenant_id = ? AND booking_id = ? AND template_id = ?
           AND status = 'pending'
         """,
-        (status, now, tenant_id, booking_id, template_id),
+        (now, now, tenant_id, booking_id, template_id),
     )
-    return cur.rowcount > 0
+    if cur.rowcount == 0:
+        return False
+    conn.execute(
+        """
+        INSERT INTO reminder_send_attempts
+          (id, tenant_id, reminder_log_id, transport, kind, detail, created_at)
+        VALUES (?, ?, ?, 'whatsapp', 'delivery', ?, ?)
+        """,
+        (new_id(), tenant_id, row["id"], detail, now),
+    )
+    return True
+
+
+def list_reminder_attempts(conn, tenant_id: str, limit: int = 50):
+    rows = conn.execute(
+        """
+        SELECT rsa.*, rl.booking_id, rl.template_id, rl.status AS reminder_status
+        FROM reminder_send_attempts rsa
+        JOIN reminder_log rl ON rl.id = rsa.reminder_log_id
+        WHERE rsa.tenant_id = ?
+        ORDER BY rsa.created_at DESC LIMIT ?
+        """,
+        (tenant_id, limit),
+    ).fetchall()
+    return _rows(rows)
+
+
+# ---------------------------------------------------------------------------
+# Lecturas para la UI (listados de reservas, conversaciones y alertas)
+# ---------------------------------------------------------------------------
+
+def list_bookings(conn, tenant_id: str, *, status: str | None = None, limit: int = 100):
+    sql = "SELECT * FROM bookings WHERE tenant_id = ?"
+    params: list[Any] = [tenant_id]
+    if status:
+        sql += " AND status = ?"
+        params.append(status)
+    sql += " ORDER BY start_at DESC LIMIT ?"
+    params.append(limit)
+    return _rows(conn.execute(sql, params).fetchall())
+
+
+def list_conversations(conn, tenant_id: str, *, status: str | None = None, limit: int = 100):
+    sql = "SELECT * FROM conversations WHERE tenant_id = ?"
+    params: list[Any] = [tenant_id]
+    if status:
+        sql += " AND status = ?"
+        params.append(status)
+    sql += " ORDER BY last_message_at DESC, created_at DESC LIMIT ?"
+    params.append(limit)
+    return _rows(conn.execute(sql, params).fetchall())
+
+
+def get_conversation(conn, tenant_id: str, conversation_id: str):
+    return _row(
+        conn.execute(
+            "SELECT * FROM conversations WHERE tenant_id = ? AND id = ?",
+            (tenant_id, conversation_id),
+        ).fetchone()
+    )
+
+
+def list_conversation_messages(conn, tenant_id: str, conversation_id: str, limit: int = 200):
+    rows = conn.execute(
+        """
+        SELECT m.* FROM messages m
+        JOIN conversations c ON c.id = m.conversation_id
+        WHERE c.tenant_id = ? AND m.conversation_id = ?
+        ORDER BY m.created_at ASC LIMIT ?
+        """,
+        (tenant_id, conversation_id, limit),
+    ).fetchall()
+    return _rows(rows)
+
+
+def list_handoff_alerts(conn, tenant_id: str, *, status: str | None = None, limit: int = 100):
+    sql = "SELECT * FROM handoff_alerts WHERE tenant_id = ?"
+    params: list[Any] = [tenant_id]
+    if status:
+        sql += " AND status = ?"
+        params.append(status)
+    sql += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    return _rows(conn.execute(sql, params).fetchall())
 
 
 def internal_chat_query(conn, tenant_id: str, question: str):
