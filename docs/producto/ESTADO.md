@@ -1,5 +1,11 @@
 # Estado de continuidad — leer al retomar
 
+## Revisión independiente más reciente — 26-10-2026
+
+Leer primero REVISION_INDEPENDIENTE_2026-10-26.md. Esta revisión encuentra contradicciones entre edición local/SaaS y continuidad atrasada respecto al código. No decide por el propietario qué producto continuar. El módulo SaaS pendiente REQUIERE CORRECCIONES: runner falla con 0006, FTS rompe altas del catálogo, frontend no compila y recordatorios/chat/handoff tienen defectos reproducidos. No ejecutar el scheduler ni añadir nuevas funciones antes de revisar esta entrega.
+
+Verificaciones actuales: pytest SaaS se detuvo en 1 error de setup por migración; comparación temporal 0001–0005 pasó; dos pruebas puntuales CRM de autenticación/permisos pasaron; TypeScript sin emisión falló por sintaxis. Reproducciones en memoria/temporales, sin datos operativos/proveedores. No se revalidó todo el CRM ni se ejecutó V4. Cambios de esta revisión únicamente este aviso y el informe, sin commit/push. Siguiente decisión: identificar producto/backend/frontend activos y reparar una entrega concreta, preservando todo el trabajo. El historial siguiente se conserva como antecedente, no como estado unificado actual.
+
 Actualizado: 23-10-2026. Responsable de especificación/revisión: Codex. Implementación prevista: DeepSeek.
 Raíz real: `H:\git\chat-clinica-dental - copia\chat-reserva-V3`.
 
