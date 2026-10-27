@@ -97,8 +97,6 @@ export type {
 }
 
 export {
-  type ToastProps,
-  type ToastActionElement,
   ToastProvider,
   Toast,
   ToastTitle,
