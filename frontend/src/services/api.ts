@@ -1,242 +1,186 @@
-import api from '@/lib/api'
-import type {
-  Tenant,
-  Service,
-  Resource,
-  Schedule,
-  ScheduleException,
-  FAQ,
-  Policy,
-  Conversation,
-  Message,
-  Booking,
-  HandoffAlert,
-  AuditLog,
-  KnowledgeDocument,
-  PaginatedResponse,
-  ApiResponse,
-} from '@/types'
+'use client'
 
-// Tenant / Identity
-export const identityApi = {
-  get: () => api.get<ApiResponse<{ tenant: any }>>('/tenants/me/identity'),
-  update: (data: Partial<any>) => api.put<ApiResponse<{ tenant: any }>>('/tenants/me/identity', data),
+export interface ApiErrorShape {
+  error?: string
+  code?: number
+  message?: string
+  tenant_id?: string | null
+  retry_after?: number
 }
 
-// Services
-export const servicesApi = {
-  list: (params?: { active?: boolean }) => api.get<{ services: any[] }>('/api/services', { params }),
-  get: (id: string) => api.get<{ service: any }>(`/api/services/${id}`),
-  create: (data: any) => api.post<{ service: any }>('/api/services', data),
-  update: (id: string, data: any) => api.put<{ service: any }>(`/api/services/${id}`, data),
-  delete: (id: string) => api.delete(`/api/services/${id}`),
+const DEFAULT_ERROR: ApiErrorShape = {
+  error: 'unknown_error',
+  code: 0,
+  message: 'Error inesperado de red o servidor',
 }
 
-// Resources
-export const resourcesApi = {
-  list: (params?: { active?: boolean }) => api.get<{ resources: any[] }>('/api/resources', { params }),
-  get: (id: string) => api.get<{ resource: any }>(`/api/resources/${id}`),
-  create: (data: any) => api.post<{ resource: any }>('/api/resources', data),
-  update: (id: string, data: any) => api.put<{ resource: any }>(`/api/resources/${id}`, data),
-  delete: (id: string) => api.delete(`/api/resources/${id}`),
-  getSchedule: (id: string) => api.get<{ schedules: any[] }>(`/api/resources/${id}/schedule`),
-  updateSchedule: (id: string, blocks: any[]) => api.put<{ schedules: any[] }>(`/api/resources/${id}/schedule`, { blocks }),
+function toMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'message' in err) {
+    const m = (err as ApiErrorShape).message
+    if (m) return m
+  }
+  return DEFAULT_ERROR.message || 'Error inesperado'
 }
 
-// Schedule Exceptions
-export const exceptionsApi = {
-  list: (params?: { resource_id?: string }) => api.get<{ exceptions: any[] }>('/api/schedule-exceptions', { params }),
-  create: (data: any) => api.post<{ exception: any }>('/api/schedule-exceptions', data),
-  get: (id: string) => api.get<{ exception: any }>(`/api/schedule-exceptions/${id}`),
-  update: (id: string, data: any) => api.put<{ exception: any }>(`/api/schedule-exceptions/${id}`, data),
-  delete: (id: string) => api.delete(`/api/schedule-exceptions/${id}`),
+export class ApiClientError extends Error {
+  status: number
+  code: string
+  retryAfter?: number
+  constructor(status: number, payload: ApiErrorShape) {
+    super(payload.message || payload.error || `HTTP ${status}`)
+    this.status = status
+    this.code = payload.error || 'unknown_error'
+    if (typeof payload.retry_after === 'number') this.retryAfter = payload.retry_after
+  }
 }
 
-// FAQs
-export const faqsApi = {
-  list: (params?: { active?: boolean }) => api.get<{ faqs: any[] }>('/api/faqs', { params }),
-  create: (data: any) => api.post<{ faq: any }>('/api/faqs', data),
-  get: (id: string) => api.get<{ faq: any }>(`/api/faqs/${id}`),
-  update: (id: string, data: any) => api.put<{ faq: any }>(`/api/faqs/${id}`, data),
-  delete: (id: string) => api.delete(`/api/faqs/${id}`),
+const identityApi = {
+  get: () => request<void, { tenant: any }>('/tenants/me/identity'),
+  update: (data: any) => request<any, { tenant: any }>('/tenants/me/identity', 'PUT', data),
 }
 
-// Policies
-export const policiesApi = {
-  list: (params?: { active?: boolean }) => api.get<{ policies: any[] }>('/api/policies', { params }),
-  get: (key: string) => api.get<{ policy: any }>(`/api/policies/${key}`),
-  upsert: (data: any) => api.put<{ policy: any }>('/api/policies', data),
+const servicesApi = {
+  list: (params?: Record<string, unknown>) =>
+    request<void, { services: any[] }>(withQuery('/services', params)),
+  get: (id: string) => request<void, { service: any }>(`/services/${id}`),
+  create: (data: any) => request<any, { service: any }>('/services', 'POST', data),
+  update: (id: string, data: any) => request<any, { service: any }>(`/services/${id}`, 'PUT', data),
+  remove: (id: string) => request<void, { ok: boolean }>(`/services/${id}`, 'DELETE'),
 }
 
-// Knowledge
-export const knowledgeApi = {
-  status: () => api.get<{ status: Record<string, any> }>('/api/knowledge/status'),
-  reindex: (sections: string[]) => api.post<{ status: Record<string, any> }>('/api/knowledge/reindex', { sections }),
-  test: (question: string) => api.post<{ answer: string | null; sources: any[]; note?: string }>('/api/knowledge/test', { question }),
+const resourcesApi = {
+  list: () => request<void, { resources: any[] }>('/resources'),
+  get: (id: string) => request<void, { resource: any }>(`/resources/${id}`),
+  create: (data: any) => request<any, { resource: any }>('/resources', 'POST', data),
+  update: (id: string, data: any) => request<any, { resource: any }>(`/resources/${id}`, 'PUT', data),
+  remove: (id: string) => request<void, { ok: boolean }>(`/resources/${id}`, 'DELETE'),
+  getSchedule: (id: string) => request<void, { schedules: any[] }>(`/resources/${id}/schedule`),
+  updateSchedule: (id: string, blocks: any[]) =>
+    request<any, { schedules: any[] }>(`/resources/${id}/schedule`, 'PUT', { schedule: blocks }),
 }
 
-// Conversations
-export const conversationsApi = {
-  create: (data: { customer_phone: string; customer_name?: string; disclosure_text: string }) =>
-    api.post<{ conversation: any; ai_disclosure: any }>('/api/conversations', data),
-  list: (params?: { status?: string; customer_phone?: string }) => api.get<{ conversations: any[] }>('/api/conversations', { params }),
-  get: (id: string) => api.get<{ conversation: any }>(`/api/conversations/${id}`),
-  getMessages: (id: string) => api.get<{ messages: any[] }>(`/api/conversations/${id}/messages`),
+const exceptionsApi = {
+  list: () => request<void, { exceptions: any[] }>('/schedule-exceptions'),
+  create: (data: any) => request<any, { exception: any }>('/schedule-exceptions', 'POST', data),
+  update: (id: string, data: any) =>
+    request<any, { exception: any }>(`/schedule-exceptions/${id}`, 'PUT', data),
+  remove: (id: string) => request<void, { ok: boolean }>(`/schedule-exceptions/${id}`, 'DELETE'),
 }
 
-// Bookings
-export const bookingsApi = {
-  list: (params?: { status?: string; customer_phone?: string }) => api.get<{ bookings: any[] }>('/api/bookings', { params }),
-  get: (id: string) => api.get<{ booking: any }>(`/api/bookings/${id}`),
-  create: (data: any) => api.post<{ booking: any }>('/api/bookings', data),
-  cancel: (id: string, reason: string) => api.post<{ booking: any }>(`/api/bookings/${id}/cancel`, { reason }),
-  reschedule: (id: string, new_start_at: string) => api.post<{ booking: any }>(`/api/bookings/${id}/reschedule`, { new_start_at }),
+const faqsApi = {
+  list: () => request<void, { faqs: any[] }>('/faqs'),
+  get: (id: string) => request<void, { faq: any }>(`/faqs/${id}`),
+  create: (data: any) => request<any, { faq: any }>('/faqs', 'POST', data),
+  update: (id: string, data: any) => request<any, { faq: any }>(`/faqs/${id}`, 'PUT', data),
+  remove: (id: string) => request<void, { ok: boolean }>(`/faqs/${id}`, 'DELETE'),
 }
 
-// Handoff Alerts
-export const alertsApi = {
-  list: (params?: { status?: string }) => api.get<{ alerts: any[] }>('/api/alerts', { params }),
-  get: (id: string) => api.get<{ alert: any }>(`/api/alerts/${id}`),
-  take: (id: string, assigned_to: string) => api.post<{ alert: any }>(`/api/alerts/${id}/take`, { assigned_to }),
-  resolve: (id: string, resolution_note: string, resolved_by: string) => api.post<{ alert: any }>(`/api/alerts/${id}/resolve`, { resolution_note, resolved_by }),
+const policiesApi = {
+  list: () => request<void, { policies: any[] }>('/policies'),
+  upsert: (data: any) => request<any, { policy: any }>(`/policies/${data.key}`, 'PUT', data),
 }
 
-// Customers / Forget
-export const customersApi = {
-  forgetRequest: (id: string) => api.post<{ customer: any }>(`/api/customers/${id}/forget-request`),
-  forgetExecute: (id: string) => api.post<{ customer: any }>(`/api/customers/${id}/forget-execute`),
+const knowledgeApi = {
+  status: () => request<void, any>('/knowledge/status'),
+  reindex: () => request<void, any>('/knowledge/reindex', 'POST'),
+  test: (data: any) => request<any, any>('/knowledge/test', 'POST', data),
 }
 
-// Data Retention
-export const retentionApi = {
-  expired: () => api.get<{ expired_messages: any[]; expired_customers: any[] }>('/api/data-retention', { params: { expired: true } }),
-  purge: () => api.post<{ purged_at: string }>('/api/data-retention/purge'),
+const conversationsApi = {
+  create: (data: any) => request<any, { conversation: any }>('/conversations', 'POST', data),
+  list: (params?: Record<string, unknown>) =>
+    request<void, { conversations: any[] }>(withQuery('/conversations', params)),
+  get: (id: string) => request<void, { conversation: any }>(`/conversations/${id}`),
+  getMessages: (id: string) => request<void, { messages: any[] }>(`/conversations/${id}/messages`),
 }
 
-// Knowledge Test
-export const knowledgeTestApi = {
-  test: (question: string) => api.post<{ answer: string | null; sources: any[]; note?: string }>('/api/knowledge/test', { question }),
+const bookingsApi = {
+  list: (params?: Record<string, unknown>) =>
+    request<void, { bookings: any[] }>(withQuery('/bookings', params)),
 }
 
-// Knowledge Reindex
-export const knowledgeReindexApi = {
-  reindex: (sections: string[]) => api.post<{ status: Record<string, any> }>('/api/knowledge/reindex', { sections }),
-  status: () => api.get<{ status: Record<string, any> }>('/api/knowledge/status'),
+const alertsApi = {
+  list: (params?: Record<string, unknown>) =>
+    request<void, { alerts: any[] }>(withQuery('/alerts', params)),
+  take: (id: string) => request<void, { alert: any }>(`/handoff/${id}/take`, 'POST'),
+  resolve: (id: string, note: string) =>
+    request<{ note: string }, { alert: any }>(`/handoff/${id}/resolve`, 'POST', { note }),
+  close: (id: string) => request<void, { alert: any }>(`/handoff/${id}/close`, 'POST'),
 }
 
-// Audit Log
-export const auditApi = {
-  list: (params?: { action?: string; limit?: number; offset?: number }) => api.get<{ audit_log: any[] }>('/api/audit-log', { params }),
+const customersApi = {
+  list: (params?: Record<string, unknown>) =>
+    request<void, { customers: any[] }>(withQuery('/customers', params)),
+  forgetRequest: (id: string) => request<void, any>(`/customers/${id}/forget-request`, 'POST'),
+  forgetExecute: (id: string) => request<void, any>(`/customers/${id}/forget-execute`, 'POST'),
 }
 
-// Identity
-export const identityApi = {
-  get: () => api.get('/api/tenants/me/identity'),
-  update: (data: any) => api.put('/api/tenants/me/identity', data),
+const retentionApi = {
+  expired: () => request<void, { expired: any[] }>('/data-retention'),
+  purge: () => request<void, any>('/data-retention/purge', 'POST'),
 }
 
-// Services
-export const servicesApi = {
-  list: (params?: { active?: boolean }) => api.get('/api/services', { params }),
-  get: (id: string) => api.get(`/api/services/${id}`),
-  create: (data: any) => api.post('/api/services', data),
-  update: (id: string, data: any) => api.put(`/api/services/${id}`, data),
-  delete: (id: string) => api.delete(`/api/services/${id}`),
+const auditApi = {
+  list: () => request<void, { entries: any[] }>('/audit-log'),
 }
 
-// Resources
-export const resourcesApi = {
-  list: (params?: { active?: boolean }) => api.get('/api/resources', { params }),
-  get: (id: string) => api.get(`/api/resources/${id}`),
-  create: (data: any) => api.post('/api/resources', data),
-  update: (id: string, data: any) => api.put(`/api/resources/${id}`, data),
-  delete: (id: string) => api.delete(`/api/resources/${id}`),
-  getSchedule: (id: string) => api.get(`/api/resources/${id}/schedule`),
-  updateSchedule: (id: string, blocks: any[]) => api.put(`/api/resources/${id}/schedule`, { blocks }),
+const catalogApi = {
+  list: () => request<void, { items: any[] }>('/catalog'),
+  create: (data: any) => request<any, { item: any }>('/catalog', 'POST', data),
+  update: (id: string, data: any) => request<any, { item: any }>(`/catalog/${id}`, 'PUT', data),
 }
 
-// Schedule Exceptions
-export const exceptionsApi = {
-  list: (params?: { resource_id?: string }) => api.get('/api/schedule-exceptions', { params }),
-  create: (data: any) => api.post('/api/schedule-exceptions', data),
-  get: (id: string) => api.get(`/api/schedule-exceptions/${id}`),
-  update: (id: string, data: any) => api.put(`/api/schedule-exceptions/${id}`, data),
-  delete: (id: string) => api.delete(`/api/schedule-exceptions/${id}`),
+const templatesApi = {
+  list: () => request<void, { templates: any[] }>('/templates'),
+  create: (data: any) => request<any, { template: any }>('/templates', 'POST', data),
+  update: (id: string, data: any) => request<any, { template: any }>(`/templates/${id}`, 'PUT', data),
 }
 
-// FAQs
-export const faqsApi = {
-  list: (params?: { active?: boolean }) => api.get('/api/faqs', { params }),
-  create: (data: any) => api.post('/api/faqs', data),
-  get: (id: string) => api.get(`/api/faqs/${id}`),
-  update: (id: string, data: any) => api.put(`/api/faqs/${id}`, data),
-  delete: (id: string) => api.delete(`/api/faqs/${id}`),
+const remindersApi = {
+  dryRun: () => request<void, any>('/reminders/dry-run', 'POST'),
+  execute: () => request<void, any>('/reminders/execute', 'POST'),
+  attempts: () => request<void, { attempts: any[] }>('/reminders/attempts'),
 }
 
-// Policies
-export const policiesApi = {
-  list: (params?: { active?: boolean }) => api.get('/api/policies', { params }),
-  get: (key: string) => api.get(`/api/policies/${key}`),
-  upsert: (data: any) => api.put('/api/policies', data),
+const internalChatApi = {
+  ask: (question: string) => request<{ question: string }, any>('/internal-chat', 'POST', { question }),
 }
 
-// Knowledge
-export const knowledgeApi = {
-  status: () => api.get('/api/knowledge/status'),
-  reindex: (sections: string[]) => api.post('/api/knowledge/reindex', { sections }),
-  test: (question: string) => api.post('/api/knowledge/test', { question }),
+function withQuery(path: string, params?: Record<string, unknown>): string {
+  if (!params) return path
+  const qs = Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+    .join('&')
+  return qs ? `${path}?${qs}` : path
 }
 
-// Conversations
-export const conversationsApi = {
-  create: (data: { customer_phone: string; customer_name?: string; disclosure_text: string }) =>
-    api.post('/api/conversations', data),
-  list: (params?: { status?: string; customer_phone?: string }) => api.get('/api/conversations', { params }),
-  get: (id: string) => api.get(`/api/conversations/${id}`),
-  getMessages: (id: string) => api.get(`/api/conversations/${id}/messages`),
+async function request<TBody, TResp>(
+  path: string,
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET',
+  body?: TBody
+): Promise<TResp> {
+  const { apiFetch } = await import('@/lib/api')
+  return apiFetch<TResp>(path, method, body)
 }
 
-// Bookings
-export const bookingsApi = {
-  list: (params?: { status?: string; customer_phone?: string }) => api.get('/api/bookings', { params }),
-  get: (id: string) => api.get(`/api/bookings/${id}`),
-  create: (data: any) => api.post('/api/bookings', data),
-  cancel: (id: string, reason: string) => api.post(`/api/bookings/${id}/cancel`, { reason }),
-  reschedule: (id: string, new_start_at: string) => api.post(`/api/bookings/${id}/reschedule`, { new_start_at }),
-}
-
-// Handoff Alerts
-export const alertsApi = {
-  list: (params?: { status?: string }) => api.get('/api/alerts', { params }),
-  get: (id: string) => api.get(`/api/alerts/${id}`),
-  take: (id: string, assigned_to: string) => api.post(`/api/alerts/${id}/take`, { assigned_to }),
-  resolve: (id: string, resolution_note: string, resolved_by: string) => api.post(`/api/alerts/${id}/resolve`, { resolution_note, resolved_by }),
-}
-
-// Customers / Forget
-export const customersApi = {
-  forgetRequest: (id: string) => api.post(`/api/customers/${id}/forget-request`),
-  forgetExecute: (id: string) => api.post(`/api/customers/${id}/forget-execute`),
-}
-
-// Data Retention
-export const retentionApi = {
-  expired: () => api.get('/api/data-retention', { params: { expired: true } }),
-  purge: () => api.post('/api/data-retention/purge'),
-}
-
-// Knowledge Test
-export const knowledgeTestApi = {
-  test: (question: string) => api.post('/api/knowledge/test', { question }),
-}
-
-// Knowledge Reindex
-export const knowledgeReindexApi = {
-  reindex: (sections: string[]) => api.post('/api/knowledge/reindex', { sections }),
-  status: () => api.get('/api/knowledge/status'),
-}
-
-// Audit Log
-export const auditApi = {
-  list: (params?: { action?: string; limit?: number; offset?: number }) => api.get('/api/audit-log', { params }),
+export {
+  identityApi,
+  servicesApi,
+  resourcesApi,
+  exceptionsApi,
+  faqsApi,
+  policiesApi,
+  knowledgeApi,
+  conversationsApi,
+  bookingsApi,
+  alertsApi,
+  customersApi,
+  retentionApi,
+  auditApi,
+  catalogApi,
+  templatesApi,
+  remindersApi,
+  internalChatApi,
+  toMessage,
 }
