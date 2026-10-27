@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from hashlib import sha256
 import json
+import re
+import sqlite3
 from typing import Any
 
 
@@ -605,6 +607,279 @@ def update_template(conn, tenant_id: str, template_id: str, data: dict):
         conn.execute(
             "SELECT * FROM whatsapp_templates WHERE tenant_id = ? AND id = ?",
             (tenant_id, template_id),
+        ).fetchone()
+    )
+
+
+def get_due_reminders(conn, tenant_id: str, now_ts: str):
+    """Obtiene recordatorios pendientes cuya scheduled_for <= now_ts."""
+    rows = conn.execute(
+        """
+        SELECT rl.*, b.id as booking_id, b.tenant_id as booking_tenant_id
+        FROM reminder_log rl
+        LEFT JOIN bookings b ON rl.booking_id = b.id
+        WHERE rl.tenant_id = ? AND rl.status = 'pending'
+          AND rl.scheduled_for <= ?
+        ORDER BY rl.scheduled_for
+        """,
+        (tenant_id, now_ts),
+    ).fetchall()
+    return _rows(rows)
+
+
+def schedule_reminder(conn, tenant_id: str, booking_id: str, template_id: str,
+                      scheduled_for: str):
+    """Registra un recordatorio pendiente para una cita.
+
+    Idempotente: si ya existe una fila para (tenant, booking, template),
+    conserva la existente (no crea duplicado).
+    """
+    from saas.db import new_id
+
+    now = _now()
+    conn.execute(
+        """
+        INSERT INTO reminder_log
+          (id, tenant_id, booking_id, template_id, scheduled_for, sent_at, status)
+        VALUES (?, ?, ?, ?, ?, NULL, 'pending')
+        ON CONFLICT (tenant_id, booking_id, template_id) DO NOTHING
+        """,
+        (new_id(), tenant_id, booking_id, template_id, scheduled_for),
+    )
+
+
+def log_reminder_sent(conn, tenant_id: str, booking_id: str, template_id: str, status: str):
+    """Marca el recordatorio como enviado (pendiente -> otorgado).
+
+    Idempotente: actualiza la fila existente en lugar de insertar otra (la
+    clave UNIQUE (tenant, booking, template) no admite duplicados).
+    """
+    now = _now()
+    cur = conn.execute(
+        """
+        UPDATE reminder_log
+        SET status = ?, sent_at = ?
+        WHERE tenant_id = ? AND booking_id = ? AND template_id = ?
+          AND status = 'pending'
+        """,
+        (status, now, tenant_id, booking_id, template_id),
+    )
+    return cur.rowcount > 0
+
+
+def internal_chat_query(conn, tenant_id: str, question: str):
+    """Búsqueda RAG sobre FTS5 + herramientas SQL básicas.
+    
+    Devuelve {answer, sources, tool_used}.
+    """
+    q_lower = question.lower().strip()
+    tool_used = None
+
+    # --- Herramienta: citas_hoy ---
+    if any(kw in q_lower for kw in ("citas hoy", "citas de hoy", "turnos hoy")):
+        tool_used = "citas_hoy"
+        today = _now()[:10]  # YYYY-MM-DD
+        rows = conn.execute(
+            """
+            SELECT b.id, b.customer_phone, b.start_at, b.status,
+                   s.name AS service_name, r.name AS resource_name
+            FROM bookings b
+            LEFT JOIN services s ON s.tenant_id = b.tenant_id AND s.id = b.service_id
+            LEFT JOIN resources r ON r.tenant_id = b.tenant_id AND r.id = b.resource_id
+            WHERE b.tenant_id = ? AND date(b.start_at) = ?
+            ORDER BY b.start_at ASC LIMIT 20
+            """,
+            (tenant_id, today),
+        ).fetchall()
+        if rows:
+            lines = [
+                f"{r['start_at'][11:16]} - {r['customer_phone']} - {r['service_name'] or 'sin servicio'} ({r['status']})"
+                for r in rows
+            ]
+            answer = f"Citas hoy ({len(rows)}):\n" + "\n".join(lines)
+        else:
+            answer = "No hay citas programadas para hoy."
+        return {"answer": answer, "sources": [], "tool_used": tool_used}
+
+    # --- Herramienta: inventario_producto ---
+    if any(kw in q_lower for kw in ("inventario", "stock")):
+        tool_used = "inventario_producto"
+        # Extraer nombre del producto de la pregunta
+        words = q_lower.split()
+        producto = None
+        for i, w in enumerate(words):
+            if w in ("inventario", "stock") and i + 1 < len(words):
+                producto = words[i + 1]
+                break
+        if producto:
+            row = conn.execute(
+                """
+                SELECT name, inventory FROM catalog_items
+                WHERE tenant_id = ? AND LOWER(name) LIKE ?
+                LIMIT 1
+                """,
+                (tenant_id, f"%{producto}%"),
+            ).fetchone()
+            if row:
+                answer = f"Inventario de {row['name']}: {row['inventory']} unidades."
+            else:
+                answer = f"No se encontró producto '{producto}' en el inventario."
+        else:
+            answer = "Especifica el nombre del producto para consultar su inventario."
+        return {"answer": answer, "sources": [], "tool_used": tool_used}
+
+    # --- Herramienta: leads_recientes ---
+    if any(kw in q_lower for kw in ("leads", "prospectos", "nuevos clientes")):
+        tool_used = "leads_recientes"
+        rows = conn.execute(
+            """
+            SELECT id, customer_phone, customer_name, status, created_at
+            FROM conversations
+            WHERE tenant_id = ?
+            ORDER BY created_at DESC LIMIT 10
+            """,
+            (tenant_id,),
+        ).fetchall()
+        if rows:
+            lines = [f"{r['customer_name'] or r['customer_phone']} - {r['status']}" for r in rows]
+            answer = f"Leads recientes ({len(rows)}):\n" + "\n".join(lines)
+        else:
+            answer = "No hay leads registrados recientemente."
+        return {"answer": answer, "sources": [], "tool_used": tool_used}
+
+    # --- Búsqueda FTS5 en catálogo, FAQs y políticas ---
+    # Escapar la pregunta: FTS5 trata cualquier signo (?, ¡, ¿, -) como
+    # operador de su gramática y lanza "syntax error". Se buscan los tokens
+    # significativos (>= 4 letras, que descartan artículos y preposiciones)
+    # como frases exactas unidas con OR; el ranking bm25 ordena los mejores.
+    tokens = sorted({tok for tok in re.findall(r"\w+", question) if len(tok) >= 4})
+    fts_query = " OR ".join(f'"{tok}"' for tok in tokens)
+    if not fts_query:
+        return {"answer": "No se encontró información relevante en el conocimiento configurado.",
+                "sources": [], "tool_used": tool_used or "fts5_search"}
+    fts_rows = conn.execute(
+        """
+        SELECT content, source_type, source_id,
+               bm25(rag_search) as score
+        FROM rag_search
+        WHERE rag_search MATCH ? AND tenant_id = ?
+        ORDER BY score
+        LIMIT 5
+        """,
+        (fts_query, tenant_id),
+    ).fetchall()
+
+    sources = []
+    answer_parts = []
+    for row in fts_rows:
+        sources.append({"kind": row["source_type"], "id": row["source_id"], "content": row["content"][:200]})
+        answer_parts.append(row["content"][:200])
+
+    if answer_parts:
+        answer = "\n---\n".join(answer_parts)
+    else:
+        answer = "No se encontró información relevante en el conocimiento configurado."
+
+    return {"answer": answer, "sources": sources, "tool_used": tool_used or "fts5_search"}
+
+
+def handoff_take(conn, tenant_id: str, alert_id: str):
+    """Cambia estado de alerta de handoff a 'in_progress'.
+
+    Fija taken_at (exigido por CHECK status <> 'in_progress' OR taken_at IS
+    NOT NULL). Si la alerta no está pendiente o no pertenece al tenant,
+    devuelve None.
+    """
+    now = _now()
+    cur = conn.execute(
+        """
+        UPDATE handoff_alerts
+        SET status = 'in_progress', taken_at = COALESCE(taken_at, ?)
+        WHERE tenant_id = ? AND id = ? AND status = 'pending'
+        """,
+        (now, tenant_id, alert_id),
+    )
+    if cur.rowcount == 0:
+        return None
+    return _row(
+        conn.execute(
+            "SELECT * FROM handoff_alerts WHERE tenant_id = ? AND id = ?",
+            (tenant_id, alert_id),
+        ).fetchone()
+    )
+
+
+def handoff_resolve(conn, tenant_id: str, alert_id: str, note: str):
+    """Cambia estado a 'resolved'. La nota es obligatoria.
+
+    El esquema exige para 'resolved': taken_at, resolved_at y resolution_note
+    informados. Si la alerta sale directamente de 'pending', se fija taken_at
+    en el momento de resolver.
+    """
+    if not note or not note.strip():
+        raise ValueError("La nota es obligatoria para resolver un handoff.")
+    now = _now()
+    cur = conn.execute(
+        """
+        UPDATE handoff_alerts
+        SET status = 'resolved',
+            resolution_note = ?,
+            taken_at = COALESCE(taken_at, ?),
+            resolved_at = ?
+        WHERE tenant_id = ? AND id = ? AND status IN ('pending', 'in_progress')
+        """,
+        (note.strip(), now, now, tenant_id, alert_id),
+    )
+    if cur.rowcount == 0:
+        return None
+    return _row(
+        conn.execute(
+            "SELECT * FROM handoff_alerts WHERE tenant_id = ? AND id = ?",
+            (tenant_id, alert_id),
+        ).fetchone()
+    )
+
+
+def handoff_close(conn, tenant_id: str, alert_id: str):
+    """Cierra la alerta: 'resolved' con nota de cierre, y la conversación
+    asociada vuelve a 'idle'.
+
+    El esquema no define un estado 'closed'; para no violar CHECK se usa
+    'resolved' con resolución del tipo "cerrada manualmente". La conversación
+    vuelve a 'idle' para que el asistente siga atendiendo.
+    """
+    alert = _row(
+        conn.execute(
+            "SELECT conversation_id FROM handoff_alerts WHERE tenant_id = ? AND id = ?",
+            (tenant_id, alert_id),
+        ).fetchone()
+    )
+    if alert is None:
+        return None
+    now = _now()
+    conn.execute(
+        """
+        UPDATE handoff_alerts
+        SET status = 'resolved',
+            resolution_note = 'Cerrada manualmente sin resolución registrada.',
+            taken_at = COALESCE(taken_at, ?),
+            resolved_at = ?
+        WHERE tenant_id = ? AND id = ? AND status IN ('pending', 'in_progress')
+        """,
+        (now, now, tenant_id, alert_id),
+    )
+    conn.execute(
+        """
+        UPDATE conversations
+        SET state = 'idle'
+        WHERE tenant_id = ? AND id = ?
+        """,
+        (tenant_id, alert["conversation_id"]),
+    )
+    return _row(
+        conn.execute(
+            "SELECT * FROM handoff_alerts WHERE tenant_id = ? AND id = ?",
+            (tenant_id, alert_id),
         ).fetchone()
     )
 
