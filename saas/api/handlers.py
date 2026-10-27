@@ -686,27 +686,41 @@ def template_update(conn, tenant_id, path_params, query, body):
 # ---------------------------------------------------------------------------
 
 def reminders_dry_run(conn, tenant_id, path_params, query, body):
-    """Devuelve cuántos recordatorios se enviarían sin ejecutar."""
+    """Devuelve cuántos recordatorios vencerían. NO escribe nada."""
     now = _now_ts()
     due = repo.get_due_reminders(conn, tenant_id, now)
-    return 200, {"due_count": len(due), "dry_run": True}
+    return 200, {"due_count": len(due), "dry_run": True, "simulated": False}
 
 
 def reminders_execute(conn, tenant_id, path_params, query, body):
-    """Ejecuta envío de recordatorios pendientes (simulado)."""
+    """Ejecuta envío SIMULADO de recordatorios pendientes.
+
+    REGLA DE HONESTIDAD: sin transporte real conectado, esta tarea registra
+    cada intento como 'simulada' y NO marca reminder_log como 'sent'. Un
+    recordatorio solo pasa a 'sent' cuando un transporte real confirma la
+    entrega (mark_reminder_delivered).
+    """
     now = _now_ts()
     due = repo.get_due_reminders(conn, tenant_id, now)
-    sent = 0
-    skipped = 0
+    simulated = 0
     for r in due:
-        ok = repo.log_reminder_sent(
-            conn, tenant_id, r["booking_id"], r["template_id"], "sent"
-        )
-        if ok:
-            sent += 1
-        else:
-            skipped += 1
-    return 200, {"sent": sent, "skipped_duplicates": skipped, "total": len(due)}
+        if repo.simulate_reminder_send(
+            conn, tenant_id, r["booking_id"], r["template_id"],
+            "Envío simulado (sin transporte real conectado)",
+        ):
+            simulated += 1
+    return 200, {
+        "simulated": simulated,
+        "delivered": 0,
+        "total": len(due),
+        "transport": "simulated",
+        "note": "Simulación registrada: ningún recordatorio fue marcado como entregado.",
+    }
+
+
+def reminders_attempts(conn, tenant_id, path_params, query, body):
+    rows = repo.list_reminder_attempts(conn, tenant_id)
+    return 200, {"attempts": rows}
 
 
 # ---------------------------------------------------------------------------
@@ -904,6 +918,51 @@ def conversation_create(conn, tenant_id, path_params, query, body):
         payload={"disclosure": True},
     )
     return 201, {"conversation": conv, "ai_disclosure": disclosure}
+
+
+def conversations_list(conn, tenant_id, path_params, query, body):
+    status = query.get("status") or None
+    rows = repo.list_conversations(conn, tenant_id, status=status)
+    return 200, {"conversations": rows}
+
+
+def conversation_get(conn, tenant_id, path_params, query, body):
+    conv = repo.get_conversation(conn, tenant_id, path_params["id"])
+    if conv is None:
+        raise not_found("Conversación no encontrada", tenant_id)
+    return 200, {"conversation": conv}
+
+
+def conversation_messages(conn, tenant_id, path_params, query, body):
+    conv = repo.get_conversation(conn, tenant_id, path_params["id"])
+    if conv is None:
+        raise not_found("Conversación no encontrada", tenant_id)
+    rows = repo.list_conversation_messages(conn, tenant_id, path_params["id"])
+    return 200, {"messages": rows}
+
+
+def customers_list(conn, tenant_id, path_params, query, body):
+    search = query.get("search") or ""
+    sql = "SELECT * FROM customers WHERE tenant_id = ?"
+    params: list[Any] = [tenant_id]
+    if search:
+        sql += " AND (name LIKE ? OR phone LIKE ?)"
+        params += [f"%{search}%", f"%{search}%"]
+    sql += " ORDER BY created_at DESC LIMIT 100"
+    rows = conn.execute(sql, params).fetchall()
+    return 200, {"customers": [_dict(r) for r in rows]}
+
+
+def bookings_list(conn, tenant_id, path_params, query, body):
+    status = query.get("status") or None
+    rows = repo.list_bookings(conn, tenant_id, status=status)
+    return 200, {"bookings": rows}
+
+
+def handoff_alerts_list(conn, tenant_id, path_params, query, body):
+    status = query.get("status") or None
+    rows = repo.list_handoff_alerts(conn, tenant_id, status=status)
+    return 200, {"alerts": rows}
 
 
 # ---------------------------------------------------------------------------
