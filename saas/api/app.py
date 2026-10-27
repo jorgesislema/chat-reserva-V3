@@ -61,7 +61,7 @@ _ROUTES = [
     ("GET", "/api/data-retention", handlers.data_retention_expired, False),
     ("POST", "/api/data-retention/purge", handlers.data_retention_purge, False),
     ("GET", "/api/audit-log", handlers.audit_log_list, False),
-    # Phase 4, Bloque 1: Cat�logo RAG y Plantillas WhatsApp
+    # Phase 4, Bloque 1: Catalogo RAG y Plantillas WhatsApp
     ("GET", "/api/catalog", handlers.catalog_list, False),
     ("POST", "/api/catalog", handlers.catalog_create, False),
     ("PUT", "/api/catalog/{id}", handlers.catalog_update, False),
@@ -71,10 +71,18 @@ _ROUTES = [
     # Phase 4, Bloque 2: Recordatorios, Chat Interno y Handoff
     ("POST", "/api/reminders/dry-run", handlers.reminders_dry_run, False),
     ("POST", "/api/reminders/execute", handlers.reminders_execute, False),
+    ("GET", "/api/reminders/attempts", handlers.reminders_attempts, False),
     ("POST", "/api/internal-chat", handlers.internal_chat_handler, False),
     ("POST", "/api/handoff/{id}/take", handlers.handoff_take_handler, False),
     ("POST", "/api/handoff/{id}/resolve", handlers.handoff_resolve_handler, False),
     ("POST", "/api/handoff/{id}/close", handlers.handoff_close_handler, False),
+    # Phase 4, Bloque 3: Lecturas para la UI (listados)
+    ("GET", "/api/conversations", handlers.conversations_list, False),
+    ("GET", "/api/conversations/{id}", handlers.conversation_get, False),
+    ("GET", "/api/conversations/{id}/messages", handlers.conversation_messages, False),
+    ("GET", "/api/customers", handlers.customers_list, False),
+    ("GET", "/api/bookings", handlers.bookings_list, False),
+    ("GET", "/api/alerts", handlers.handoff_alerts_list, False),
     ("GET", "/openapi.json", None, False),
 ]
 
