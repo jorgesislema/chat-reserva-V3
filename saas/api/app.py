@@ -15,7 +15,7 @@ import time
 import uuid
 
 from . import auth, handlers, repo
-from .errors import APIError, ERROR_INTERNAL, error_response, not_found, unauthorized, validation_error
+from .errors import APIError, ERROR_INTERNAL, error_response, not_found, rate_limited, unauthorized, validation_error
 from .validate import ValidationError
 
 RATE_LIMIT = 60  # peticiones por minuto por tenant (DEC-007, documentado)
@@ -61,13 +61,20 @@ _ROUTES = [
     ("GET", "/api/data-retention", handlers.data_retention_expired, False),
     ("POST", "/api/data-retention/purge", handlers.data_retention_purge, False),
     ("GET", "/api/audit-log", handlers.audit_log_list, False),
-    # Phase 4, Bloque 1: Catálogo RAG y Plantillas WhatsApp
+    # Phase 4, Bloque 1: Catï¿½logo RAG y Plantillas WhatsApp
     ("GET", "/api/catalog", handlers.catalog_list, False),
     ("POST", "/api/catalog", handlers.catalog_create, False),
     ("PUT", "/api/catalog/{id}", handlers.catalog_update, False),
     ("GET", "/api/templates", handlers.templates_list, False),
     ("POST", "/api/templates", handlers.template_create, False),
     ("PUT", "/api/templates/{id}", handlers.template_update, False),
+    # Phase 4, Bloque 2: Recordatorios, Chat Interno y Handoff
+    ("POST", "/api/reminders/dry-run", handlers.reminders_dry_run, False),
+    ("POST", "/api/reminders/execute", handlers.reminders_execute, False),
+    ("POST", "/api/internal-chat", handlers.internal_chat_handler, False),
+    ("POST", "/api/handoff/{id}/take", handlers.handoff_take_handler, False),
+    ("POST", "/api/handoff/{id}/resolve", handlers.handoff_resolve_handler, False),
+    ("POST", "/api/handoff/{id}/close", handlers.handoff_close_handler, False),
     ("GET", "/openapi.json", None, False),
 ]
 
@@ -183,10 +190,7 @@ class App:
                 message="; ".join(e["message"] for e in exc.errors),
                 request_id=request_id, tenant_id=tenant_id,
             )
-        except Exception as exc:  # DEBUG TEMPORAL
-            import traceback
-            traceback.print_exc()
-            raise
+        except Exception:
             try:
                 conn.rollback()
             except Exception:
