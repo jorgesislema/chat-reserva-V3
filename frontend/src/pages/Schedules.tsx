@@ -3,12 +3,14 @@
 import { useState, useEffect } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Calendar, Plus, Clock, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Calendar, Plus, Clock, Trash2, Edit } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { schedulesApi, resourcesApi } from '@/services/api'
-import { cn } from '@/utils'
+import { resourcesApi } from '@/services/api'
+import { extractError } from '@/lib/api'
 
 interface ScheduleBlock {
   weekday: number
@@ -23,21 +25,20 @@ interface Resource {
 
 export function Schedules() {
   const { toast } = useToast()
-  const [resources, setResources] = useState<any[]>([])
+  const [resources, setResources] = useState<Resource[]>([])
   const [selectedResource, setSelectedResource] = useState<string>('')
-  const [schedules, setSchedules] = useState<any[]>([])
+  const [schedules, setSchedules] = useState<ScheduleBlock[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingBlock, setEditingBlock] = useState<{ weekday: number; start_time: string; end_time: string } | null>(null)
+  const [editingBlock, setEditingBlock] = useState<ScheduleBlock | null>(null)
   const [formData, setFormData] = useState({ weekday: 0, start_time: '09:00', end_time: '10:00' })
-  const { toast } = useToast()
 
   const fetchResources = async () => {
     try {
       const response = await resourcesApi.list()
       setResources(response.resources || [])
-    } catch (error: any) {
-      console.error(error)
+    } catch (error) {
+      toast({ title: 'Error', description: extractError(error), variant: 'error' })
     }
   }
 
@@ -45,10 +46,10 @@ export function Schedules() {
     if (!selectedResource) return
     setIsLoading(true)
     try {
-      const response = await schedulesApi.get(selectedResource)
+      const response = await resourcesApi.getSchedule(selectedResource)
       setSchedules(response.schedules || [])
-    } catch (error: any) {
-      console.error(error)
+    } catch (error) {
+      toast({ title: 'Error', description: extractError(error), variant: 'error' })
     } finally {
       setIsLoading(false)
     }
@@ -76,35 +77,38 @@ export function Schedules() {
     if (!selectedResource) return
     try {
       const blocks = editingBlock
-        ? schedules.map(b => b.weekday === editingBlock.weekday && b.start_time === editingBlock.start_time
-          ? { ...formData }
-          : b)
+        ? schedules.map(b =>
+            b.weekday === editingBlock.weekday && b.start_time === editingBlock.start_time
+              ? { ...formData }
+              : b
+          )
         : [...schedules, formData]
 
-      await schedulesApi.upsert(selectedResource, blocks)
+      await resourcesApi.updateSchedule(selectedResource, blocks)
       toast({ title: editingBlock ? 'Franja actualizada' : 'Franja agregada', variant: 'success' })
       setDialogOpen(false)
       setEditingBlock(null)
       setFormData({ weekday: 0, start_time: '09:00', end_time: '10:00' })
       fetchSchedules()
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'error' })
+    } catch (error) {
+      toast({ title: 'Error', description: extractError(error), variant: 'error' })
     }
   }
 
   const handleDelete = async (weekday: number, start_time: string) => {
     if (!confirm('¿Eliminar esta franja?')) return
+    if (!selectedResource) return
     try {
       const blocks = schedules.filter(b => !(b.weekday === weekday && b.start_time === start_time))
-      await schedulesApi.upsert(selectedResource!, blocks)
+      await resourcesApi.updateSchedule(selectedResource, blocks)
       toast({ title: 'Franja eliminada', variant: 'success' })
       fetchSchedules()
-    } catch (error: any) {
-      toast({ title: 'Error', description: error.message, variant: 'error' })
+    } catch (error) {
+      toast({ title: 'Error', description: extractError(error), variant: 'error' })
     }
   }
 
-  const openEdit = (block: { weekday: number; start_time: string; end_time: string }) => {
+  const openEdit = (block: ScheduleBlock) => {
     setEditingBlock(block)
     setFormData({ weekday: block.weekday, start_time: block.start_time, end_time: block.end_time })
     setDialogOpen(true)
@@ -131,7 +135,6 @@ export function Schedules() {
             <Calendar className="h-5 w-5" />
             Configuración de horarios
           </CardTitle>
-          <CardDescription>Selecciona un recurso para gestionar sus horarios</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -190,7 +193,7 @@ export function Schedules() {
                               <Button variant="ghost" size="sm" onClick={() => openEdit(schedule)}>
                                 <Edit className="h-4 w-4" />
                               </Button>
-                              <Button variant="ghost" size="sm" variant="destructive" onClick={() => handleDelete(schedule.weekday, schedule.start_time)}>
+                              <Button variant="ghost" size="sm" className="text-red-600" onClick={() => handleDelete(schedule.weekday, schedule.start_time)}>
                                 <Trash2 className="h-4 w-4" />
                               </Button>
                             </div>
@@ -198,10 +201,10 @@ export function Schedules() {
                         ))}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
-            ) : null}
+            )}
           </CardContent>
         </Card>
       )}
@@ -214,7 +217,10 @@ export function Schedules() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <Label htmlFor="weekday">Día de la semana</Label>
-              <Select value={formData.weekday.toString()} onValueChange={v => setFormData({ ...formData, weekday: parseInt(v) })}>
+              <Select
+                value={formData.weekday.toString()}
+                onValueChange={v => setFormData({ ...formData, weekday: parseInt(v, 10) })}
+              >
                 <SelectTrigger><SelectValue placeholder="Selecciona día" /></SelectTrigger>
                 <SelectContent>
                   {weekdays.map((day, i) => (
@@ -238,12 +244,12 @@ export function Schedules() {
             <Button variant="outline" onClick={() => { setDialogOpen(false); setEditingBlock(null); setFormData({ weekday: 0, start_time: '09:00', end_time: '10:00' }); }}>
               Cancelar
             </Button>
-            <Button onClick={handleSubmit} disabled={isLoading} loading={isLoading}>
+            <Button onClick={handleSubmit} disabled={isLoading}>
               {editingBlock ? 'Actualizar' : 'Agregar'}
             </Button>
           </DialogFooter>
-        </Dialog>
-      </Card>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
