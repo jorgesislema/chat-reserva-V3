@@ -237,6 +237,30 @@ TEMPLATE_UPDATE = {
     },
     "additionalProperties": False,
 }
+
+REMINDER_EXECUTE = {
+    "type": "object",
+    "required": [],
+    "additionalProperties": False,
+}
+
+INTERNAL_CHAT = {
+    "type": "object",
+    "required": ["question"],
+    "properties": {
+        "question": {"type": "string", "min_length": 1, "max_length": 2000},
+    },
+    "additionalProperties": False,
+}
+
+HANDOFF_RESOLVE = {
+    "type": "object",
+    "required": ["note"],
+    "properties": {
+        "note": {"type": "string", "min_length": 1, "max_length": 2000},
+    },
+    "additionalProperties": False,
+}
 CONSENT_CREATE = {
     "type": "object",
     "required": ["customer_id", "purpose", "consent_text_shown", "accepted"],
@@ -658,8 +682,96 @@ def template_update(conn, tenant_id, path_params, query, body):
 
 
 # ---------------------------------------------------------------------------
-# Consentimiento
+# Recordatorios (scheduler)
 # ---------------------------------------------------------------------------
+
+def reminders_dry_run(conn, tenant_id, path_params, query, body):
+    """Devuelve cuántos recordatorios se enviarían sin ejecutar."""
+    now = _now_ts()
+    due = repo.get_due_reminders(conn, tenant_id, now)
+    return 200, {"due_count": len(due), "dry_run": True}
+
+
+def reminders_execute(conn, tenant_id, path_params, query, body):
+    """Ejecuta envío de recordatorios pendientes (simulado)."""
+    now = _now_ts()
+    due = repo.get_due_reminders(conn, tenant_id, now)
+    sent = 0
+    skipped = 0
+    for r in due:
+        ok = repo.log_reminder_sent(
+            conn, tenant_id, r["booking_id"], r["template_id"], "sent"
+        )
+        if ok:
+            sent += 1
+        else:
+            skipped += 1
+    return 200, {"sent": sent, "skipped_duplicates": skipped, "total": len(due)}
+
+
+# ---------------------------------------------------------------------------
+# Chat interno de empresa (RAG + herramientas SQL)
+# ---------------------------------------------------------------------------
+
+def internal_chat_handler(conn, tenant_id, path_params, query, body):
+    data = _validated(INTERNAL_CHAT, body)
+    question = data["question"]
+    result = repo.internal_chat_query(conn, tenant_id, question)
+    repo.write_audit(
+        conn, tenant_id=tenant_id, actor_type="human", actor_id=None,
+        action="internal_chat", entity_type="chat", entity_id=None,
+        payload={"question": question, "tool_used": result.get("tool_used")},
+    )
+    return 200, {
+        "answer": result["answer"],
+        "sources": result["sources"],
+        "tool_used": result["tool_used"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Handoff a humanos
+# ---------------------------------------------------------------------------
+
+def handoff_take_handler(conn, tenant_id, path_params, query, body):
+    alert_id = path_params["id"]
+    alert = repo.handoff_take(conn, tenant_id, alert_id)
+    if alert is None:
+        raise not_found("Alerta de handoff no encontrada o ya tomada", tenant_id)
+    repo.write_audit(
+        conn, tenant_id=tenant_id, actor_type="human", actor_id=None,
+        action="handoff.take", entity_type="handoff_alert", entity_id=alert_id,
+        payload=None,
+    )
+    return 200, {"alert": alert}
+
+
+def handoff_resolve_handler(conn, tenant_id, path_params, query, body):
+    alert_id = path_params["id"]
+    data = _validated(HANDOFF_RESOLVE, body)
+    try:
+        alert = repo.handoff_resolve(conn, tenant_id, alert_id, data["note"])
+    except ValueError as exc:
+        raise validation_error(str(exc))
+    repo.write_audit(
+        conn, tenant_id=tenant_id, actor_type="human", actor_id=None,
+        action="handoff.resolve", entity_type="handoff_alert", entity_id=alert_id,
+        payload={"note": data["note"]},
+    )
+    return 200, {"alert": alert}
+
+
+def handoff_close_handler(conn, tenant_id, path_params, query, body):
+    alert_id = path_params["id"]
+    alert = repo.handoff_close(conn, tenant_id, alert_id)
+    if alert is None:
+        raise not_found("Alerta de handoff no encontrada", tenant_id)
+    repo.write_audit(
+        conn, tenant_id=tenant_id, actor_type="human", actor_id=None,
+        action="handoff.close", entity_type="handoff_alert", entity_id=alert_id,
+        payload=None,
+    )
+    return 200, {"alert": alert}
 
 def consent_create(conn, tenant_id, path_params, query, body):
     data = _validated(CONSENT_CREATE, body)
