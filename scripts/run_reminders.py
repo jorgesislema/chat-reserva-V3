@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Scheduler de recordatorios para WhatsApp (Fase 4, Bloque 2).
+"""Scheduler de recordatorios para WhatsApp (Fase 4, Bloque 3).
 
-CLI que acepta --dry-run o --execute. Itera sobre todos los tenants,
-llama a get_due_reminders y log_reminder_sent.
+CLI honesta: --dry-run NO escribe nada; --execute registra intentos
+SIMULADOS (transport='simulated') sin marcar recordatorios como enviados.
+La entrega real ('whatsapp') solo puede confirmarla un transporte conectado,
+que este encargo NO implementa: si se pide --transport whatsapp se aborta
+con un error claro en vez de fingir una entrega.
 """
 
 from __future__ import annotations
@@ -28,12 +31,18 @@ def main():
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Solo mostrar cuántos se enviarían, sin ejecutar",
+        help="Solo mostrar cuántos se enviarían, sin escribir nada",
     )
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="Ejecutar envío de recordatorios pendientes",
+        help="Ejecutar envío SIMULADO de recordatorios pendientes",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["simulated", "whatsapp"],
+        default="simulated",
+        help="Transporte de envío (por defecto simulated; whatsapp no está conectado)",
     )
     parser.add_argument(
         "--db",
@@ -42,14 +51,23 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.dry_run and args.execute:
+        print("Error: --dry-run y --execute son mutuamente excluyentes")
+        sys.exit(1)
     if not args.dry_run and not args.execute:
         print("Error: debe especificar --dry-run o --execute")
         sys.exit(1)
+    if args.transport == "whatsapp":
+        print(
+            "Error: --transport whatsapp solicitado pero no hay transporte real "
+            "conectado en este encargo. No se puede confirmar ninguna entrega "
+            "de WhatsApp. Use --transport simulated (por defecto)."
+        )
+        sys.exit(1)
 
     now = _now_ts()
-    total_sent = 0
-    total_skipped = 0
     total_due = 0
+    total_simulated = 0
 
     tenants = db.list_tenants(args.db)
     if not tenants:
@@ -65,18 +83,19 @@ def main():
                 if args.dry_run:
                     print(f"  [dry-run] tenant={tenant_id} booking={r['booking_id']} template={r['template_id']}")
                 else:
-                    ok = repo.log_reminder_sent(
-                        conn, tenant_id, r["booking_id"], r["template_id"], "sent"
-                    )
-                    if ok:
-                        total_sent += 1
-                    else:
-                        total_skipped += 1
+                    if repo.simulate_reminder_send(
+                        conn, tenant_id, r["booking_id"], r["template_id"],
+                        "Envío simulado (sin transporte real conectado)",
+                    ):
+                        total_simulated += 1
 
     if args.dry_run:
-        print(f"\nTotal pendientes (dry-run): {total_due}")
+        print(f"\nTotal pendientes (dry-run, sin escrituras): {total_due}")
     else:
-        print(f"\nEnviados: {total_sent}, Duplicados omitidos: {total_skipped}, Total evaluados: {total_due}")
+        print(
+            f"\nIntentos simulados: {total_simulated}, Total evaluados: {total_due}. "
+            "Ningún recordatorio fue marcado como entregado (transporte real no conectado)."
+        )
     return 0
 
 
