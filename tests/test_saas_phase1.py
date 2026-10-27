@@ -52,9 +52,10 @@ def _tenant_pair(path):
 
 
 def test_migrations_are_versioned_and_idempotent(db_path):
-    assert db.schema_versions(db_path) == ["0001", "0002", "0003", "0004"]
+    expected = ["0001", "0002", "0003", "0004", "0005", "0006"]
+    assert db.schema_versions(db_path) == expected
     assert db.migrate(db_path) == []
-    assert db.schema_versions(db_path) == ["0001", "0002", "0003", "0004"]
+    assert db.schema_versions(db_path) == expected
 
 
 def test_migration_checksum_detects_tampering(tmp_path):
