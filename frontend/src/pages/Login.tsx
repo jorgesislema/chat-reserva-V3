@@ -8,26 +8,29 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
-import { cn } from '@/utils'
 import { AlertCircle, Loader2, LayoutDashboard } from 'lucide-react'
 
 export function Login() {
-  const { setApiKey, setTenant, setLoading } = useAuth()
+  const { setApiKey } = useAuth()
   const { toast } = useToast()
   const navigate = useNavigate()
   const [apiKey, setApiKeyState] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setError('')
+    if (!apiKey.trim()) {
+      setError('Ingresa tu API key')
+      return
+    }
     setIsLoading(true)
 
     try {
       const res = await fetch('/api/tenants/me/identity', {
         headers: {
-          'X-API-Key': apiKey,
+          'X-API-Key': apiKey.trim(),
           'Content-Type': 'application/json',
         },
       })
@@ -36,24 +39,26 @@ export function Login() {
         if (res.status === 401) {
           throw new Error('API key inválida o expirada')
         }
+        if (res.status === 429) {
+          throw new Error('Demasiadas peticiones. Espera unos segundos.')
+        }
         throw new Error('Error al validar la API key')
       }
 
       const data = await res.json()
-      
-      // Store in localStorage via auth store
-      localStorage.setItem('saas_api_key', apiKey)
-      
-      // We need to trigger a re-render of the auth context
-      // This would typically be handled by the AuthProvider
-      window.location.href = '/dashboard'
+
+      // Guarda la key y el tenant en el store persistido; el AuthProvider
+      // verificará la identidad al montar. Navegación programática (no reload).
+      setApiKey(apiKey.trim())
+      if (data.tenant) {
+        const { setTenant } = await import('@/lib/auth')
+        setTenant(data.tenant)
+      }
+      navigate('/dashboard')
     } catch (err: any) {
-      setError(err.message || 'Error al iniciar sesión')
-      toast({
-        title: 'Error de autenticación',
-        description: err.message,
-        variant: 'error',
-      })
+      const msg = err?.message || 'Error al iniciar sesión'
+      setError(msg)
+      toast({ title: 'Error de autenticación', description: msg, variant: 'error' })
     } finally {
       setIsLoading(false)
     }
@@ -85,20 +90,17 @@ export function Login() {
                 <Label htmlFor="apiKey" className="text-sm font-medium text-text-secondary">
                   API Key
                 </Label>
-                <div className="relative">
-                  <Input
-                    id="apiKey"
-                    name="apiKey"
-                    type="password"
-                    placeholder="sk_live_..."
-                    value={apiKey}
-                    onChange={(e) => setApiKeyState(e.target.value)}
-                    placeholder="sk_live_..."
-                    disabled={isLoading}
-                    autoComplete="off"
-                    autoFocus
-                  />
-                </div>
+                <Input
+                  id="apiKey"
+                  name="apiKey"
+                  type="password"
+                  placeholder="sk_live_..."
+                  value={apiKey}
+                  onChange={(e) => setApiKeyState(e.target.value)}
+                  disabled={isLoading}
+                  autoComplete="off"
+                  autoFocus
+                />
               </div>
 
               {error && (
@@ -107,19 +109,23 @@ export function Login() {
                   <span>{error}</span>
                 </div>
               )}
+
+              <Button type="submit" className="w-full" disabled={isLoading} loading={isLoading}>
+                <Loader2 className="h-4 w-4 mr-2" />
+                {isLoading ? 'Validando...' : 'Acceder'}
+              </Button>
             </form>
           </CardContent>
-          <CardFooter className="flex flex-col gap-3">
-            <Button type="submit" className="w-full" disabled={isLoading} loading={isLoading}>
-              <Loader2 className="h-4 w-4 mr-2" />
-              {isLoading ? 'Validando...' : 'Acceder'}
-            </Button>
+          <CardFooter className="flex flex-col gap-3 border-t pt-0">
             <p className="text-center text-sm text-text-muted">
-              ¿No tienes API key? <Link to="/register" className="text-primary-600 hover:underline">Solicitar acceso</Link>
+              ¿No tienes API key?{' '}
+              <Link to="/register" className="text-primary-600 hover:underline">
+                Solicitar acceso
+              </Link>
             </p>
           </CardFooter>
         </Card>
-        
+
         <div className="mt-6 text-center text-sm text-text-muted">
           <p>Panel de administración SaaS • Multi-tenant nativo</p>
         </div>
