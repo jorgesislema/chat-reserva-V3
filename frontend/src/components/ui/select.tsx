@@ -8,6 +8,7 @@ import { cn } from '@/utils'
 const Select = SelectPrimitive.Root
 const SelectGroup = SelectPrimitive.Group
 const SelectValue = SelectPrimitive.Value
+const SelectLabel = SelectPrimitive.Label
 
 const SelectTrigger = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Trigger>,
@@ -17,7 +18,7 @@ const SelectTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       'input w-full',
-      props.error && 'border-red-500 focus:border-red-500 focus:ring-red-500/20',
+      error && 'border-red-500 focus:border-red-500 focus:ring-red-500/20',
       'flex h-10 items-center justify-between',
       '[&>span]:line-clamp-1'
     )}
@@ -28,7 +29,7 @@ const SelectTrigger = React.forwardRef<
       <ChevronDown className="h-4 w-4 text-text-muted transition-transform duration-200" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
-)
+))
 SelectTrigger.displayName = SelectPrimitive.Trigger.displayName
 
 const SelectScrollUpButton = React.forwardRef<
@@ -42,11 +43,10 @@ const SelectScrollUpButton = React.forwardRef<
       'focus-visible:ring-2 focus-visible:ring-ring'
     )}
     {...props}
-    ref={ref}
   >
     <ChevronUp className="h-4 w-4" />
   </SelectPrimitive.ScrollUpButton>
-)
+))
 SelectScrollUpButton.displayName = SelectPrimitive.ScrollUpButton.displayName
 
 const SelectScrollDownButton = React.forwardRef<
@@ -60,17 +60,16 @@ const SelectScrollDownButton = React.forwardRef<
       'focus-visible:ring-2 focus-visible:ring-ring'
     )}
     {...props}
-    ref={ref}
   >
     <ChevronDown className="h-4 w-4" />
   </SelectPrimitive.ScrollDownButton>
-)
+))
 SelectScrollDownButton.displayName = SelectPrimitive.ScrollDownButton.displayName
 
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = 'popper', sideOffset = 4, ...props }, ref) => (
+>(({ className, children, position = 'popper', ...props }, ref) => (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
@@ -79,19 +78,14 @@ const SelectContent = React.forwardRef<
         'data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2'
       )}
       position={position}
-      sideOffset={4}
       {...props}
-      ref={ref}
     >
-      <SelectPrimitive.Viewport className={cn('p-1', props.position === 'popper' && 'w-full min-w-[8rem]')}>
-        {children}
-      </SelectPrimitive.Viewport>
-      <SelectPrimitive.Viewport className={cn('p-1', props.position === 'popper' && 'w-full min-w-[8rem]')}>
+      <SelectPrimitive.Viewport className={cn('p-1', position === 'popper' && 'w-full min-w-[8rem]')}>
         {children}
       </SelectPrimitive.Viewport>
     </SelectPrimitive.Content>
   </SelectPrimitive.Portal>
-)
+))
 SelectContent.displayName = SelectPrimitive.Content.displayName
 
 const SelectItem = React.forwardRef<
@@ -106,7 +100,6 @@ const SelectItem = React.forwardRef<
       'data-[disabled]:pointer-events-none data-[disabled]:opacity-50'
     )}
     {...props}
-    ref={ref}
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
@@ -115,7 +108,7 @@ const SelectItem = React.forwardRef<
     </span>
     <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
   </SelectPrimitive.Item>
-)
+))
 SelectItem.displayName = SelectPrimitive.Item.displayName
 
 const SelectSeparator = React.forwardRef<
@@ -126,9 +119,8 @@ const SelectSeparator = React.forwardRef<
     ref={ref}
     className={cn(' -mx-1 my-1 h-px bg-border', className)}
     {...props}
-    ref={ref}
   />
-)
+))
 SelectSeparator.displayName = SelectPrimitive.Separator.displayName
 
 export {
@@ -137,7 +129,7 @@ export {
   SelectValue,
   SelectTrigger,
   SelectContent,
-  SelectLabel: SelectPrimitive.Label,
+  SelectLabel,
   SelectItem,
   SelectSeparator,
   SelectScrollUpButton,
