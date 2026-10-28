@@ -1,0 +1,45 @@
+{# C02 — Bandeja humana operativa (RF-07/RF-09, R3/R4). Sin scripts inline (CSP
+   estricta): el estado vive en data-* y las acciones las llama crm_c02_inbox.js. #}
+<section>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">{{ business }} / BANDEJA HUMANA</div>
+      <h1>Decide quién responde</h1>
+      <p class="muted">Ver, tomar y responder cada conversación. Cuando la IA pausa por una persona, esa toma no se pasa por alto: el control queda detenido hasta que usted lo devuelva.</p>
+    </div>
+  </header>
+
+  <div id="c02-inbox-app" data-csrf="{{ csrf }}" data-user="{{ user.id }}" data-role="{{ user.role }}">
+    <div class="status-line info" id="c02-inbox-status">Cargando bandeja...</div>
+
+    <div class="inbox-layout">
+      <section class="card inbox-list-card">
+        <div class="section-title"><h2>Conversaciones</h2><span class="badge" id="c02-inbox-count">—</span></div>
+        <ul class="inbox-list" id="c02-inbox-list" hidden></ul>
+        <p class="preview-note" id="c02-inbox-empty" hidden>Sin conversaciones. Las derivaciones de la IA aparecerán aquí.</p>
+      </section>
+
+      <section class="card inbox-thread-card" id="c02-inbox-thread" hidden>
+        <div class="inbox-thread-header">
+          <div><strong id="c02-inbox-thread-name">—</strong>
+            <small id="c02-inbox-thread-meta"></small></div>
+          <div class="inbox-thread-actions" id="c02-inbox-thread-actions"></div>
+        </div>
+        <div class="inbox-messages" id="c02-inbox-messages" role="log" aria-live="polite"></div>
+        <form id="c02-inbox-reply-form" class="inbox-reply">
+          <textarea id="c02-inbox-reply-text" rows="2" placeholder="Escriba la respuesta como operador…" required></textarea>
+          <button type="submit" class="button" id="c02-inbox-send">Enviar</button>
+        </form>
+      </section>
+    </div>
+  </div>
+
+  <template id="c02-inbox-row-tpl">
+    <li class="inbox-row" data-id="">
+      <span class="inbox-row-state"></span>
+      <strong class="inbox-row-key"></strong>
+      <small class="inbox-row-name"></small>
+      <small class="inbox-row-last updated-at-muted"></small>
+    </li>
+  </template>
+</section>
