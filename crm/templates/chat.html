@@ -1,0 +1,18 @@
+{# C02 — Chat de IA interno (R4, §10.3): conectado a la KB (RAG) y a la BD de la
+   agenda. Sin scripts inline (CSP estricta); el historial vive en el DOM y las
+   peticiones las hace crm_c02_chat.js. #}
+<div class="c02-chat-block" data-csrf="{{ csrf }}">
+  <hr class="c02-separator">
+  <div class="section-title"><h2>Chat de IA interno</h2>
+    <span class="badge" id="c02-chat-fuente">conexión KB + agenda</span></div>
+  <p class="muted">Haga una consulta al asistente interno. Responde con el conocimiento publicado (RAG) y con el estado real de la agenda y los profesionales.</p>
+  <div class="inline-chat">
+    <div class="inbox-messages c02-chat-log" id="c02-chat-log" role="log" aria-live="polite">
+      <div class="inbox-message note">Asistente interno conectado. Pruebe: «¿qué horarios tienen?», «¿qué profesional está activo?» o «tengo cita».</div>
+    </div>
+    <form id="c02-chat-form" class="inbox-reply">
+      <textarea id="c02-chat-input" rows="2" placeholder="Escriba su consulta interna…" required></textarea>
+      <button type="submit" class="button" id="c02-chat-send">Preguntar</button>
+    </form>
+  </div>
+</div>
