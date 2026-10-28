@@ -1,0 +1,125 @@
+{# C02 — Catálogo editable (RF-05). Operativo: edición por celda y detalle por
+   artículo con control de revisión. Sin scripts inline (CSP estricta). #}
+<section>
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">{{ business }} / CATÁLOGO</div>
+      <h1>Catálogo y conocimiento</h1>
+      <p class="muted">Artículos de la agenda y oferta. Edite una celda y presione Enter para guardar; cada cambio genera una revisión.</p>
+    </div>
+    <div class="topbar-actions">
+      {% if user.role=='admin' %}
+      <label class="inline-select">Tipo
+        <select id="c02-new-kind">
+          <option value="servicio">Servicio/tratamiento</option>
+          <option value="producto">Producto</option>
+          <option value="regalo">Regalo</option>
+          <option value="promocion">Promoción</option>
+        </select>
+      </label>
+      {% endif %}
+      <button class="button" id="c02-cat-new" type="button">+ Nuevo artículo</button>
+    </div>
+  </header>
+
+  <div id="c02-catalog-app" data-csrf="{{ csrf }}" data-admin="{{ '1' if user.role=='admin' else '0' }}">
+    <div class="status-line info">Cargando catálogo...</div>
+    <div class="status-line" id="c02-cat-spinner" hidden role="status" aria-live="polite">Actualizando…</div>
+
+    <div class="table-wrap">
+      <table class="preview-table" id="c02-cat-table" hidden>
+        <thead>
+          <tr>
+            <th>Código</th><th>Nombre</th><th>Tipo</th><th>Precio</th>
+            <th>Estado</th><th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <button class="button ghost" id="c02-cat-retry" hidden>Reintentar carga</button>
+    <p class="preview-note" id="c02-cat-empty" hidden>Sin artículos todavía. Cree el primero con «+ Nuevo artículo».</p>
+
+    <hr class="c02-separator">
+
+    <div class="section-title"><h2>Conocimiento &amp; configuración de IA</h2>
+      <button class="button" id="c02-kb-new" type="button">+ Nuevo documento</button></div>
+    <p class="muted">Documentos que la IA usa para responder con datos del negocio. Publique para activar la recuperación; desactivar la retira de inmediato.</p>
+    <div class="table-wrap">
+      <table class="preview-table" id="c02-kb-table">
+        <thead><tr><th>Nombre</th><th>Estado</th><th>Visibilidad</th><th>Versión</th><th>Índice</th><th>Acciones</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  {# Diálogo de detalle por artículo (nombre, detalle, notas públicas, precios, stock,
+     vigencia, profesional y notas internas sólo para administradores). #}
+  <dialog id="c02-cat-dialog" class="detail-dialog" aria-labelledby="c02-detail-title">
+    <form id="c02-detail-form" method="dialog">
+      <h2 id="c02-detail-title">Detalle del artículo</h2>
+      <div class="form-grid">
+        <label>Código<input name="code" id="c02-f-code" readonly></label>
+        <label>Nombre<input name="name" id="c02-f-name" required maxlength="200"></label>
+        <label>Tipo<select name="kind" id="c02-f-kind">
+          <option value="servicio">Servicio/tratamiento</option>
+          <option value="producto">Producto</option>
+          <option value="regalo">Regalo</option>
+          <option value="promocion">Promoción</option>
+        </select></label>
+        <label>Profesional<select name="professional_id" id="c02-f-professional">
+          <option value="">— Sin asignar —</option>
+          {% for p in professionals if p.active %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+        </select></label>
+        <label>Precio<small>Moneda de contado opcional</small>
+          <input type="number" step="0.01" name="price" id="c02-f-price"></label>
+        <label>Moneda<input name="currency" id="c02-f-currency" maxlength="3" placeholder="USD"></label>
+        <label>Stock<input type="number" name="stock" id="c02-f-stock"></label>
+        <label>Duración<small>Minutos, para la agenda</small>
+          <input type="number" name="duration" id="c02-f-duration"></label>
+        <label>Vigencia desde<input type="date" name="valid_from" id="c02-f-valid-from"></label>
+        <label>Vigencia hasta<input type="date" name="valid_until" id="c02-f-valid-until"></label>
+      </div>
+      <label>Detalle (visible para el paciente)<textarea name="details" id="c02-f-details" rows="3"></textarea></label>
+      <label>Notas públicas (para el bot de concierge)<textarea name="public_notes" id="c02-f-public-notes" rows="3"></textarea></label>
+      {% if user.role=='admin' %}
+      <label>Notas internas<small>Sólo el equipo ve estas notas; nunca las envía el bot.</small>
+        <textarea name="internal_notes" id="c02-f-internal-notes" rows="2"></textarea></label>
+      {% endif %}
+      <div class="check-row">
+        <label class="check"><input type="checkbox" name="active" id="c02-f-active">Activo</label>
+        <label class="check"><input type="checkbox" name="stock_na" id="c02-f-stock-na">Sin stock (información)</label>
+      </div>
+      <p class="muted">Guardar genera una nueva revisión en el historial. Publicar hace visible la revisión actual para el bot y los pacientes.</p>
+      <div class="dialog-actions">
+        <button type="button" class="button ghost detail-cancel">Cancelar</button>
+        <button type="submit" class="button">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  {# Editor de documentos de conocimiento (R4) #}
+  <dialog id="c02-kb-dialog" class="detail-dialog" aria-labelledby="c02-kb-title">
+    <form id="c02-kb-form" method="dialog">
+      <h2 id="c02-kb-title">Documento de conocimiento</h2>
+      <input type="hidden" id="c02-kb-id">
+      <label>Nombre<input id="c02-kb-name" required maxlength="200" placeholder="Horarios y sedes"></label>
+      <div class="form-grid">
+        <label>Visibilidad<select id="c02-kb-visibility">
+          <option value="publico">Público (lo ve el bot y los pacientes)</option>
+          <option value="privado">Privado (sólo el equipo)</option>
+        </select></label>
+        <label>Tipo<select id="c02-kb-kind">
+          <option value="texto">Texto</option>
+          <option value="md">Markdown</option>
+        </select></label>
+      </div>
+      <label>Contenido<textarea id="c02-kb-body" rows="8"></textarea></label>
+      <p class="muted">Al guardar se crea una nueva revisión y el índice queda pendiente de actualizar hasta publicar.</p>
+      <div class="dialog-actions">
+        <button type="button" class="button ghost" data-kb-close>Cancelar</button>
+        <button type="submit" class="button">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+</section>
