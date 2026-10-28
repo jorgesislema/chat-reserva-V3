@@ -11,7 +11,7 @@
 {% macro token() %}<input type="hidden" name="csrf" value="{{ csrf }}">{% endmacro %}
 {% if user %}
 <aside class="sidebar"><a class="brand" href="/">✦ <span>{{ business }}</span></a><p class="nav-label">ESPACIO DE TRABAJO</p>
-<nav>{% for key,label,icon in [('overview','Resumen','◈'),('leads','Leads y clientes','◎'),('agenda','Agenda','▦'),('analytics','Análisis comercial','↗')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endfor %}
+<nav>{% for key,label,icon in [('overview','Resumen','◈'),('leads','Leads y clientes','◎'),('agenda','Agenda','▦'),('catalog','Catálogo','❋'),('inbox','Conversaciones','✉'),('analytics','Análisis comercial','↗')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}{% if key in ('catalog','inbox') %}<em class="nav-preview">prev.</em>{% endif %}</a>{% endfor %}
 {% if user.role=='admin' %}<p class="nav-label">ADMINISTRACIÓN</p>{% for key,label,icon in [('team','Profesionales','♧'),('accounts','Cuentas Google','⇄'),('sync','Sincronización','⟳'),('users','Usuarios y acceso','◇'),('audit','Actividad','≡')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endfor %}{% endif %}
 <a class="{{ 'selected' if tab=='profile' }}" href="{{ url_for('home',tab='profile') }}">Mi contraseña</a></nav>
 <div class="sidebar-bottom"><strong>{{ user.name }}</strong><small>{{ 'Administrador' if user.role=='admin' else 'Usuario' }}</small><form action="/logout" method="post">{{ token() }}<button class="ghost">Cerrar sesión →</button></form></div></aside>
