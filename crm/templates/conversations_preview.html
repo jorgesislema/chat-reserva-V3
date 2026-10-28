@@ -1,0 +1,50 @@
+{# C01 §9.5 — PREVISUALIZACIÓN SINTÉTICA de Conversaciones (bandeja humana).
+   Claramente rotulada y NO operativa: no guarda datos, no sustituye una página real.
+   Datos de ejemplo ficticios (prefijo [Ej.]). #}
+<section class="preview-scope">
+  <div class="preview-banner" role="note" aria-label="Previsualización de diseño">
+    <span class="preview-pill">Previsualización</span>
+    <span><strong>Conversaciones</strong> — diseño propuesto de la bandeja humana, aún no conectado
+      al chat. <span class="preview-scope">Los ejemplos son ficticios; nada se envía ni guarda en esta pantalla.</span></span>
+  </div>
+
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">{{ business }} / CONVERSACIONES · DISEÑO</div>
+      <h1>Decide quién responde</h1>
+      <p class="muted">Una bandeja para ver, derivar y tomar el control de cada conversación cuando la IA necesite a una persona.</p>
+    </div>
+    <button class="button preview-glare" type="button" disabled>Configurar (próximamente)</button>
+  </header>
+
+  <div class="preview-grid">
+    <article class="preview-card">
+      <h3>Estado durable por conversación</h3>
+      <p>Una nueva entrada <strong>no reactiva la IA automáticamente</strong>; el estado persiste incluso ante respuestas tardías de Meta.</p>
+    </article>
+    <article class="preview-card">
+      <h3>Tomar el chat</h3>
+      <p>Requerir la cola de salida y la propiedad de la conversación requiere rol válido; el control queda pausado de forma persistente hasta que alguien lo devuelva.</p>
+    </article>
+    <article class="preview-card">
+      <h3>Emergencia y derivación</h3>
+      <p>Una emergencia crea una alerta sin esperar todos los datos y <strong>sin prometer minutos de respuesta</strong> no acordados.</p>
+    </article>
+  </div>
+
+  <section class="card">
+    <div class="section-title"><h2>Ejemplo de bandeja</h2><span class="badge">Solo visual · sin guardado</span></div>
+    <div class="table-wrap">
+      <table class="preview-table">
+        <thead><tr><th>Paciente</th><th>Canal</th><th>Estado IA</th><th>Último mensaje</th><th>Prioridad</th><th>Responsable</th></tr></thead>
+        <tbody>
+          <tr><td>[Ej.] Ana Torres</td><td>WhatsApp</td><td><span class="preview-chip">IA en curso</span></td><td>¿Qué horarios tienen mañana?</td><td>Normal</td><td>—</td></tr>
+          <tr><td>[Ej.] Luis Mendoza</td><td>WhatsApp</td><td><span class="preview-chip">Requiere persona</span></td><td>Tengo dolor intenso desde ayer</td><td><strong>Alta</strong></td><td>—</td></tr>
+          <tr><td>[Ej.] Carmen Vera</td><td>Web</td><td><span class="preview-chip">Pausada (humana)</span></td><td>Quiero cambiar mi cita de mañana</td><td>Normal</td><td>[Ej.] Equipo</td></tr>
+          <tr><td>[Ej.] Diego Ruiz</td><td>WhatsApp</td><td><span class="preview-chip">Derivada</span></td><td>No me llega la confirmación</td><td>Normal</td><td>—</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="preview-note">Pantalla propositiva. La bandeja real con toma de chat, derivación persistente y la pausa de IA llegarán en entregas posteriores (RF-07/RF-09).</p>
+  </section>
+</section>
