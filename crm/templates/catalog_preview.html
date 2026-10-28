@@ -1,0 +1,62 @@
+{# C01 §9.5 — PREVISUALIZACIÓN SINTÉTICA de Catálogo.
+   Claramente rotulada y NO operativa: no guarda datos, no sustituye una página real.
+   Los datos de ejemplo son ficticios (prefijo [Ej.]). #}
+<section class="preview-scope">
+  <div class="preview-banner" role="note" aria-label="Previsualización de diseño">
+    <span class="preview-pill">Previsualización</span>
+    <span><strong>Catálogo y conocimiento</strong> — diseño propuesto, aún no conectado al guardado.
+      <span class="preview-scope">Los datos de ejemplo son ficticios; nada se guarda en esta pantalla.</span></span>
+  </div>
+
+  <header class="topbar">
+    <div>
+      <div class="eyebrow">{{ business }} / CATÁLOGO · DISEÑO</div>
+      <h1>Tu oferta, disponible para el chat</h1>
+      <p class="muted">Servicios, productos, tratamientos y promociones que la IA puede ofrecer cuando esta sección esté activa.</p>
+    </div>
+    <button class="button preview-glare" type="button" disabled>+ Nuevo artículo (próximamente)</button>
+  </header>
+
+  <div class="preview-grid">
+    <article class="preview-card">
+      <h3>Qué tendrás aquí</h3>
+      <ul class="preview-ul">
+        <li>Cada artículo con <strong>ID estable</strong> (no UUID ilegibles) y tipo: producto, tratamiento, colección o promoción.</li>
+        <li><strong>Precio y moneda</strong> cuando aplican; <strong>stock</strong> o «No aplica»; y <strong>vigencia</strong> de los artículos.</li>
+        <li><strong>Notas internas separadas</strong> de lo que se publica al chat: las observaciones privadas nunca llegan al paciente.</li>
+      </ul>
+    </article>
+    <article class="preview-card">
+      <h3>Reglas de publicación</h3>
+      <ul class="preview-ul">
+        <li>Borrador → prueba → <strong>publicado</strong>, con versión visible del índice.</li>
+        <li>Un artículo no consume inventario por el hecho de que alguien pregunte por él.</li>
+        <li>Regalos/promociones mantienen vigencia y condiciones propias; no se vuelven servicios reservables por sí solos.</li>
+      </ul>
+    </article>
+    <article class="preview-card">
+      <h3>Nociones distintas</h3>
+      <ul class="preview-ul">
+        <li><strong>No aplica</strong> ≠ <strong>agotado</strong> ≠ <strong>gratis</strong>: cada estado se trata como lo que es.</li>
+        <li>Desactivar, cambio de stock, precio o vigencia se <strong>revalida contra datos operativos</strong>, nunca un fragmento semántico viejo.</li>
+      </ul>
+    </article>
+  </div>
+
+  <section class="card">
+    <div class="section-title"><h2>Ejemplo de tabla del catálogo</h2><span class="badge">Solo visual · sin guardado</span></div>
+    <div class="table-wrap">
+      <table class="preview-table">
+        <thead><tr><th>ID</th><th>Nombre</th><th>Tipo</th><th>Detalle</th><th>Precio</th><th>Stock</th><th>Vigencia</th><th>Estado</th></tr></thead>
+        <tbody>
+          <tr><td>SRV-OD-001</td><td>Consulta de diagnóstico</td><td>Tratamiento</td><td>Primera valoración con ortopanorámica si aplica</td><td>35.00</td><td>No aplica</td><td>Abierto</td><td><span class="preview-chip">Activo</span></td></tr>
+          <tr><td>SRV-LIM-014</td><td>Limpieza dental</td><td>Tratamiento</td><td>Ultrasonidos y pulido</td><td>45.00</td><td>No aplica</td><td>Abierto</td><td><span class="preview-chip">Activo</span></td></tr>
+          <tr><td>PRD-HIG-007</td><td>Cepillo eléctrico</td><td>Producto</td><td>Disponible en mostrador</td><td>29.90</td><td>12</td><td>Abierto</td><td><span class="preview-chip">Activo</span></td></tr>
+          <tr><td>SRV-ORT-022</td><td>Revisión de ortodoncia</td><td>Tratamiento</td><td>Control mensual programado</td><td>15.00</td><td>No aplica</td><td>Abierto</td><td><span class="preview-chip">Activo</span></td></tr>
+          <tr><td>PRO-WEL-003</td><td>Bienvenida de primer mes</td><td>Promoción</td><td>Descuento en la segunda consulta</td><td>—</td><td>No aplica</td><td>01/11 - 30/11</td><td><span class="preview-chip">Activo</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="preview-note">Pantalla propositiva. El guardado real, el control de publicación y el índice RAG llegarán en entregas posteriores (RF-05).</p>
+  </section>
+</section>
