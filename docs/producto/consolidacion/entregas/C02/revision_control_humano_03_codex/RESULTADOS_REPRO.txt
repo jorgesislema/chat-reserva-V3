@@ -1,0 +1,2 @@
+RACE_BEFORE_TRANSPORT {"events": ["take_committed", "transport_called"], "receipts": 1, "state": "humano_asignado"}
+SENT_RETRY {"requeued": 0, "human_receipts": 1}
