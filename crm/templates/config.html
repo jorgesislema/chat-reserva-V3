@@ -1,0 +1,76 @@
+{# C02 — Configuración de IA y negocio (R4, §10.2). Sin scripts inline (CSP
+   estricta); los campos los lee y guarda crm_c02_config.js. El perfil es
+   EDITABLE (nombre, zona, moneda) y el horario semanal es operativo: la misma
+   regla la aplican el panel y el canal al aceptar/rechazar reservas. #}
+<div class="c02-config-block" id="c02-config-app" data-csrf="{{ csrf }}">
+  <hr class="c02-separator">
+  <div class="section-title"><h2>Configuración de IA y datos del negocio</h2>
+    <span class="badge">sólo administrador</span></div>
+
+  <div class="two-columns">
+    <section class="card">
+      <h3>Datos del negocio</h3>
+      <div class="form-grid" id="c02-cfg-perfil">
+        <label>Nombre del negocio
+          <input type="text" id="c02-cfg-nombre" maxlength="200"></label>
+        <label>Rubro (informativo)
+          <input type="text" id="c02-cfg-rubro" disabled></label>
+        <label>Zona horaria (IANA)
+          <input type="text" id="c02-cfg-zona" placeholder="America/Guayaquil"></label>
+        <label>Moneda
+          <input type="text" id="c02-cfg-moneda" maxlength="3" placeholder="USD"></label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Saludo y mensajes del bot</h3>
+      <label>Saludo inicial (conversación nueva)
+        <textarea id="c02-cfg-saludo" rows="3"></textarea></label>
+      <label>Mensaje fuera de horario
+        <textarea id="c02-cfg-fuera" rows="2"></textarea></label>
+    </section>
+  </div>
+
+  <section class="card">
+    <h3>Horario semanal (regla operativa de reservas)</h3>
+    <p class="muted tiny">Aplicado por el panel y por el canal al aceptar o rechazar
+      una reserva. Deje el día vacío para cerrarlo.</p>
+    <table class="c02-week-table" id="c02-cfg-week">
+      <thead><tr><th>Día</th><th>Apertura</th><th>Cierre</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h3>Fechas cerradas y excepciones</h3>
+    <div class="c02-exc-form">
+      <label>Fecha <input type="date" id="c02-cfg-exc-fecha"></label>
+      <label>Estado
+        <select id="c02-cfg-exc-estado">
+          <option value="cerrado">Cerrado todo el día</option>
+          <option value="horario">Horario especial</option>
+        </select></label>
+      <label>Apertura <input type="time" id="c02-cfg-exc-a" step="1800"></label>
+      <label>Cierre <input type="time" id="c02-cfg-exc-c" step="1800"></label>
+      <button type="button" class="button secondary" id="c02-cfg-exc-add">Añadir</button>
+    </div>
+    <table class="c02-exc-table" id="c02-cfg-exc-list">
+      <thead><tr><th>Fecha</th><th>Estado</th><th>Horario</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="muted tiny" id="c02-cfg-exc-empty">Sin excepciones configuradas.</p>
+  </section>
+
+  <section class="card">
+    <h3>Especialistas y disponibilidad</h3>
+    <p class="muted tiny">La disponibilidad marca quién puede recibir reservas
+      (la misma gestión de la pestaña Profesionales).</p>
+    <div id="c02-cfg-especialistas" class="c02-especialistas"></div>
+    <p class="muted tiny" id="c02-cfg-esp-empty">No hay especialistas registrados aún.</p>
+  </section>
+
+  <div class="config-actions">
+    <button type="button" class="button" id="c02-cfg-save">Guardar cambios</button>
+    <span class="muted tiny" id="c02-cfg-msg"></span>
+  </div>
+</div>
