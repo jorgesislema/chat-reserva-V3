@@ -1,0 +1,4 @@
+120 passed in 71.25s; exit 0
+E2E 5 pantalla + 7 BD/buzon PASS; VERIFY_OK; exit 0
+RACE humano_asignado, ai_received_after_take=1
+SENT_TASK_RETRY requeued=1, receipts=2
