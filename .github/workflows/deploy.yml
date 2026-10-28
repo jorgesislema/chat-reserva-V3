@@ -1,0 +1,69 @@
+name: Deploy
+
+# Despliegue a producción por SSH + rsync. Se dispara MANUALMENTE desde
+# Actions (workflow_dispatch) para tener control explícito de cada salida.
+# Para desplegar también con etiquetas v*, añadir a `on`:
+#   push:
+#     tags: ['v*']
+#
+# Secretos de repositorio requeridos (Settings > Secrets and variables >
+# Actions). Ninguno debe tener valor por defecto en el repositorio:
+#   DEPLOY_HOST          IP o dominio del servidor (p. ej. 66.154.127.82)
+#   DEPLOY_USER          usuario SSH (p. ej. root)
+#   DEPLOY_PATH          ruta absoluta de destino en el servidor
+#   DEPLOY_SSH_KEY       clave privada OpenSSH del agente de despliegue
+#   DEPLOY_RESTART_CMD   reinicio/recarga del servicio tras publicar
+#                        (p. ej. "systemctl restart chat-clinica")
+#
+# El flujo replica lo que hoy hace deploy.ps1 (scp + ssh), pero sin IP ni
+# credenciales en el repositorio, con frontend compilado y sin archivos de
+# desarrollo. El entorno de producción sigue el modelo del README: un mismo
+# servidor atendiendo los tenants (SQLite en el VPS, sin .env distribuido).
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: Motivo de este despliegue
+        required: false
+
+jobs:
+  deploy:
+    name: Desplegar a producción
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: frontend
+
+      - name: Install SSH key
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync project
+        shell: bash
+        run: |
+          rsync -az --delete --exclude \
+            '.git' --exclude 'venv*' --exclude '.venv*' --exclude '__pycache__' \
+            --exclude '*.db' --exclude '*.sqlite' --exclude '.env' --exclude '.env.*' \
+            --exclude 'node_modules' --exclude 'logs' \
+            --exclude '.pytest_cache' --exclude '.ruff_cache' --exclude '.mypy_cache' \
+            ./ "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}"
+      # frontend/dist se transfiere (build del paso anterior) y queda servido
+      # por el mismo servidor; .env.example sí viaja, los .env reales no.
+
+      - name: Install dependencies and restart service
+        shell: bash
+        run: |
+          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}' && python -m pip install -r requirements.txt && ${{ secrets.DEPLOY_RESTART_CMD }}"
