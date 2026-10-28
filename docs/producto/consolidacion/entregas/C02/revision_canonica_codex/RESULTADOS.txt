@@ -1,0 +1,4 @@
+Suite seleccionada: 139 passed in 81.86s, exit 0
+E2E: 5 pantalla + 7 BD/buzon PASS, VERIFY_OK, exit 0
+JUNCTION same_file=true, same_lock=true, first_acquired=true, alias_acquired=false
+RELATIVE relative_is_absolute=false, same_file=true, same_lock=true, first_acquired=true, relative_acquired=false
