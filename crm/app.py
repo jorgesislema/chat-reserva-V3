@@ -1368,6 +1368,25 @@ def create_app(test_config=None):
         items = c02.outbox_history(app.config['DATABASE'], limit=200)
         return jsonify(items=items)
 
+    @app.post('/api/c02/outbox/<int:outbox_id>/cancel')
+    @protected()
+    def c02_outbox_cancel(outbox_id):
+        """Cancela una tarea de salida PENDIENTE que aún no comenzó.
+
+        Sólo administrador; el CSRF ya se valida en before_request (token de
+        sesión en cabecera X-CSRF-Token o form). El motivo es obligatorio y
+        queda registrado en ``crm_audit``. No puede cancelar tareas
+        reclamadas/en curso/ya enviadas (se rechaza sin modificar)."""
+        if g.user['role'] != 'admin':
+            return jsonify(ok=False, error={'message': 'Sólo un administrador cancela tareas de salida'}), 403
+        body = request.get_json(silent=True) or {}
+        res = c02.outbox_cancel(app.config['DATABASE'], outbox_id=outbox_id,
+                                user_id=g.user['id'], role=g.user['role'],
+                                motivo=body.get('motivo') or '')
+        status = {'forbidden': 403, 'not_found': 404, 'invalid': 400,
+                  'conflict': 409}.get(res.get('code'), 200 if res['ok'] else 500)
+        return jsonify(res), status
+
     return app
 
 
