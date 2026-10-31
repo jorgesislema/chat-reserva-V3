@@ -5,7 +5,7 @@
    inline (CSP estricta). #}
 <section>
   <div class="page-head">
-    <p class="muted">Mensajes generados por el CRM hacia clientes (WhatsApp). Solo lectura: nada de lo visto aquí reenvía ni modifica mensajes. Los archivos que se envían se gestionan en «Biblioteca de recursos».</p>
+    <p class="muted">Mensajes generados por el CRM hacia clientes (WhatsApp). No reenvía ni modifica mensajes enviados: sólo un administrador puede CANCELAR una tarea pendiente que aún no comenzó a enviarse, indicando el motivo (queda auditado). Los archivos que se envían se gestionan en «Biblioteca de recursos».</p>
     <div class="topbar-actions">
       <label class="inline-select">Canal
         <select id="c02-outbox-filter" style="width:auto;margin:0"><option value="todos">Todos</option><option value="whatsapp" selected>WhatsApp</option></select>
@@ -21,6 +21,7 @@
         <thead><tr>
           <th>Fecha</th><th>Canal</th><th>Destinatario</th><th>Estado</th>
           <th>Estado del proveedor</th><th>Intentos</th><th>Eventos</th><th>Wamid</th>
+          <th>Acción</th>
         </tr></thead>
         <tbody></tbody>
       </table>
