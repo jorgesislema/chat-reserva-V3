@@ -1,0 +1,64 @@
+{# C02 — Conocimiento y documentos para RAG (R4 + punto 3: carga de archivos).
+   Pantalla independiente. Sin scripts inline (CSP estricta); la carga valida,
+   extrae y muestra vista previa, y sólo se guarda lo que el usuario confirma
+   (nunca se publica al cargar). #}
+<section>
+  <div class="page-head">
+    <p class="muted">Documentos internos que la IA usa para responder con datos del negocio. Publicar activa la recuperación (RAG); desactivar la retira de inmediato.</p>
+    <div class="topbar-actions">
+      {% if user.role=='admin' %}
+      <button class="button" id="c02-kb-new" type="button">+ Nuevo documento</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <div id="c02-docs-app" data-csrf="{{ csrf }}" data-admin="{{ '1' if user.role=='admin' else '0' }}">
+    <div class="status-line" id="c02-kb-status" role="status" aria-live="polite"></div>
+    <div class="table-wrap">
+      <table class="preview-table" id="c02-kb-table">
+        <thead><tr><th>Nombre</th><th>Estado</th><th>Visibilidad</th><th>Versión</th><th>Origen</th><th>Índice</th><th>Acciones</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="preview-note" id="c02-kb-empty" hidden>Sin documentos todavía. Cree el primero con «+ Nuevo documento».</p>
+  </div>
+
+  {# Editor de documentos de conocimiento (R4 + punto 3: carga de archivos) #}
+  <dialog id="c02-kb-dialog" class="detail-dialog" aria-labelledby="c02-kb-title">
+    <form id="c02-kb-form" method="dialog">
+      <h2 id="c02-kb-title">Documento de conocimiento</h2>
+      <input type="hidden" id="c02-kb-id">
+      <div class="kb-upload-zone">
+        <label>Archivo (.docx, .pdf, .xlsx, .csv, .txt, .md)
+          <input type="file" id="c02-kb-file" accept=".docx,.pdf,.xlsx,.csv,.txt,.md,.doc,.xls">
+        </label>
+        <button type="button" class="button ghost" id="c02-kb-preview">Previsualizar archivo</button>
+        <p class="muted">La carga valida formato, tamaño y contenido; nunca ejecuta macros, fórmulas ni instrucciones del documento. No se publica automáticamente: tras previsualizar, revise el texto y guarde como borrador.</p>
+        <div id="c02-kb-preview-box" hidden></div>
+      </div>
+      <label>Nombre<input id="c02-kb-name" required maxlength="200" placeholder="Horarios y sedes"></label>
+      <div class="form-grid">
+        <label>Visibilidad<select id="c02-kb-visibility">
+          <option value="publico">Público (lo ve el bot y los pacientes)</option>
+          <option value="privado">Privado (sólo el equipo)</option>
+        </select></label>
+        <label>Tipo<select id="c02-kb-kind">
+          <option value="texto">Texto</option>
+          <option value="pdf">PDF</option>
+          <option value="docx">Word (.docx)</option>
+          <option value="xlsx">Excel (.xlsx)</option>
+          <option value="csv">CSV</option>
+          <option value="md">Markdown</option>
+        </select></label>
+      </div>
+      <label>Contenido<textarea id="c02-kb-body" rows="8"></textarea></label>
+      <div class="dialog-actions">
+        <button type="button" class="button ghost" id="c02-kb-cancel">Cancelar</button>
+        <button type="submit" class="button">Guardar borrador</button>
+        {% if user.role=='admin' %}
+        <button type="button" class="button" id="c02-kb-save-public">Guardar y publicar</button>
+        {% endif %}
+      </div>
+    </form>
+  </dialog>
+</section>
