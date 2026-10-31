@@ -71,15 +71,21 @@
       var tr = document.createElement('tr');
       var td1 = document.createElement('td'); td1.textContent = DIAS[d];
       var td2 = document.createElement('td');
+      var chk = document.createElement('input');
+      chk.type = 'checkbox'; chk.className = 'c02-dia-lab';
+      chk.dataset.dia = d; chk.checked = !!(win && (win[0] || win[1]));
+      td2.appendChild(chk);
+      var td3 = document.createElement('td');
       var inpA = document.createElement('input');
       inpA.type = 'time'; inpA.step = '1800'; inpA.dataset.dia = d; inpA.dataset.lado = 'a';
+      var td4 = document.createElement('td');
       var inpC = document.createElement('input');
       inpC.type = 'time'; inpC.step = '1800'; inpC.dataset.dia = d; inpC.dataset.lado = 'c';
       if (win && win[0]) inpA.value = win[0];
       if (win && win[1]) inpC.value = win[1];
-      var td3 = document.createElement('td');
-      td2.appendChild(inpA); td3.appendChild(inpC);
-      tr.appendChild(td1); tr.appendChild(td2); tr.appendChild(td3);
+      td3.appendChild(inpA); td4.appendChild(inpC);
+      tr.appendChild(td1); tr.appendChild(td2);
+      tr.appendChild(td3); tr.appendChild(td4);
       weekBody.appendChild(tr);
     }
   }
@@ -87,10 +93,14 @@
   function horariosFromDom() {
     var out = {};
     if (!weekBody) return out;
+    var checks = weekBody.querySelectorAll('input.c02-dia-lab');
+    var labels = {};
+    for (var i = 0; i < checks.length; i++) labels[checks[i].dataset.dia] = checks[i].checked;
     var inputs = weekBody.querySelectorAll('input[data-dia]');
-    for (var i = 0; i < inputs.length; i++) {
-      var inp = inputs[i];
+    for (var j = 0; j < inputs.length; j++) {
+      var inp = inputs[j];
       var d = inp.dataset.dia;
+      if (labels[d] === false) continue;
       if (!out[d]) out[d] = [];
       out[d][inp.dataset.lado === 'a' ? 0 : 1] = inp.value || null;
     }
