@@ -22,7 +22,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from crm.store import connect, now
+from crm.store import connect, now, audit
 from crm.conv_lock import conversation_lock
 from crm.business_config import config_get_extended, config_set_extended
 
@@ -38,6 +38,7 @@ ALREADY = 'already'
 EMPTY = 'empty'
 HANDLED = 'handled'
 CONCURRENCY = 'concurrency'
+CONFLICT = 'conflict'
 UNSUPPORTED = 'unsupported'
 
 KINDS = ('producto', 'servicio', 'regalo', 'promocion')
@@ -1132,7 +1133,7 @@ def outbox_history(path, *, channel=None, limit=200):
             return []
         q = ("SELECT o.id, o.channel, o.recipient, o.operation_id, o.correlation, "
              "o.state, o.provider_state, o.provider_message_id, o.attempts, o.origin, "
-             "o.created_at, o.updated_at, "
+             "o.began_at, o.created_at, o.updated_at, "
              "(SELECT COUNT(*) FROM crm_wa_delivery_events e WHERE e.outbox_id=o.id) AS eventos "
              "FROM crm_outbox o")
         params = []
@@ -1143,6 +1144,50 @@ def outbox_history(path, *, channel=None, limit=200):
         params.append(limit)
         rows = conn.execute(q, params).fetchall()
         return [dict(r) for r in rows]
+
+
+def outbox_cancel(path, *, outbox_id, user_id, role, motivo):
+    """Cancelación AUDITADA de una tarea de salida que aún no comenzó (C02).
+
+    Sólo un administrador, con MOTIVO obligatorio (mínimo 3 caracteres). Es
+    elegible únicamente una tarea ``pendiente`` que nunca se intentó
+    (``attempts=0``) y cuyo envío NO ha comenzado ni salido (``began_at``
+    vacío y sin ``provider_message_id``). Compite ATOMICAMENTE con el
+    claim/inicio de envío (``BEGIN IMMEDIATE``, lock de escritura compartido
+    entre procesos, mismo mecanismo que ``outbox_claim``/``begin_send``): si
+    en el momento de la cancelación la tarea ya fue reclamada, cambió de
+    estado o su envío empezó, se RECHAZA sin modificarla. Registra en
+    ``crm_audit`` la acción, el usuario y el motivo.
+    """
+    motivo_limpio = (motivo or '').strip()
+    if role != 'admin':
+        return _err(FORBIDDEN, 'Solo un administrador cancela tareas de salida')
+    if len(motivo_limpio) < 3:
+        return _err(INVALID, 'El motivo de la cancelación es obligatorio (mínimo 3 caracteres)')
+    stamp = now()
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        r = conn.execute('SELECT * FROM crm_outbox WHERE id=?', (outbox_id,)).fetchone()
+        if not r:
+            return _err(NOT_FOUND, 'Tarea de salida no encontrada')
+        elegible = (r['state'] == 'pendiente' and r['attempts'] == 0
+                    and r['began_at'] is None and r['provider_message_id'] is None)
+        if not elegible:
+            return _err(CONFLICT,
+                        'La tarea no es cancelable: no está pendiente sin intentos y sin envío iniciado',
+                        existing_state=r['state'])
+        cur = conn.execute(
+            """UPDATE crm_outbox SET state='cancelado', provider_state='cancelado',
+               claimed_by=NULL, claimed_at=NULL, updated_at=?
+               WHERE id=? AND state='pendiente' AND attempts=0
+                 AND began_at IS NULL AND provider_message_id IS NULL""",
+            (stamp, outbox_id))
+        if cur.rowcount != 1:
+            return _err(CONFLICT, 'La tarea cambió de estado; no se canceló',
+                        existing_state=r['state'])
+        audit(conn, user_id,
+              'Cancelación de tarea de salida %s' % outbox_id, detail=motivo_limpio)
+        return _ok(outbox_id=outbox_id, state='cancelado')
 
 
 def conversations_list(path, *, role='user', user_id=None):
