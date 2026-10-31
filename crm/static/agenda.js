@@ -301,6 +301,10 @@
     button.setAttribute('aria-label', appt.title + ', ' + appt.start_time + '–' + appt.end_time + ', ' +
       pro.name + ', ' + appt.status_label + continuation +
       (appt.has_notes ? ', con observaciones' : ''));
+    if (laneCount > 1) { button.classList.add('lane-compact'); }
+    if (laneCount > 2) { button.classList.add('lane-tight'); }
+    button.title = appt.title + ' · ' + appt.start_time + '–' + appt.end_time +
+      ' · ' + pro.name + ' · ' + appt.status_label + continuation;
     var top = ((segment.start - grid.minHour * 60) / 60) * SLOT_PX;
     var height = Math.max(26, ((segment.end - segment.start) / 60) * SLOT_PX);
     if (top < 0) { height += top; top = 0; }
@@ -312,9 +316,19 @@
       button.style.width = 'calc(' + (100 / laneCount) + '% - 4px)';
     }
     button.appendChild(el('strong', null, appt.title));
-    button.appendChild(el('small', null,
-      (segment.startsBefore ? '↪ ' : '') + appt.start_time + '–' + appt.end_time +
-      (segment.endsAfter ? ' ↦' : '') + ' · ' + pro.name));
+    // Con carriles estrechos el nombre del profesional abreviado mantiene la
+    // cita legible; el detalle completo está en el título y al abrir la ficha.
+    var nombrePro = String(pro.name || '').split(' ')[0] || '';
+    if (laneCount > 2) {
+      button.appendChild(el('small', null,
+        (segment.startsBefore ? '↪ ' : '') + appt.start_time + '–' + appt.end_time +
+        (segment.endsAfter ? ' ↦' : '')));
+      button.appendChild(el('small', 'pro-short', nombrePro));
+    } else {
+      button.appendChild(el('small', null,
+        (segment.startsBefore ? '↪ ' : '') + appt.start_time + '–' + appt.end_time +
+        (segment.endsAfter ? ' ↦' : '') + ' · ' + nombrePro));
+    }
     var meta = el('span', 'appt-meta');
     meta.appendChild(el('span', 'status-badge ' + appt.operational_status, appt.status_label));
     if (appt.pending_closure) { meta.appendChild(el('span', 'badge warn', 'Pendiente de cierre')); }
