@@ -8,7 +8,7 @@
   color: #1f2f2a; }
 .agenda *, .agenda-dialog * { box-sizing: border-box; }
 .agenda-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; margin-bottom: 18px; }
-.agenda-head h1 { margin: 0 0 6px; }
+.agenda-head h1, .agenda-head .agenda-main-title { margin: 0 0 6px; font-size: 29px; line-height: 1.2; letter-spacing: -0.8px; }
 .agenda-head-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
 .agenda-sync { display: inline; }
 .agenda-sync button { min-height: 42px; }
@@ -148,7 +148,7 @@
   .agenda-head { flex-direction: row; align-items: center; gap: 8px; margin-bottom: 8px; }
   .agenda-head > div:first-child { min-width: 0; }
   .agenda-head .eyebrow { display: none; }
-  .agenda-head h1 { font-size: 20px; margin: 0 0 2px; }
+  .agenda-head h1, .agenda-head .agenda-main-title { font-size: 20px; margin: 0 0 2px; }
   .agenda-subtitle { font-size: 11px; gap: 4px; }
   .tz-pill { padding: 2px 6px; font-size: 9px; }
   .agenda-head-actions { width: auto; flex: 0 0 auto; flex-direction: column; gap: 4px; }
@@ -186,3 +186,55 @@
 }
 
 @media (prefers-reduced-motion: reduce) { .agenda * { scroll-behavior: auto; } }
+
+/* ============================ TEMA OSCURO (agenda) ============================ */
+[data-theme="dark"] .agenda{--agenda-line:#2c3a34;--agenda-soft:#1c2922;
+  --agenda-danger:#e0a29b;color:#e3ece6;--accent:#5fbf99}
+[data-theme="dark"] .agenda .agenda-toolbar{background:var(--white,#1c241f);border-color:var(--agenda-line)}
+[data-theme="dark"] .agenda .agenda-surface{background:var(--white,#1c241f);border-color:var(--agenda-line)}
+[data-theme="dark"] .agenda-dialog{background:var(--white,#1c241f);color:var(--ink,#e3ece6);border-color:var(--agenda-line)}
+[data-theme="dark"] .agenda-dialog h2,.dialog-head h2{color:var(--ink,#e3ece6)}
+[data-theme="dark"] .agenda-dialog::backdrop{background:rgba(5,10,8,.55)}
+[data-theme="dark"] .dialog-head{color:var(--ink,#e3ece6)}
+[data-theme="dark"] .agenda-field{color:#a7b6ae}
+[data-theme="dark"] .agenda-field select,.agenda-field input,.agenda-field textarea{
+  background:#141c18;border-color:#33453c;color:var(--ink,#e3ece6)}
+[data-theme="dark"] .tz-pill{background:var(--agenda-soft);border-color:var(--agenda-line);color:#b9c9bf}
+[data-theme="dark"] .segmented{background:var(--agenda-soft);border-color:var(--agenda-line)}
+[data-theme="dark"] .segmented button{color:#a7b6ae}
+[data-theme="dark"] .segmented button[aria-pressed="true"]{background:var(--agenda-accent,var(--accent));color:#0c1411}
+[data-theme="dark"] .day-head,.week-head,.month-dow{background:#17201c;border-color:var(--agenda-line);color:#b9c9bf}
+[data-theme="dark"] .day-head{color:#b9c9bf}
+[data-theme="dark"] .day-head.time-head{color:#7d9187}
+[data-theme="dark"] .hour-slot{border-color:var(--agenda-line)}
+[data-theme="dark"] .week-day .hour-slot{border-color:#23302a}
+[data-theme="dark"] .axis .tick{color:#93a89e}
+[data-theme="dark"] .appt{background:#1d332a;color:#e8f2ec;border-left-color:var(--accent)}
+[data-theme="dark"] .appt strong{color:#f2f8f4}
+[data-theme="dark"] .appt small{color:#a8c0b2}
+[data-theme="dark"] .appt.cancelled{opacity:.55}
+[data-theme="dark"] .appt.attended{background:#232b38}
+[data-theme="dark"] .appt.no_show{background:#36231f}
+[data-theme="dark"] .appt.confirmed{background:#1e3328}
+[data-theme="dark"] .week-head.today{background:#16301f}
+[data-theme="dark"] .week-day.today{background:#18231d}
+[data-theme="dark"] .month-dow{color:#a7b6ae}
+[data-theme="dark"] .month-dow.today{background:#16301f}
+[data-theme="dark"] .detail-grid dt{color:#7d9187}
+[data-theme="dark"] .detail-section{border-color:var(--agenda-line)}
+[data-theme="dark"] .agenda-status{color:#7d9187}
+[data-theme="dark"] .agenda-status.error{color:#e0a29b}
+[data-theme="dark"] .material-day.today{background:#16301f}
+[data-theme="dark"] .material-day.has-events{color:var(--accent)}
+
+/* Carriles estrechos (varios profesionales a la misma hora): la cita sigue
+   siendo legible. Con CSS no se puede "adivinar" ancho; los JS añaden
+   lane-compact/lane-tight cuando el número de carriles lo exige. */
+.agenda .appt.lane-compact{padding:5px 6px}
+.agenda .appt.lane-compact strong{white-space:normal;overflow-wrap:anywhere}
+.agenda .appt.lane-tight{padding:4px 5px}
+.agenda .appt.lane-tight .appt-meta{display:none}
+.agenda .appt.lane-tight strong{font-size:11.5px;line-height:1.25}
+.agenda .appt.lane-tight small{font-size:10px}
+.agenda .appt .pro-short{display:block;font-weight:600}
+@media(max-width:700px){.agenda .week-body{min-width:118px}}
