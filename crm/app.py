@@ -1,6 +1,7 @@
 """Servidor CRM local. No requiere OpenRouter, Qdrant ni Google para arrancar."""
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from functools import wraps
+import json
 import os
 from pathlib import Path
 import re
@@ -15,8 +16,19 @@ from flask import (Flask, Response, abort, flash, g, jsonify, redirect,
                    render_template, request, session, url_for)
 from werkzeug.security import check_password_hash, generate_password_hash
 
+# El adaptador IA (chat_adapter) se importa a nivel de módulo y congelaba
+# ADAPTADOR_ACTIVO ANTES de cargar las variables: cargar .env en lo alto
+# garantiza que la configuración del proveedor (CRM_CHAT_*) exista cuando
+# se construye el adaptador por defecto. create_app() conserva su carga
+# idempotente.
+ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(ROOT / '.env')
+
 from crm import agenda_time
 from crm import business_profile
+from crm import chat_adapter as _chat_adapter
+from crm import health as _health
+from crm.business_config import zone as _eff_zone
 from crm.calendar import queue_for_resend, sync
 from crm.reservation_service import (FORBIDDEN, NOT_FOUND, OVERLAP,
                                      STATUS_LABELS, VERSION_CONFLICT, add_note,
@@ -27,9 +39,121 @@ from crm.reservation_service import (FORBIDDEN, NOT_FOUND, OVERLAP,
                                      save_appointment)
 from crm.store import audit, connect, initialize, now
 
-ROOT = Path(__file__).resolve().parent.parent
 STAGES = ['Nuevo', 'Contactado', 'Cita agendada', 'Ganado', 'Perdido']
 DUMMY_PASSWORD_HASH = generate_password_hash(secrets.token_hex(32))
+# Endpoints de disponibilidad: públicos, sin sesión y sin BD en before_request
+# (liveness no puede depender de la base que se intenta supervisar).
+HEALTH_PATHS = frozenset({'/health', '/ready'})
+
+
+def _eff_check_window(database, start_utc, end_utc):
+    """Regla de horario del negocio efectiva (crm_settings + perfil base).
+
+    Se evalúa por petición para que cambios de horarios, excepciones por fecha
+    y zona surtan efecto inmediatamente en el panel, igual que en el canal.
+    """
+    from crm.business_config import check_window
+    return check_window(database, start_utc, end_utc)
+
+
+def _bloqueo_manual_fecha(database, fecha_iso):
+    """Excepción del negocio POR FECHA (cerrado u horario especial). Es un
+    bloqueo DISTINTO del horario habitual: se respeta siempre en esta entrega;
+    la cita excepcional del operador no se salta fechas cerradas ni horarios
+    especiales (requieren una excepción expresamente diseñada y autorizada)."""
+    from crm.business_config import effective_settings as _settings
+    from crm.business_config import _parse_json as _bcfg_json
+    exc = _bcfg_json(_settings(database).get('negocio_excepciones'), {})
+    return exc.get(fecha_iso)
+
+
+def _hhmm_min(hhmm):
+    try:
+        h, m = str(hhmm).split(':', 1)
+        return int(h) * 60 + int(m)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _solapa(citas, start_utc, end_utc):
+    "¿Alguna cita existente solapa el intervalo UTC?"
+    for c in citas:
+        try:
+            cs = datetime.fromisoformat(str(c['start']).replace('Z', '+00:00'))
+            ce = datetime.fromisoformat(str(c['end']).replace('Z', '+00:00'))
+            if cs.tzinfo is None:
+                cs = cs.replace(tzinfo=timezone.utc)
+            if ce.tzinfo is None:
+                ce = ce.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if cs < end_utc and ce > start_utc:
+            return True
+    return False
+
+
+def _slots_dia(database, professional_id, fecha_iso, duration_min):
+    """Espacios libres del profesional en un día local (cita excepcional C02).
+
+    Devuelve huecos DENTRO del horario habitual del día (perfil efectivo +
+    excepciones por fecha) que no solapan con citas existentes, más el estado
+    de la fecha para la propuesta excepcional del operador. No existe control
+    de recursos físicos (consultorios/salas) en esta entrega: se DECLARA esa
+    limitación y no se promete comprobarla.
+    """
+    from crm.business_config import effective_profile
+    from crm.business_config import effective_settings as _settings
+    from crm.business_config import _parse_json as _bcfg_json
+    prof = effective_profile(database)
+    zona = prof.zone
+    try:
+        d = date.fromisoformat(fecha_iso)
+    except (TypeError, ValueError):
+        return {'ok': False, 'code': 'invalid', 'message': 'Fecha no válida'}
+    with connect(database) as conn:
+        prof_row = conn.execute('SELECT active FROM crm_professionals WHERE id=?',
+                                (professional_id,)).fetchone()
+        profesionales = conn.execute(
+            'SELECT id,name,active FROM crm_professionals ORDER BY name').fetchall()
+    if not prof_row:
+        return {'ok': False, 'code': 'not_found', 'message': 'El profesional no existe'}
+    if prof_row['active'] in (0, '0', False):
+        return {'ok': False, 'code': 'inactivo',
+                'message': 'El profesional está inactivo; no puede recibir citas.'}
+    exc = _bcfg_json(_settings(database).get('negocio_excepciones'), {})
+    exc_day = exc.get(fecha_iso)
+    if (exc_day or {}).get('estado') == 'cerrado':
+        return {'ok': True, 'cerrado': True, 'bloqueo_manual': True,
+                'fuera_horario_permitido': False, 'slots': [], 'motivo': None,
+                'profesionales': [dict(p) for p in profesionales],
+                'recursos_fisicos': False}
+    rango = ((exc_day or {}).get('horario') or None) or prof.hours.get(d.weekday()) or None
+    tz = ZoneInfo(zona)
+    d0 = datetime(d.year, d.month, d.day, 0, 0, tzinfo=tz)
+    citas = list_appointments(database, start_utc=d0.astimezone(timezone.utc).isoformat(),
+                              end_utc=(d0 + timedelta(days=1)).astimezone(timezone.utc).isoformat(),
+                              professional=str(professional_id), status='',
+                              include_cancelled=False)
+    slots = []
+    if rango:
+        o = _hhmm_min(rango[0]) if isinstance(rango[0], str) else int(rango[0])
+        c = _hhmm_min(rango[1]) if isinstance(rango[1], str) else int(rango[1])
+        tmin = o
+        while tmin + duration_min <= c:
+            ini_l = datetime(d.year, d.month, d.day, tmin // 60, tmin % 60, tzinfo=tz)
+            fin_l = ini_l + timedelta(minutes=duration_min)
+            ini_u, fin_u = ini_l.astimezone(timezone.utc), fin_l.astimezone(timezone.utc)
+            if _eff_check_window(database, ini_u, fin_u) is None \
+                    and not _solapa(citas, ini_u, fin_u):
+                slots.append({'inicio': '%02d:%02d' % (tmin // 60, tmin % 60), 'fuera': False})
+            tmin += duration_min
+    return {'ok': True, 'cerrado': False,
+            'bloqueo_manual': bool(exc_day),
+            'fuera_horario_permitido': not bool(exc_day),
+            'motivo': None if rango else 'El día no tiene horario habitual.',
+            'slots': slots,
+            'profesionales': [dict(p) for p in profesionales],
+            'recursos_fisicos': False}
 
 
 def required(name, limit=200):
@@ -63,7 +187,8 @@ def create_app(test_config=None):
                       BUSINESS_NAME=os.getenv('CRM_BUSINESS_NAME', ''),
                       ACCENT=accent,
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
-                      PERMANENT_SESSION_LIFETIME=timedelta(hours=8), MAX_CONTENT_LENGTH=65536)
+                      PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+                      MAX_CONTENT_LENGTH=10 * 1024 * 1024)
     if test_config:
         app.config.update(test_config)
     # G01B R1: el perfil es la ÚNICA autoridad de zona y nombre operativo.
@@ -120,12 +245,16 @@ def create_app(test_config=None):
     @app.before_request
     def security():
         g.user = None
+        if request.path in HEALTH_PATHS:
+            # Liveness/readiness se sirven sin sesión ni consultas previas:
+            # deben responder aunque la BD esté caída (con 200/503 según toque).
+            return None
         with db() as conn:
             user = conn.execute('SELECT * FROM crm_users WHERE id=? AND active=1',
                                 (session.get('user_id'),)).fetchone()
         if user and user['session_version'] == session.get('version'):
             g.user = user
-        if request.method == 'POST':
+        if request.method == 'POST' and not request.path.startswith('/webhook'):
             token = request.form.get('csrf') or request.headers.get('X-CSRF-Token', '')
             current = session.get('csrf', '')
             if not current or not secrets.compare_digest(current.encode(), token.encode()):
@@ -154,8 +283,14 @@ def create_app(test_config=None):
     def context():
         if 'csrf' not in session:
             session['csrf'] = secrets.token_hex(32)
+        demo = False
+        try:
+            demo = (app.config.get('DEMO_BANNER') or '').lower() in ('1', 'true', 'si')
+        except Exception:
+            demo = False
         return dict(csrf=session['csrf'], business=app.config['BUSINESS_NAME'], stages=STAGES,
-                    user=g.user, zone=app.config['TIMEZONE'], accent=app.config['ACCENT'])
+                    user=g.user, zone=app.config['TIMEZONE'], accent=app.config['ACCENT'],
+                    demo=demo)
 
     @app.template_filter('localtime')
     def localtime(value):
@@ -175,6 +310,36 @@ def create_app(test_config=None):
                                   'message': 'Referencia no válida o registro duplicado.'}), 400
         flash('Ya existe un registro con esos datos o la referencia no es válida.', 'error')
         return redirect(url_for('home'))
+
+    @app.errorhandler(sqlite3.OperationalError)
+    def db_unavailable(_exc):
+        """Indisponibilidad clara cuando la BD no está accesible en plena
+        operación (archivo movido/bloqueado/vacío): 503 explícito, sin datos
+        internos ni rutas, en lugar de un 500 genérico."""
+        if request.path.startswith('/api/'):
+            return jsonify(error={'code': 'base_datos_no_disponible',
+                                  'message': 'La base de datos no está disponible. '
+                                             'Intente de nuevo en unos momentos.'}), 503
+        return Response('Base de datos no disponible. El CRM no puede atender la '
+                        'solicitud ahora; verifique la instalación o solicite soporte.',
+                        status=503, mimetype='text/plain; charset=utf-8')
+
+    @app.get('/health')
+    def health():
+        """Liveness: el proceso vivo responde. Sin BD, sin proveedores, sin
+        efectos secundarios. La salud de la BD se consulta en /ready."""
+        return jsonify(status='ok', servicio='crm')
+
+    @app.get('/ready')
+    def ready():
+        """Readiness: acceso a BD + esquema compatible (sólo lectura, nunca
+        ejecuta migraciones ni repara). La IA sin configurar se reporta como
+        limitación propia, sin afectar la disponibilidad del CRM ni simular."""
+        ok_db, db_detail = _health.probe_database(app.config['DATABASE'])
+        ia = _health.chat_ia_estado(_chat_adapter.ADAPTADOR_ACTIVO)
+        payload = {'status': 'ok' if ok_db else 'error',
+                   'checks': {'database': db_detail, 'chat_ia': ia}}
+        return jsonify(payload), 200 if ok_db else 503
 
     @app.route('/login', methods=['GET', 'POST'])
     def login():
@@ -386,7 +551,7 @@ def create_app(test_config=None):
             start=required('start'),
             end=required('end'),
             title=required('title'),
-            zone=app.config['TIMEZONE'],
+            zone=_eff_zone(app.config['DATABASE']),
             appointment_id=appointment_id,
             lead_id=lead_id,
             actor=g.user['id'],
@@ -394,7 +559,7 @@ def create_app(test_config=None):
             reason=request.form.get('reason') or None,
             role=g.user['role'],
             channel='web',
-            window_policy=app.config['PROFILE'].check_window,
+            window_policy=lambda s, e: _eff_check_window(app.config['DATABASE'], s, e),
         )
         if not result['ok']:
             raise ValueError(result['message'])
@@ -545,11 +710,11 @@ def create_app(test_config=None):
         result = save_appointment(
             app.config['DATABASE'], professional_id=professional_id,
             start=data.get('start'), end=data.get('end'),
-            title=data.get('title') or '', zone=app.config['TIMEZONE'],
+            title=data.get('title') or '', zone=_eff_zone(app.config['DATABASE']),
             lead_id=data.get('lead_id') or None, actor=g.user['id'],
             role=g.user['role'], channel='web',
             reason=data.get('reason') or None,
-            window_policy=app.config['PROFILE'].check_window)
+            window_policy=lambda s, e: _eff_check_window(app.config['DATABASE'], s, e))
         if not result['ok']:
             return api_error(result['code'], result['message'], service_status(result['code']))
         detail = appointment_detail(app.config['DATABASE'],
@@ -576,9 +741,10 @@ def create_app(test_config=None):
             result = reprogram_appointment(
                 database, appointment_id=identifier, start=data.get('start'),
                 end=data.get('end'), title=data.get('title'),
-                zone=app.config['TIMEZONE'], expected_version=version,
+                zone=_eff_zone(database), expected_version=version,
                 reason=data.get('reason'), actor=actor, role=role,
-                window_policy=app.config['PROFILE'].check_window)
+                window_policy=lambda s, e: _eff_check_window(database, s, e)
+            )
         elif action == 'cancel':
             result = cancel_appointment(database, appointment_id=identifier,
                                         expected_version=version, reason=data.get('reason'),
@@ -636,4 +802,586 @@ def create_app(test_config=None):
         if any(result.get('error') for result in results):
             raise click.ClickException('Hay calendarios o cambios con errores pendientes')
 
+    # C02: webhook de WhatsApp dentro del mismo arranque (ruta /webhook).
+    try:
+        from crm.whatsapp_webhook import wa_webhooks
+        app.register_blueprint(wa_webhooks)
+    except Exception as exc:  # nunca debe impedir arrancar el panel
+        app.logger.warning('No se pudo registrar el webhook de WhatsApp: %s', exc)
+
+    # C02: rutas API del catálogo editable y bandeja humana (mismo panel).
+    import crm.c02_services as c02
+
+    @app.get('/api/c02/catalog')
+    @protected()
+    def c02_catalog_list():
+        items = c02.catalog_list(app.config['DATABASE'], include_internal=g.user['role'] == 'admin')
+        return jsonify(items=items)
+
+    @app.post('/api/c02/catalog')
+    @protected()
+    def c02_catalog_create():
+        body = request.get_json(silent=True) or {}
+        res = c02.catalog_create(app.config['DATABASE'], name=body.get('name'),
+                                 kind=body.get('kind', 'servicio'),
+                                 professional_id=body.get('professional_id'),
+                                 created_by=g.user['id'])
+        if not res['ok']:
+            return jsonify(error={'code': res['code'], 'message': res['message']}), 400
+        return jsonify(res), 201
+
+    @app.get('/api/c02/catalog/<int:identifier>')
+    @protected()
+    def c02_catalog_detail(identifier):
+        res = c02.catalog_detail(app.config['DATABASE'], identifier,
+                                 include_internal=g.user['role'] == 'admin')
+        return jsonify(res), (200 if res['ok'] else 404)
+
+    @app.get('/api/c02/catalog/<int:identifier>/revisions')
+    @protected()
+    def c02_catalog_revisions(identifier):
+        return jsonify(c02.catalog_revisions(app.config['DATABASE'], identifier))
+
+    @app.post('/api/c02/catalog/<int:identifier>')
+    @protected()
+    def c02_catalog_update(identifier):
+        body = request.get_json(silent=True) or {}
+        res = c02.catalog_update(
+            app.config['DATABASE'], item_id=identifier,
+            expected_revision=body.get('revision'), field=body.get('field'),
+            value=body.get('value'), actor=g.user['id'],
+            reason=body.get('reason'), publish=body.get('publish'),
+            role=g.user['role'])
+        return jsonify(res), (200 if res['ok'] else 409 if res['code'] == 'version_conflict' else 400)
+
+    @app.post('/api/c02/catalog/<int:identifier>/publish')
+    @protected()
+    def c02_catalog_publish(identifier):
+        res = c02.catalog_publish(app.config['DATABASE'], item_id=identifier,
+                                  actor=g.user['id'])
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.get('/api/c02/knowledge')
+    @protected()
+    def c02_kb_list():
+        return jsonify(c02.kb_list(app.config['DATABASE'], role=g.user['role']))
+
+    @app.post('/api/c02/knowledge/upload')
+    @protected(admin=True)
+    def c02_kb_upload():
+        """Extrae un documento subido y devuelve una vista previa SIN guardar.
+
+        No se publica automáticamente: el archivo queda en borrador tras la
+        confirmación del usuario en /api/c02/knowledge. Los documentos son
+        fuentes de datos; sus instrucciones nunca modifican reglas del sistema.
+        """
+        from crm import c02_docs
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify(ok=False, error={'code': 'empty',
+                                            'message': 'Seleccione un archivo'}), 400
+        data = file.read(c02_docs.MAX_UPLOAD_BYTES + 1)
+        if len(data) > c02_docs.MAX_UPLOAD_BYTES:
+            return jsonify(ok=False, error={'code': 'too_large',
+                                            'message': 'El archivo excede el límite de 10 MB'}), 400
+        extracted = c02_docs.extraer_documento(file.filename, data)
+        preview = {
+            'filename': file.filename,
+            'kind': extracted['kind'],
+            'body_text': (extracted.get('body_text') or '')[:40000],
+            'procedencia': extracted.get('procedencia') or [],
+            'warnings': extracted.get('warnings') or [],
+            'extract_error': extracted.get('extract_error'),
+            'ok': extracted.get('ok', False),
+            'n_pages': extracted.get('n_pages'),
+            'sheets': len(extracted.get('sheets') or []),
+            'rows': sum(len(s.get('filas') or []) for s in (extracted.get('sheets') or [])),
+        }
+        if not extracted.get('ok'):
+            return jsonify(ok=False, preview=preview,
+                           error={'code': 'invalid',
+                                  'message': extracted.get('extract_error') or 'Formato no admitido'}), 400
+        return jsonify(ok=True, preview=preview)
+
+    @app.post('/api/c02/knowledge')
+    @protected(admin=True)
+    def c02_kb_save():
+        body = request.get_json(silent=True) or {}
+        res = c02.kb_upsert(app.config['DATABASE'], doc_id=body.get('doc_id'),
+                            name=body.get('name'), body_text=body.get('body_text', ''),
+                            kind=body.get('kind') or 'texto',
+                            visibility=body.get('visibility') or 'privado',
+                            source_name=body.get('source_name'),
+                            source_path=body.get('source_path'),
+                            procedencia=body.get('procedencia'),
+                            extract_error=body.get('extract_error'),
+                            actor=g.user['id'])
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.post('/api/c02/knowledge/<int:identifier>/publish')
+    @protected(admin=True)
+    def c02_kb_publish(identifier):
+        res = c02.kb_publish(app.config['DATABASE'], doc_id=identifier, actor=g.user['id'])
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.post('/api/c02/knowledge/<int:identifier>/deactivate')
+    @protected(admin=True)
+    def c02_kb_deactivate(identifier):
+        res = c02.kb_deactivate(app.config['DATABASE'], doc_id=identifier, actor=g.user['id'])
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.get('/api/c02/knowledge/<int:identifier>')
+    @protected()
+    def c02_kb_detail(identifier):
+        # El cuerpo del documento es interno: sólo un administrador puede editarlo.
+        res = c02.kb_detail(app.config['DATABASE'], identifier, role=g.user['role'])
+        return jsonify(res), (200 if res['ok'] else 403 if res['code'] == 'forbidden' else 404)
+
+    # --- Importación de inventario (punto 3 C02, paso B) ---
+    # Flujo separado y controlado: subir → hoja → mapeo → vista previa →
+    # confirmación explícita → aplicar. El mismo archivo se reenvía en cada
+    # paso (sin estado temporal en el servidor); nada se aplica sin confirmación.
+    @app.post('/api/c02/inventory/upload')
+    @protected(admin=True)
+    def c02_inventory_upload():
+        from crm import c02_inventory
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify(ok=False, error={'code': 'empty',
+                                            'message': 'Seleccione un archivo'}), 400
+        from crm import c02_docs as _docs
+        data = file.read(_docs.MAX_UPLOAD_BYTES + 1)
+        if len(data) > _docs.MAX_UPLOAD_BYTES:
+            return jsonify(ok=False, error={'code': 'too_large',
+                                            'message': 'El archivo excede el límite de 10 MB'}), 400
+        res = c02_inventory.inventory_upload_info(file.filename, data)
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.post('/api/c02/inventory/preview')
+    @protected(admin=True)
+    def c02_inventory_preview():
+        from crm import c02_inventory
+        from crm import c02_docs as _docs
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify(ok=False, error={'code': 'empty',
+                                            'message': 'Seleccione un archivo'}), 400
+        data = file.read(_docs.MAX_UPLOAD_BYTES + 1)
+        sheet = request.form.get('sheet', '')
+        mapping_raw = request.form.get('mapping', '{}')
+        try:
+            mapping = json.loads(mapping_raw)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error={'code': 'invalid',
+                                            'message': 'Mapeo de columnas no válido'}), 400
+        res = c02_inventory.inventory_preview(app.config['DATABASE'], file.filename,
+                                              data, sheet, mapping)
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.post('/api/c02/inventory/apply')
+    @protected(admin=True)
+    def c02_inventory_apply():
+        from crm import c02_inventory
+        from crm import c02_docs as _docs
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify(ok=False, error={'code': 'empty',
+                                            'message': 'Seleccione un archivo'}), 400
+        data = file.read(_docs.MAX_UPLOAD_BYTES + 1)
+        sheet = request.form.get('sheet', '')
+        confirm = request.form.get('confirm', '') == 'true'
+        mapping_raw = request.form.get('mapping', '{}')
+        try:
+            mapping = json.loads(mapping_raw)
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error={'code': 'invalid',
+                                            'message': 'Mapeo de columnas no válido'}), 400
+        res = c02_inventory.inventory_apply(app.config['DATABASE'], file.filename,
+                                            data, sheet, mapping, confirm,
+                                            actor=g.user['id'])
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.post('/api/c02/chat')
+    @protected()
+    def c02_chat_internal():
+        body = (request.get_json(silent=True) or {}).get('question', '')
+        res = c02.responder_chat_internal(app.config['DATABASE'], body, role=g.user['role'])
+        return jsonify(answer=res.get('answer', ''), ok=res.get('ok', True),
+                       fuente=res.get('fuente'), documento=res.get('documento'),
+                       version=res.get('version'), procedencia=res.get('procedencia'),
+                       fuentes=res.get('fuentes', []), abstencion=res.get('abstencion', False),
+                       adaptador=res.get('adaptador'), modo=res.get('modo'),
+                       fallo_proveedor=res.get('fallo_proveedor', False),
+                       telemetria=res.get('telemetria'),
+                       resumen=res.get('resumen'))
+
+    @app.get('/api/c02/config')
+    @protected()
+    def c02_config_get():
+        res = c02.config_get_all(app.config['DATABASE'])
+        # El saludo es interno (equipo); sólo un admin lo ve por completo.
+        if g.user['role'] != 'admin':
+            res['settings'] = {}
+        return jsonify(res)
+
+    @app.post('/api/c02/config')
+    @protected()
+    def c02_config_set():
+        if g.user['role'] != 'admin':
+            return jsonify(ok=False, error={'message': 'Sólo un administrador edita la configuración'}), 403
+        body = request.get_json(silent=True) or {}
+        res = c02.config_set(app.config['DATABASE'], key=body.get('key'),
+                             value=body.get('value'), actor=g.user['id'])
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.get('/api/c02/inbox')
+    @protected()
+    def c02_inbox_list():
+        from crm import c02_services as _c
+        alerts = _c.conv_alerts(app.config['DATABASE'])
+        convs = _c.conversations_list(app.config['DATABASE'],
+                                      role=g.user['role'], user_id=g.user['id'])
+        return jsonify(alerts=alerts, conversations=convs, active=None)
+
+    @app.get('/api/c02/inbox/<int:conversation_id>/messages')
+    @protected()
+    def c02_inbox_messages(conversation_id):
+        from crm import c02_services as _c
+        msgs = _c.conv_messages(app.config['DATABASE'], conversation_id)
+        return jsonify(messages=msgs)
+
+    @app.post('/api/c02/inbox/<int:conversation_id>/reply')
+    @protected()
+    def c02_inbox_reply(conversation_id):
+        from crm import c02_services as _c
+        data = request.get_json(silent=True) or {}
+        res = _c.conv_reply_humano(
+            app.config['DATABASE'], conversation_id=conversation_id,
+            user_id=g.user['id'], role=g.user['role'],
+            body=data.get('body', ''), request_id=data.get('request_id'))
+        status = {'forbidden': 403, 'not_found': 404, 'version_conflict': 409,
+                  'invalid': 400, 'empty': 400}.get(res.get('code'), 500 if not res['ok'] else 200)
+        return jsonify(res), status
+
+    @app.post('/api/c02/inbox/<int:conversation_id>/take')
+    @protected()
+    def c02_inbox_take(conversation_id):
+        res = c02.conv_take(app.config['DATABASE'], conversation_id=conversation_id,
+                            user_id=g.user['id'], role=g.user['role'])
+        return jsonify(res), (200 if res['ok'] else 403 if res['code'] == 'forbidden' else 409)
+
+    @app.post('/api/c02/inbox/<int:conversation_id>/return')
+    @protected()
+    def c02_inbox_return(conversation_id):
+        res = c02.conv_return(app.config['DATABASE'], conversation_id=conversation_id,
+                              user_id=g.user['id'])
+        return jsonify(res), (200 if res['ok'] else 403 if res['code'] == 'forbidden' else 409)
+
+    @app.post('/api/c02/inbox/<int:conversation_id>/close')
+    @protected()
+    def c02_inbox_close(conversation_id):
+        res = c02.conv_close(app.config['DATABASE'], conversation_id=conversation_id,
+                             user_id=g.user['id'])
+        return jsonify(res), (200 if res['ok'] else 403 if res['code'] == 'forbidden' else 409)
+
+    @app.post('/api/c02/inbox/alert/<int:alert_id>/mark')
+    @protected()
+    def c02_inbox_alert_mark(alert_id):
+        state = (request.get_json(silent=True) or {}).get('state', 'leida')
+        c02.conv_mark_alert(app.config['DATABASE'], alert_id, state)
+        return jsonify(ok=True)
+
+    # --- Alerta superior de atención humana (campana global) ---
+    # GET no muta estado: abrir la campana NO resuelve (la resolución es un
+    # acto explícito del operador). No expone mensajes privados completos,
+    # sólo motivo, prioridad, antigüedad, cliente y responsable.
+    @app.get('/api/c02/atencion')
+    @protected()
+    def c02_atencion_panel():
+        res = c02.atencion_panel(app.config['DATABASE'],
+                                 role=g.user['role'], user_id=g.user['id'])
+        return jsonify(res)
+
+    # --- Cita excepcional coordinada por el operador (C02) --------------------
+    # El BOT jamás crea citas fuera de horario ni salta reglas: sólo el operador
+    # autorizado (rol admin) puede PROPUESTA de excepción con motivo obligatorio
+    # y confirmación explícita de que cae fuera del horario habitual. Crear la
+    # cita NO resuelve reclamos ni devuelve el chat a la IA (actos separados).
+    @app.get('/api/c02/excepcion/slots')
+    @protected()
+    def c02_excepcion_slots():
+        database = app.config['DATABASE']
+        try:
+            professional_id = int(request.args.get('professional_id') or 0)
+            fecha = request.args.get('date') or ''
+            duration_min = int(request.args.get('duration_min') or 30)
+        except (TypeError, ValueError):
+            return api_error('invalid', 'Parámetros no válidos')
+        if duration_min < 5 or duration_min > 480:
+            return api_error('invalid', 'Duración no válida')
+        if professional_id <= 0:
+            # Sin profesional: devolver sólo el catálogo para la primera carga.
+            with connect(database) as conn:
+                profesionales = conn.execute(
+                    'SELECT id,name,active FROM crm_professionals ORDER BY name').fetchall()
+            return jsonify(ok=True, cerrado=False, fuera_horario_permitido=False,
+                           slots=[], motivo=None,
+                           profesionales=[dict(p) for p in profesionales],
+                           recursos_fisicos=False)
+        res = _slots_dia(database, professional_id, fecha, duration_min)
+        if not res['ok']:
+            return api_error(res['code'], res['message'])
+        return jsonify(res)
+
+    @app.post('/api/c02/excepcion')
+    @protected()
+    def c02_excepcion_create():
+        from crm import c02_services as _c
+        data = request.get_json(silent=True) or {}
+        database = app.config['DATABASE']
+        try:
+            professional_id = int(data.get('professional_id'))
+            duration_min = int(data.get('duration_min') or 30)
+        except (TypeError, ValueError):
+            return api_error('invalid', 'Datos de la cita no válidos')
+        fecha = str(data.get('fecha') or '')
+        inicio = str(data.get('inicio') or '')
+        excepcional = bool(data.get('excepcional'))
+        confirmada = data.get('confirmada_fuera_horario') is True
+        motivo = (data.get('motivo') or '').strip()
+        try:
+            d = date.fromisoformat(fecha)
+            hhmm = datetime.strptime(inicio, '%H:%M').time()
+        except (TypeError, ValueError):
+            return api_error('invalid', 'Fecha u hora no válidas')
+        if duration_min < 5 or duration_min > 480:
+            return api_error('invalid', 'Duración no válida')
+        if excepcional and g.user['role'] != 'admin':
+            return api_error('forbidden',
+                             'Solo el administrador puede autorizar una cita excepcional', 403)
+        if excepcional and (len(motivo) < 8 or not confirmada):
+            return api_error('invalid',
+                             'Una cita excepcional exige un motivo (mínimo 8 caracteres) y '
+                             'la confirmación de que está fuera del horario habitual')
+        titulo = ((data.get('title') or '').strip() or 'Cita excepcional')[:200]
+        zona = _eff_zone(database)
+        tz = ZoneInfo(zona)
+        ini_l = datetime(d.year, d.month, d.day, hhmm.hour, hhmm.minute, tzinfo=tz)
+        fin_l = ini_l + timedelta(minutes=duration_min)
+        start_utc, end_utc = ini_l.astimezone(timezone.utc), fin_l.astimezone(timezone.utc)
+        wmotivo = _eff_check_window(database, start_utc, end_utc)
+        if excepcional:
+            if wmotivo is None:
+                return api_error('no_requiere_excepcion',
+                                 'Ese horario está dentro del horario habitual; '
+                                 'cree la cita sin excepción.')
+            if _bloqueo_manual_fecha(database, fecha):
+                return api_error('fecha_bloqueada',
+                                 'El negocio tiene un bloqueo ese día; la excepción no '
+                                 'puede saltarlo. Elija otra fecha u horario.')
+        elif wmotivo is not None:
+            return api_error('outside_window',
+                             'Ese horario está fuera del horario habitual; use el flujo '
+                             'de cita excepcional (con motivo y autorización).')
+        result = save_appointment(
+            database, professional_id=professional_id,
+            start=start_utc.isoformat(), end=end_utc.isoformat(),
+            title=titulo, zone=zona,
+            lead_id=data.get('lead_id') or None, actor=g.user['id'],
+            role='admin' if excepcional else g.user['role'], channel='web',
+            reason=motivo or None,
+            window_policy=lambda s, e: _eff_check_window(database, s, e))
+        if not result['ok']:
+            return api_error(result['code'], result['message'],
+                             service_status(result['code']))
+        cita_id = result['appointment']['id']
+        conv_id = data.get('conversation_id')
+        if conv_id:
+            _c.conv_add_message(database, int(conv_id), direction='internal',
+                                body=('Cita #%d creada por el operador%s. Motivo: %s.'
+                                      % (cita_id,
+                                         ' (fuera del horario habitual)' if excepcional else '',
+                                         motivo or '—')),
+                                author_type='sistema')
+        return jsonify(ok=True, excepcional=excepcional,
+                       appointment={'id': cita_id,
+                                    'professional_id': professional_id,
+                                    'start': result['appointment']['start'],
+                                    'end': result['appointment']['end'],
+                                    'title': titulo}), 201
+
+    # --- Biblioteca de recursos privados (punto 5, 2026-10-29) ---
+    @app.get('/api/c02/library')
+    @protected()
+    def c02_library_list():
+        from crm import library as _lib
+        return jsonify(items=_lib.library_list(app.config['DATABASE']))
+
+    @app.get('/api/c02/library/<int:resource_id>')
+    @protected(admin=True)
+    def c02_library_detail(resource_id):
+        from crm import library as _lib
+        res = _lib.library_detail(app.config['DATABASE'], resource_id)
+        return jsonify(res), (200 if res else 404)
+
+    @app.post('/api/c02/library/upload')
+    @protected(admin=True)
+    def c02_library_upload():
+        """Sube un recurso privado (PDF/catálogo/lista de precios) o una nueva
+        versión. No se publica en RAG sin allow_rag; los archivos no se sirven
+        como estáticos. La aprobación de plantillas Meta no se toca aquí."""
+        from crm import library as _lib
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify(ok=False, error={'code': 'empty',
+                                            'message': 'Seleccione un archivo'}), 400
+        data = file.read(_lib.MAX_RESOURCE_BYTES + 1)
+        if len(data) > _lib.MAX_RESOURCE_BYTES:
+            return jsonify(ok=False, error={'code': 'too_large',
+                                            'message': 'El archivo excede el límite de 10 MB'}), 400
+        res = _lib.library_upload(
+            app.config['DATABASE'], name=request.form.get('name', ''),
+            filename=file.filename, data=data,
+            categoria=request.form.get('categoria') or 'documento',
+            descripcion=request.form.get('descripcion'),
+            allow_send=request.form.get('allow_send') in ('1', 'true', 'on'),
+            allow_rag=request.form.get('allow_rag', '1') in ('1', 'true', 'on'),
+            actor=g.user['id'],
+            resource_id=request.form.get('resource_id') or None)
+        return jsonify(res), 201 if res.get('ok') else 400
+
+    @app.post('/api/c02/library/<int:resource_id>')
+    @protected(admin=True)
+    def c02_library_update(resource_id):
+        from crm import library as _lib
+        b = request.get_json(silent=True) or {}
+        res = _lib.library_update(app.config['DATABASE'], resource_id,
+                                  actor=g.user['id'],
+                                  name=b.get('name'), descripcion=b.get('descripcion'),
+                                  categoria=b.get('categoria'),
+                                  allow_send=b.get('allow_send'),
+                                  allow_rag=b.get('allow_rag'))
+        return jsonify(res), 200 if res.get('ok') else 400
+
+    @app.post('/api/c02/library/<int:resource_id>/retirar')
+    @protected(admin=True)
+    def c02_library_retirar(resource_id):
+        from crm import library as _lib
+        res = _lib.library_retirar(app.config['DATABASE'], resource_id,
+                                   actor=g.user['id'])
+        return jsonify(res), 200 if res.get('ok') else 404 if res['code'] == 'not_found' else 400
+
+    @app.get('/api/c02/library/<int:resource_id>/archivo')
+    @protected(admin=True)
+    def c02_library_archivo(resource_id):
+        """Descarga autorizada de un recurso privado (sólo administradores)."""
+        from flask import send_file
+        from crm import library as _lib
+        ruta, nombre = _lib.library_descargar(app.config['DATABASE'], resource_id)
+        if not ruta:
+            abort(404)
+        return send_file(ruta, as_attachment=True, download_name=nombre)
+
+    # --- Plantillas WhatsApp (declaración local; aprobación = Meta) ---
+    @app.get('/api/c02/plantillas')
+    @protected()
+    def c02_plantillas_list():
+        from crm import library as _lib
+        return jsonify(items=_lib.plantillas_list(app.config['DATABASE']))
+
+    @app.post('/api/c02/plantillas')
+    @protected(admin=True)
+    def c02_plantillas_upsert():
+        from crm import library as _lib
+        b = request.get_json(silent=True) or {}
+        res = _lib.plantilla_upsert(
+            app.config['DATABASE'], template_id=b.get('template_id'),
+            name=b.get('name', ''), language=b.get('language', 'es'),
+            category=b.get('category', 'UTILITY'), body=b.get('body', ''),
+            parameters=b.get('parameters'), actor=g.user['id'],
+            estado=b.get('estado'))
+        return jsonify(res), 201 if res.get('ok') else 400
+
+    @app.post('/api/c02/plantillas/<int:template_id>/retirar')
+    @protected(admin=True)
+    def c02_plantillas_retirar(template_id):
+        from crm import library as _lib
+        res = _lib.plantilla_retirar(app.config['DATABASE'], template_id,
+                                     actor=g.user['id'])
+        return jsonify(res), 200 if res.get('ok') else 404 if res['code'] == 'not_found' else 400
+
+    @app.post('/api/c02/plantillas/<int:template_id>/preparar-envio')
+    @protected(admin=True)
+    def c02_plantilla_preparar_envio(template_id):
+        """Selecciona una plantilla (SÓLO aprobada por verificación externa)
+        con parámetros y la encola en el outbox existente por el canal WhatsApp.
+        Respeta: control humano (la bandeja sigue vigente), ventana de 24 h
+        (WH-04 difiere el texto libre; la plantilla explícita sí viaja) y
+        protección contra duplicados (request_id estable idempotente). NO
+        envía por sí mismo: encola para el egress/worker."""
+        from crm import library as _lib
+        b = request.get_json(silent=True) or {}
+        aprobadas = {t['id']: t for t in _lib.plantillas_seleccionables(
+            app.config['DATABASE'])}
+        t = aprobadas.get(template_id)
+        if not t:
+            return jsonify(ok=False, code='not_aproved',
+                           error={'code': 'not_aproved',
+                                  'message': ('Sólo una plantilla con aprobación'
+                                              ' verificada del proveedor puede'
+                                              ' prepararse para envío; el estado'
+                                              ' actual no lo permite.')}), 400
+        recipient = re.sub(r'[^0-9]', '', str(b.get('phone') or ''))
+        if not (7 <= len(recipient) <= 15):
+            return jsonify(ok=False, error={'code': 'invalid',
+                                            'message': 'Destinatario inválido'
+                                                        ' (número de 7 a 15 dígitos).'}), 400
+        params = b.get('parametros')
+        if not isinstance(params, list) or not all(isinstance(x, str) for x in params):
+            return jsonify(ok=False, error={'code': 'invalid',
+                                            'message': 'Parámetros: lista de cadenas.'}), 400
+        request_id = c02._clean(b.get('request_id'), 120)
+        if not request_id:
+            return jsonify(ok=False, error={'code': 'invalid',
+                                            'message': 'Se requiere request_id'
+                                                        ' estable (idempotencia).'}), 400
+        try:
+            res = c02.outbox_enqueue(
+                app.config['DATABASE'], channel='whatsapp', recipient=recipient,
+                payload={'plantilla': {'nombre': t['name'], 'idioma': t['language'],
+                                       'parametros': params[:10]}},
+                correlation=c02._clean(b.get('correlation'), 120) or None,
+                request_id=request_id, origin='humano')
+        except sqlite3.IntegrityError:
+            with connect(app.config['DATABASE']) as conn:
+                row = conn.execute('SELECT id FROM crm_outbox WHERE request_id=?',
+                                   (request_id,)).fetchone()
+            return jsonify(ok=True, code='existing', outbox_id=row['id'] if row else None,
+                           duplicated=True), 200
+        return jsonify(res), 201 if res.get('ok') else 400
+
+    @app.get('/api/c02/outbox')
+    @protected()
+    def c02_outbox_list():
+        """Biblioteca de envíos (sólo lectura): historial reciente del outbox
+        con estado del proveedor y eventos de entrega. No reenvía ni muta."""
+        items = c02.outbox_history(app.config['DATABASE'], limit=200)
+        return jsonify(items=items)
+
     return app
+
+
+def _alerts_to_conversations(database, alerts):
+    """Resumen de conversaciones con alerta activa para la bandeja."""
+    from crm.store import connect
+    try:
+        with connect(database) as conn:
+            rows = conn.execute(
+                "SELECT c.*, u.name AS responsible_name FROM crm_conversations c "
+                "LEFT JOIN crm_users u ON u.id=c.responsible_user_id "
+                "WHERE c.id IN (SELECT DISTINCT conversation_id FROM crm_human_alerts "
+                "                WHERE state='activa') ORDER BY c.updated_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
