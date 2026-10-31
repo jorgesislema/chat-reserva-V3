@@ -1,0 +1,87 @@
+{# C02 — Biblioteca de recursos privados (punto 5, 2026-10-29). Catálogo
+   privado de PDFs, catálogos y listas de precios CON permisos separados de
+   envío y RAG, versiones y retirada con trazabilidad. Las plantillas WhatsApp
+   se declaran aquí; su aprobación la fija SOLO Meta: sin verificación externa
+   el estado es «Sin verificar». NO sustituye al «Historial de envíos».
+   Sin scripts inline (CSP estricta). #}
+<section>
+  <div class="page-head">
+    <p class="muted">Archivos privados del negocio (listas de precios, catálogos, documentos). Cada recurso controla por separado si puede <strong>enviarse</strong> a pacientes y si puede usarse en <strong>RAG</strong> para el asistente. Retirar conserva la trazabilidad.</p>
+  </div>
+
+  <div id="c02-library-app" data-csrf="{{ csrf }}" data-admin="{{ '1' if user.role=='admin' else '0' }}">
+    {% if user.role=='admin' %}
+    <div class="card">
+      <h2>Subir recurso</h2>
+      <form id="c02-lib-form">
+        <div class="form-grid">
+          <label>Archivo (PDF, .xlsx, .csv, .txt, .md; máx 10 MB)
+            <input type="file" id="c02-lib-file" accept=".pdf,.xlsx,.csv,.txt,.md"></label>
+          <label>Nombre<input id="c02-lib-name" maxlength="200" required placeholder="Lista de precios 2026"></label>
+          <label>Categoría<select id="c02-lib-cat">
+            <option value="documento">Documento</option>
+            <option value="catalogo">Catálogo</option>
+            <option value="lista_precios">Lista de precios</option>
+          </select></label>
+        </div>
+        <label>Descripción<input id="c02-lib-desc" maxlength="1000" placeholder="Para qué sirve este recurso"></label>
+        <div class="check-row">
+          <label class="check"><input type="checkbox" id="c02-lib-send">Permitir <strong>enviar</strong> a pacientes</label>
+          <label class="check"><input type="checkbox" id="c02-lib-rag" checked>Permitir uso en <strong>RAG</strong> (asistente)</label>
+        </div>
+        <p class="muted">Permisos independientes: un recurso puede estar archivado sin que el asistente lo lea, o leído sin poder enviarse. El texto extraído es sólo fuente de datos.</p>
+        <button type="submit" class="button">Subir recurso</button>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="status-line info" id="c02-lib-status" role="status" aria-live="polite"></div>
+    <div class="table-wrap">
+      <table class="preview-table" id="c02-lib-table">
+        <thead><tr>
+          <th>Nombre</th><th>Categoría</th><th>Versión</th><th>Estado</th>
+          <th>Envío</th><th>RAG</th><th>Fragmentos</th><th>Tamaño</th>
+          {% if user.role=='admin' %}<th>Gestionar</th>{% endif %}
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="preview-note" id="c02-lib-empty" hidden>Sin recursos todavía. Suba el primero (solo administradores).</p>
+    <p class="muted">Los recursos retirados se listan al final con su marca de retirada; el archivo y las versiones se conservan para auditoría.</p>
+  </div>
+
+  <h2 class="library-sub">Plantillas WhatsApp (declaración local)</h2>
+  <p class="muted">Cuerpo, idioma, categoría y parámetros se preparan aquí. <strong>Guardar un borrador NO aprueba la plantilla:</strong> el estado «Aprobada por Meta» sólo llega con verificación externa real. Sin conexión, la lista muestra «Sin verificar».</p>
+  <div id="c02-plantillas-app" data-csrf="{{ csrf }}" data-admin="{{ '1' if user.role=='admin' else '0' }}">
+    {% if user.role=='admin' %}
+    <div class="card">
+      <h3>Nueva plantilla</h3>
+      <form id="c02_tpl_form">
+        <div class="form-grid">
+          <label>Nombre<input id="c02_tpl_name" required maxlength="100" placeholder="recordatorio_cita"></label>
+          <label>Idioma<select id="c02_tpl_lang"><option value="es">Español (es)</option><option value="en">Inglés (en)</option></select></label>
+          <label>Categoría<select id="c02_tpl_cat">
+            <option value="UTILITY">Utilidad</option>
+            <option value="MARKETING">Marketing</option>
+            <option value="AUTHENTICATION">Autenticación</option>
+          </select></label>
+        </div>
+        <label>Cuerpo<textarea id="c02_tpl_body" rows="3" required placeholder="Hola {{1}}, su cita es el {{2}}."></textarea></label>
+        <label>Parámetros (uno por línea, en orden)<textarea id="c02_tpl_params" rows="2" placeholder="Nombre&#10;Fecha"></textarea></label>
+        <button type="submit" class="button">Guardar borrador local</button>
+      </form>
+    </div>
+    {% endif %}
+    <div class="table-wrap">
+      <table class="preview-table" id="c02_tpl_table">
+        <thead><tr>
+          <th>Nombre</th><th>Idioma</th><th>Categoría</th><th>Parámetros</th>
+          <th>Estado real</th><th>Verificado</th>
+          {% if user.role=='admin' %}<th>Gestionar</th>{% endif %}
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <p class="preview-note" id="c02_tpl_empty" hidden>Sin plantillas declaradas.</p>
+  </div>
+</section>
