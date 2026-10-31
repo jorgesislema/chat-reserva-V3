@@ -574,6 +574,28 @@ class ClasificadorIntenciones:
                                                           AdaptadorRemotoConfigurable)
                                             else None)
 
+    @staticmethod
+    def _parsear_intencion(contenido: str) -> str:
+        """Analiza ESTRICTAMENTE la respuesta del proveedor y devuelve la
+        etiqueta de intención.
+
+        Acepta JSON plano o el mismo JSON envuelto en un bloque Markdown de
+        código (```json ... ```). NO extrae JSON de texto arbitrario: si el
+        contenido empieza por ``` pero no es un bloque JSON exacto, o no es
+        JSON plano válido, levanta ValueError (→ `respuesta_invalida`).
+        """
+        contenido = (contenido or '').strip()
+        if contenido.startswith('```'):
+            bloque = re.fullmatch(r'```(?:json)?\s*(.*?)\s*```', contenido,
+                                  re.DOTALL)
+            if not bloque:
+                raise ValueError('delimitadores markdown de JSON incompletos')
+            contenido = bloque.group(1).strip()
+        etiqueta = str(json.loads(contenido).get('intencion') or '').strip().lower()
+        if not etiqueta:
+            raise ValueError('respuesta sin campo intencion')
+        return etiqueta
+
     def clasificar(self, texto: str, contexto: Optional[dict] = None) -> tuple[str, dict]:
         contexto = contexto or {}
         # En pruebas se inyecta el adaptador simulado por elección EXPLÍCITA;
@@ -615,8 +637,8 @@ class ClasificadorIntenciones:
             return ('indisponible', {'razon': 'fallo_proveedor:%s' % exc.mensaje,
                                      'fallo': True})
         try:
-            etiqueta = str(json.loads(contenido).get('intencion') or '').strip().lower()
-        except (ValueError, AttributeError):
+            etiqueta = self._parsear_intencion(contenido)
+        except (ValueError, TypeError, AttributeError):
             return ('indisponible', {'razon': 'respuesta_invalida'})
         if etiqueta.startswith('#'):
             etiqueta = etiqueta.lstrip('#')
