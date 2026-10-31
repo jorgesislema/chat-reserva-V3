@@ -1,0 +1,6 @@
+## 2026-10-29 — REVISOR: FASE 2 IA APROBADA EN EL ALCANCE REVISADO
+
+Inspeccionados cambio de crm/chat_adapter.py (precio en unidades/moneda en contexto de catálogo y stock), aserciones fase2 y actualización VALIDACION_IA_REAL_20261029.md. Evidencia externa del ejecutor: fase2 4/4 PASS y repetición de casos afectados; no se repitieron llamadas externas por el revisor. Regresión independiente local: tests/test_chat_adapter_remoto.py y tests/test_c02_chat.py, 31 passed,9 warnings,20.68s,exit0, base temporal y modo de prueba explícito en proceso. No se inspeccionaron claves ni se modificó código.
+Se acepta actualización publicada/desactivación/precio-stock dentro de los escenarios documentados; no constituye garantía universal de ausencia de alucinaciones. Alcance global de configuración y conteo de consultas vs intentos HTTP no medidos quedan aclarados; coste/cuota del proyecto sin certificar. Se cierra esta fase de validación del asistente, no C02 ni producción.
+PRÓXIMA ACCIÓN EXACTA: actualizar ejemplo de configuración sin secretos (pendiente menor) y preparar validación WhatsApp real con número de prueba autorizado según lista de salida vigente. No repetir fases IA completas ni aprobaciones previas por rutina. Google Calendar/recordatorios y demás pendientes conservados.
+
