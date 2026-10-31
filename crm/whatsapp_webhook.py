@@ -36,21 +36,37 @@ def _verify_signature(secret: str, signature_header: str, raw_body: bytes) -> bo
 
 
 def _parse_batch(payload: dict):
-    """Extrae todos los mensajes entrantes del lote, con su cuenta origen."""
-    out = []
+    """Extrae todos los mensajes entrantes y avisos de estado del lote."""
+    mensajes = []
+    estados = []
     for entry in payload.get('entry', []) or []:
         account = entry.get('id', 'whatsapp')
         for change in entry.get('changes', []) or []:
             value = change.get('value', {}) or {}
             for msg in value.get('messages', []) or []:
-                out.append({
+                mensajes.append({
                     'account': account,
                     'external_id': msg.get('id'),
                     'phone': (msg.get('from') or '')[:40],
                     'kind': msg.get('type', 'text'),
                     'text': ((msg.get('text') or {}).get('body') or '').strip(),
                 })
-    return out
+            for st in value.get('statuses', []) or []:
+                errores = ''
+                errs = st.get('errors') or []
+                if errs and isinstance(errs[0], dict):
+                    code = errs[0].get('code') or ''
+                    detail = (errs[0].get('message') or errs[0].get('details') or '')[:120]
+                    errores = 'code%s:%s' % (code, detail)
+                estados.append({
+                    'account': account,
+                    'external_id': st.get('id'),
+                    'status': st.get('status', ''),
+                    'timestamp': st.get('timestamp'),
+                    'recipient_id': st.get('recipient_id', ''),
+                    'error': errores,
+                })
+    return {'messages': mensajes, 'statuses': estados}
 
 
 @wa_webhooks.route('/webhook', methods=['GET', 'POST'])
@@ -77,13 +93,25 @@ def webhook_whatsapp():
     if not isinstance(payload, dict):
         return jsonify(error={'code': 'invalid_json'}), 400
 
-    # Mensajes de estado (read/status/etc.) no llevan 'messages': ack 200.
-    messages = _parse_batch(payload)
-    if not messages:
+    batch = _parse_batch(payload)
+
+    # Avisos de estado (sent/delivered/read/failed) de mensajes SALIENTES:
+    # actualizan el outbox por wamid de forma idempotente y estable frente a
+    # eventos repetidos o fuera de orden. Siempre se ack 200 (Meta reintenta
+    # durante días si no acusamos).
+    db_path = current_app.config['DATABASE']
+    for st in batch['statuses']:
+        if st['external_id'] and st['status']:
+            svc.outbox_webhook_status(
+                db_path, wamid=st['external_id'], status=st['status'],
+                timestamp=st['timestamp'], error=st['error'] or None,
+                recipient_id=st['recipient_id'] or None)
+
+    # Mensajes entrantes: persistencia durable con idempotencia por ID externo.
+    if not batch['messages']:
         return Response('ok', status=200)
 
-    db_path = current_app.config['DATABASE']
-    for msg in messages:
+    for msg in batch['messages']:
         result = svc.wa_ingest(
             db_path,
             external_id=msg['external_id'] or ('unid-' + str(abs(hash(str(msg))))),
