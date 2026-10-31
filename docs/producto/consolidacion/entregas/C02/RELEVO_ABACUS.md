@@ -3065,4 +3065,18 @@ CONDICIÓN V7: solo abrir si (a) WHATSAPP_PHONE_ID termina en 14843 (coincide co
 ### Continuar desde aquí
 1. No reabrir la ventana; si el propietario desea otra prueba, autorización expresa para V8 y avisar «Listo, envía ahora un hola NUEVO» en el MISMO turno de arranque, con worker recién activo y margen completo (~15 min).
 2. Precondiciones pendientes de V7 (sin secretos): WHATSAPP_PHONE_ID termina en 14843, número original activo en Meta, Activity log del evento 16:09:39 (URL/código/hora), destinatario ...1132 habilitado.
-3. Sin cambios de código/config/.env/IDs; sin SQL; sin envíos; sin reprocesamiento; sin commit/push en esta ventana.
+3. Sin cambios de código/config/.env/IDs; sin SQL; sin envíos; sin reprocesamiento; sin commit/push en esta ventana.## RELEVO — VENTANA V8 CERRADA (2026-10-31, 23:11-23:20Z): CALLBACK 200/403/404 OK; «HOLA» ENVIADO NO ENTREGADO AL WEBHOOK (ETAPA RECEPCIÓN); CIERRE COMPLETO
+
+### Resultado real
+- Preflight read-only PASS (VM limpia; outbox solo cancelada; ops 1-6 hecho; conv 2 ia_activa; saludo con prefijo; emisor = número original PNID ...14843 / WABA ...1964).
+- Receptor PID 124375 en 0.0.0.0:8931; puerto 8931 publicado; /webhook verificado por HTTPS externo: 200 RETO_V8 / 403 sin token / 404 raíz.
+- Aviso «Listo, envía ahora un hola NUEVO al número de prueba original» emitido; worker NO arrancado (esperar persistencia).
+- Propietario envió y confirmó «enviado»; verificaciones 23:16Z y 23:19Z: SIN persistencia (wa_messages max 6), SIN operaciones nuevas, outbox solo cancelada; log del receptor íntegro con CERO POST de Meta.
+- ETAPA DE FALLO: RECEPCIÓN — el evento de Meta no llegó al callback. Sin entrada no hubo worker, operación, outbox ni texto de respuesta.
+- Cierre completo por orden: receptor detenido, socket 8931 libre, puerto despublicado (`ports=[]`), base conservada.
+- Código HTTP del intento de entrega en Meta: NO disponible sin el Activity log del panel (sesión del propietario; Graph API no lo expone). No se afirma ningún código.
+
+### Continuar desde aquí
+1. Propietario: en el panel de Meta, Activity log del momento de su envío → URL de callback intentada, código HTTP, hora; comunicar la hora exacta (local/UTC) del envío.
+2. Sin esa evidencia NO se abre V9 ni se solicita otro mensaje; WhatsApp NO operativo; C02 NO cerrado.
+3. No cambiar .env/IDs/config de Meta sin confirmar la causa del 16:09 (todavía HIPÓTESIS: túnel vencido) ni la del 23:1x (sin datos de Meta aún). Sin commit/push.
