@@ -32,13 +32,32 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-@contextmanager
+class _UoW:
+    """Unidad de trabajo reutilizable sobre una conexión ya abierta.
+
+    Reemplaza al @contextmanager (Python 3.13 borra args/kwds al salir y un
+    mismo uow no puede abrirse dos veces; ``reprogram_appointment`` lo abre en
+    dos tramos). Semántica idéntica: entrega la conexión sin commit ni cierre.
+    """
+
+    def __init__(self, existing_conn):
+        self._conn = existing_conn
+
+    def __enter__(self):
+        return self._conn
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
 def use(existing_conn):
     """Unidad de trabajo sobre una conexión ya abierta: la entrega sin cerrar la
     transacción (ni commit ni rollback). El dueño de la conexión la cierra con su
     propio commit/rollback, de modo que las llamadas al dominio dentro del bloque
-    comparten la MISMA transacción (operación atómica)."""
-    yield existing_conn
+    comparten la MISMA transacción (operación atómica). Reutilizable: puede
+    abrirse más de una vez dentro del mismo flujo, siempre con la misma
+    conexión."""
+    return _UoW(existing_conn)
 
 
 @contextmanager
@@ -419,6 +438,308 @@ def _migration_011_c02_fase_envio(db):
     db.execute('ALTER TABLE crm_outbox ADD COLUMN began_at TEXT')
 
 
+# v12 (punto 3 C02): conocimiento documental editable.
+#  - crm_kb_documents: procedencia (JSON con páginas/secciones/hojas/filas),
+#    error de extracción/validación y autor de la carga; puramente aditivo.
+#  - crm_inventory_imports: registro auditable de importaciones de inventario
+#    (archivo, hoja, huella sha256, mapeo, resumen, usuario y fecha) con
+#    unicidad por (sha256, hoja) para que repetir la misma importación no
+#    aplique cambios silenciosos por segunda vez.
+def _migration_012_c02_docs(db):
+    """v12 — conocimiento documental editable (punto 3 C02).
+
+    Se amplía el CHECK de ``kind`` de crm_kb_documents a los tipos de oficina
+    (docx/xlsx/csv) y se añaden procedencia, error de extracción y autor. SQLite
+    no permite alterar un CHECK: se reconstruye la tabla preservando filas,
+    columnas, fragmentos e índices (rebuild sin pérdida), igual que en v9.
+    """
+    # 1) Nueva tabla con el CHECK ampliado y las columnas de origen.
+    db.execute("""CREATE TABLE crm_kb_documents_v12 (
+         id INTEGER PRIMARY KEY,
+         name TEXT NOT NULL,
+         version INTEGER NOT NULL DEFAULT 1,
+         state TEXT NOT NULL DEFAULT 'borrador'
+           CHECK(state IN ('borrador','publicado','desactivado','error')),
+         visibility TEXT NOT NULL DEFAULT 'privado' CHECK(visibility IN ('privado','publico')),
+         kind TEXT NOT NULL DEFAULT 'texto'
+           CHECK(kind IN ('texto','md','txt','pdf','docx','xlsx','csv')),
+         body_text TEXT NOT NULL DEFAULT '',
+         source_name TEXT, source_path TEXT,
+         index_state TEXT NOT NULL DEFAULT 'pendiente'
+           CHECK(index_state IN ('pendiente','listo','error')),
+         index_error TEXT,
+         procedencia TEXT, extract_error TEXT,
+         uploaded_by INTEGER REFERENCES crm_users(id),
+         created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+    db.execute("""INSERT INTO crm_kb_documents_v12
+                  (id, name, version, state, visibility, kind, body_text,
+                   source_name, source_path, index_state, index_error,
+                   created_at, updated_at)
+                  SELECT id, name, version, state, visibility, kind, body_text,
+                   source_name, source_path, index_state, index_error,
+                   created_at, updated_at FROM crm_kb_documents""")
+    # 2) Planilla de fragmentos: se re-crea con la misma definición.
+    db.execute("""CREATE TABLE crm_kb_fragments_v12 (
+         id INTEGER PRIMARY KEY,
+         doc_id INTEGER NOT NULL REFERENCES crm_kb_documents_v12(id),
+         doc_version INTEGER NOT NULL,
+         visibility TEXT NOT NULL DEFAULT 'privado',
+         body TEXT NOT NULL)""")
+    db.execute("""INSERT INTO crm_kb_fragments_v12
+                  (id, doc_id, doc_version, visibility, body)
+                  SELECT id, doc_id, doc_version, visibility, body
+                  FROM crm_kb_fragments""")
+    # 3) Reemplazo de tablas conservando los datos.
+    db.execute('DROP TABLE crm_kb_fragments')
+    db.execute('DROP TABLE crm_kb_documents')
+    db.execute('ALTER TABLE crm_kb_documents_v12 RENAME TO crm_kb_documents')
+    db.execute('ALTER TABLE crm_kb_fragments_v12 RENAME TO crm_kb_fragments')
+    db.execute("CREATE INDEX IF NOT EXISTS crm_kb_fragments_doc "
+               "ON crm_kb_fragments(doc_id, doc_version)")
+    # 4) Registro auditable de importaciones de inventario (paso B): archivo,
+    # hoja, huella sha256, mapeo y resultado; repetir una importación ya
+    # aplicada no re-aplica cambios silenciosos (UNIQUE sha256+hoja).
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_inventory_imports (
+             id INTEGER PRIMARY KEY,
+             filename TEXT NOT NULL,
+             sheet TEXT NOT NULL,
+             sha256 TEXT NOT NULL,
+             mapping TEXT NOT NULL,
+             summary TEXT NOT NULL,
+             created_by INTEGER REFERENCES crm_users(id),
+             created_at TEXT NOT NULL,
+             UNIQUE(sha256, sheet))""")
+
+
+def _migration_013_c02_whatsapp_real(db):
+    """v13 — transporte WhatsApp real: wamid y salida diferida fuera de ventana.
+
+    - ``provider_message_id``: identificador del mensaje devuelto por Meta
+      (wamid) al aceptar el envío; se usa para correlacionar los webhooks de
+      estado (sent/delivered/read/failed). Puramente aditivo.
+    - Estado ``diferido`` en el CHECK de crm_outbox: salida de texto libre que
+      NO se envía porque el destinatario está FUERA de la ventana de atención de
+      24 h y no hay plantilla aprobada configurada; queda pendiente con motivo
+      claro (provider_state) y se puede liberar manualmente o reaprovisionar.
+      SQLite no permite alterar un CHECK: se reconstruye la tabla preservando
+      todas las filas, columnas e índices (rebuild sin pérdida, igual que v9).
+    """
+    db.execute('DROP INDEX IF EXISTS crm_outbox_pending')
+    db.execute('DROP INDEX IF EXISTS crm_outbox_request')
+    db.execute('DROP INDEX IF EXISTS crm_outbox_conv')
+    db.execute('ALTER TABLE crm_outbox RENAME TO crm_outbox_v12')
+    db.execute(
+        """CREATE TABLE crm_outbox (
+             id INTEGER PRIMARY KEY,
+             operation_id INTEGER,
+             channel TEXT NOT NULL DEFAULT 'whatsapp',
+             recipient TEXT NOT NULL,
+             payload TEXT NOT NULL,
+             correlation TEXT,
+             state TEXT NOT NULL DEFAULT 'pendiente'
+               CHECK(state IN ('pendiente','intento','autorizado','enviado','fallo','incierto','diferido')),
+             provider_state TEXT,
+             attempts INTEGER NOT NULL DEFAULT 0,
+             conversation_id INTEGER,
+             origin TEXT NOT NULL DEFAULT 'ia',
+             generation INTEGER NOT NULL DEFAULT 0,
+             request_id TEXT,
+             claimed_by TEXT,
+             claimed_at TEXT,
+             began_at TEXT,
+             provider_message_id TEXT,
+             created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+    db.execute(
+        """INSERT INTO crm_outbox
+             (id, operation_id, channel, recipient, payload, correlation,
+              state, provider_state, attempts, conversation_id, origin,
+              generation, request_id, claimed_by, claimed_at, began_at,
+              provider_message_id, created_at, updated_at)
+           SELECT id, operation_id, channel, recipient, payload, correlation,
+              state, provider_state, attempts, conversation_id, origin,
+              generation, request_id, claimed_by, claimed_at, began_at,
+              NULL, created_at, updated_at
+           FROM crm_outbox_v12""")
+    db.execute('DROP TABLE crm_outbox_v12')
+    db.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS crm_outbox_request
+           ON crm_outbox(request_id) WHERE request_id IS NOT NULL""")
+    db.execute('CREATE INDEX IF NOT EXISTS crm_outbox_pending ON crm_outbox(state, created_at)')
+    db.execute(
+        'CREATE INDEX IF NOT EXISTS crm_outbox_conv ON crm_outbox(conversation_id, state)')
+    db.execute(
+        'CREATE INDEX IF NOT EXISTS crm_outbox_wamid ON crm_outbox(provider_message_id)')
+
+
+def _migration_014_c02_whatsapp_delivery_events(db):
+    """v14 — persistencia durable de eventos de estado de Meta que pueden
+    llegar ANTES de que el egress guarde el wamid devuelto por el envío
+    (WH-03). Tabla ``crm_wa_delivery_events`` (eventos firmados del webhook):
+
+    - Se inserta SIEMPRE, aunque el outbox aún no tenga el ``provider_message_id``;
+      con 200 de ack ya no se descarta silenciosamente un delivered temprano.
+    - Deduplicación por (wamid, status, event_timestamp): un evento repetido de
+      Meta es no-op (INSERT OR IGNORE).
+    - ``outbox_id``/``applied`` se rellenan al reconciliar: cuando el egress
+      guarda el wamid (outbox_mark) se aplican los eventos pendientes en orden
+      cronológico con la misma regla acumulativa (los estados nunca retroceden).
+    - Persiste tras reinicio por diseño (tabla normal de la BD).
+    """
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_wa_delivery_events (
+             id INTEGER PRIMARY KEY,
+             wamid TEXT NOT NULL,
+             status TEXT NOT NULL,
+             event_timestamp TEXT NOT NULL,
+             recipient_id TEXT,
+             error TEXT,
+             outbox_id INTEGER,
+             applied INTEGER NOT NULL DEFAULT 0,
+             created_at TEXT NOT NULL,
+             UNIQUE(wamid, status, event_timestamp))""")
+    db.execute(
+        """CREATE INDEX IF NOT EXISTS crm_wa_delivery_events_pending
+           ON crm_wa_delivery_events(wamid, applied)""")
+
+
+def _migration_016_c02_atencion_reclamos(db):
+    """v16 — alerta superior de atención humana: amplía los motivos de
+    derivación con ``reclamo`` (reclamos/quejas). SQLite no permite alterar
+    un CHECK: se reconstruye ``crm_human_alerts`` preservando todas las filas,
+    columnas e índices (rebuild sin pérdida, mismo patrón que v9).
+    """
+    db.execute('ALTER TABLE crm_human_alerts RENAME TO crm_human_alerts_v15')
+    db.execute(
+        """CREATE TABLE crm_human_alerts (
+             id INTEGER PRIMARY KEY,
+             conversation_id INTEGER NOT NULL REFERENCES crm_conversations(id),
+             reason TEXT NOT NULL CHECK(reason IN
+               ('humano_explicito','emergencia','sin_fuente','fallo_servicio',
+                'por_revision','reclamo')),
+             priority TEXT NOT NULL DEFAULT 'alta',
+             state TEXT NOT NULL DEFAULT 'activa' CHECK(state IN ('activa','leida','resuelta')),
+             created_at TEXT NOT NULL, resolved_at TEXT)""")
+    db.execute(
+        """INSERT INTO crm_human_alerts
+             (id, conversation_id, reason, priority, state, created_at, resolved_at)
+           SELECT id, conversation_id, reason, priority, state, created_at, resolved_at
+           FROM crm_human_alerts_v15""")
+    db.execute('DROP TABLE crm_human_alerts_v15')
+
+
+def _migration_017_c02_peligro_evidencia(db):
+    """v17 — corrección de la detección contextual de atención humana: añade el
+    motivo ``peligro_inmediato`` (señales de peligro vital, prioridad máxima,
+    distinto del resto de emergencias) y la columna ``evidence`` con la
+    evidencia breve del mensaje que disparó la derivación, para el equipo.
+
+    SQLite no permite alterar un CHECK: se reconstruye ``crm_human_alerts``
+    preservando todas las filas, columnas (ahora con ``evidence``) e índices
+    (rebuild sin pérdida, mismo patrón que v9/v16).
+    """
+    db.execute('ALTER TABLE crm_human_alerts RENAME TO crm_human_alerts_v16')
+    db.execute(
+        """CREATE TABLE crm_human_alerts (
+             id INTEGER PRIMARY KEY,
+             conversation_id INTEGER NOT NULL REFERENCES crm_conversations(id),
+             reason TEXT NOT NULL CHECK(reason IN
+               ('humano_explicito','emergencia','sin_fuente','fallo_servicio',
+                'por_revision','reclamo','peligro_inmediato')),
+             priority TEXT NOT NULL DEFAULT 'alta',
+             state TEXT NOT NULL DEFAULT 'activa' CHECK(state IN ('activa','leida','resuelta')),
+             created_at TEXT NOT NULL, resolved_at TEXT,
+             evidence TEXT)""")
+    db.execute(
+        """INSERT INTO crm_human_alerts
+             (id, conversation_id, reason, priority, state, created_at, resolved_at)
+           SELECT id, conversation_id, reason, priority, state, created_at, resolved_at
+           FROM crm_human_alerts_v16""")
+    db.execute('DROP TABLE crm_human_alerts_v16')
+
+
+def _migration_015_c02_biblioteca(db):
+    """v15 — Biblioteca de recursos privados y plantillas WhatsApp (requisito
+    del punto 5, 2026-10-29). NO sustituye al historial de envíos (outbox).
+
+    - `crm_library_resources`: catálogo PRIVADO de PDFs, catálogos y listas de
+      precios subidos por administradores. El archivo se guarda en disco bajo
+      el directorio de la base por SHA-256 (nunca servido como estático).
+      `allow_send` (adjuntar/seleccionar para envío) es un permiso SEPARADO de
+      `allow_rag` (usar el contenido en la recuperación del asistente).
+      Retirar NO borra: deja `state='retirado'` con actor y fecha; las
+      versiones conservan la trazabilidad histórica.
+    - `crm_library_versions`: cada subida crea una versión inmutable con hash,
+      tamaño y autor; la retirada no altera versiones anteriores.
+    - `crm_library_fragments`: texto indexado (sólo cuando allow_rag=1 activo)
+      para la recuperación.
+    - `crm_wa_templates`: plantillas WhatsApp declaradas localmente. El estado
+      de APROBACIÓN sólo lo fija el proveedor (Meta): sin conexión el estado
+      permitido es `borrador_local`/`pendiente_verificar`; la API rechaza
+      marcar `aprobado` a demanda del usuario (no se falsifica).
+    """
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_library_resources (
+             id INTEGER PRIMARY KEY,
+             name TEXT NOT NULL,
+             description TEXT,
+             categoria TEXT NOT NULL DEFAULT 'documento',
+             version INTEGER NOT NULL DEFAULT 1,
+             estado TEXT NOT NULL DEFAULT 'activo',
+             allow_send INTEGER NOT NULL DEFAULT 0,
+             allow_rag INTEGER NOT NULL DEFAULT 1,
+             sha256 TEXT NOT NULL,
+             filename TEXT NOT NULL,
+             kind TEXT NOT NULL,
+             path TEXT NOT NULL,
+             tamano INTEGER NOT NULL DEFAULT 0,
+             extract_error TEXT,
+             created_by INTEGER REFERENCES crm_users(id),
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             retirado_en TEXT,
+             retirado_por INTEGER REFERENCES crm_users(id))""")
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_library_versions (
+             id INTEGER PRIMARY KEY,
+             resource_id INTEGER NOT NULL REFERENCES crm_library_resources(id),
+             version INTEGER NOT NULL,
+             sha256 TEXT NOT NULL,
+             filename TEXT NOT NULL,
+             kind TEXT NOT NULL,
+             path TEXT NOT NULL,
+             tamano INTEGER NOT NULL DEFAULT 0,
+             extract_error TEXT,
+             created_by INTEGER REFERENCES crm_users(id),
+             created_at TEXT NOT NULL,
+             UNIQUE(resource_id, version))""")
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_library_fragments (
+             id INTEGER PRIMARY KEY,
+             resource_id INTEGER NOT NULL REFERENCES crm_library_resources(id),
+             body TEXT NOT NULL,
+             procedencia TEXT,
+             created_at TEXT NOT NULL)""")
+    db.execute(
+        """CREATE INDEX IF NOT EXISTS crm_library_frag_res
+           ON crm_library_fragments(resource_id)""")
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_wa_templates (
+             id INTEGER PRIMARY KEY,
+             name TEXT NOT NULL,
+             language TEXT NOT NULL DEFAULT 'es',
+             category TEXT NOT NULL DEFAULT 'UTILITY',
+             body TEXT NOT NULL,
+             parameters TEXT NOT NULL DEFAULT '[]',
+             estado TEXT NOT NULL DEFAULT 'borrador_local',
+              motivo_estado TEXT,
+             verificado_en TEXT,
+             created_by INTEGER REFERENCES crm_users(id),
+             created_at TEXT NOT NULL,
+             updated_at TEXT NOT NULL,
+             UNIQUE(name, language))""")
+
+
 # Lista ordenada de migraciones. Añadir nuevas versiones al final; nunca editar
 # una migración ya publicada.
 MIGRATIONS = [
@@ -433,6 +754,12 @@ MIGRATIONS = [
     (9, _migration_009_c02_outbox_estados),
     (10, _migration_010_c02_outbox_propiedad),
     (11, _migration_011_c02_fase_envio),
+    (12, _migration_012_c02_docs),
+    (13, _migration_013_c02_whatsapp_real),
+    (14, _migration_014_c02_whatsapp_delivery_events),
+    (15, _migration_015_c02_biblioteca),
+    (16, _migration_016_c02_atencion_reclamos),
+    (17, _migration_017_c02_peligro_evidencia),
 ]
 
 _CRM_TABLES = ('crm_users', 'crm_professionals', 'crm_appointments', 'crm_leads')
