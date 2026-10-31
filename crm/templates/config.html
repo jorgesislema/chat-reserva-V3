@@ -3,9 +3,8 @@
    EDITABLE (nombre, zona, moneda) y el horario semanal es operativo: la misma
    regla la aplican el panel y el canal al aceptar/rechazar reservas. #}
 <div class="c02-config-block" id="c02-config-app" data-csrf="{{ csrf }}">
-  <hr class="c02-separator">
-  <div class="section-title"><h2>Configuración de IA y datos del negocio</h2>
-    <span class="badge">sólo administrador</span></div>
+  <p class="muted">Perfil del negocio, horario semanal operativo (mismo criterio que aplican el panel y el canal), fechas cerradas y disponibilidad de profesionales.
+  <span class="badge">sólo administrador</span></p>
 
   <div class="two-columns">
     <section class="card">
@@ -34,9 +33,10 @@
   <section class="card">
     <h3>Horario semanal (regla operativa de reservas)</h3>
     <p class="muted tiny">Aplicado por el panel y por el canal al aceptar o rechazar
-      una reserva. Deje el día vacío para cerrarlo.</p>
+      una reserva. Marque los días laborables y elija apertura y cierre; los días
+      sin marcar quedan cerrados.</p>
     <table class="c02-week-table" id="c02-cfg-week">
-      <thead><tr><th>Día</th><th>Apertura</th><th>Cierre</th></tr></thead>
+      <thead><tr><th>Día</th><th>Laborable</th><th>Apertura</th><th>Cierre</th></tr></thead>
       <tbody></tbody>
     </table>
   </section>
