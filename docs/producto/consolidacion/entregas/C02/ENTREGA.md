@@ -212,6 +212,48 @@ ingesta/claim/outbox; bandeja tomar/retornar/pausar/alarmar).
   (captura `evidencias/c02/config-persistencia.png`). Detalle en
   `EVIDENCIA_CONTINUACION_FUNCIONAL.md` y `CONTINUACION_FUNCIONAL.md`.
 
+### Sección explícita de servicio/profesional/duración y cita en el canal (punto 2 — 28-10-2026)
+- `crm/canal.py`: `_servicios_activos` (servicio activo/publicado con duración vigente),
+  `_profesionales_activos` (BD como fuente de `active`), `_menciona_servicio`, `_opcion_numerica`,
+  `_texto_lista_servicios/profesionales/citas`, `_cita_local`, `_duracion_min_de_cita`.
+- CREAR por el canal: servicio → duración del servicio (nunca 30 min fijos; título
+  `Reserva: <servicio>`) → profesional compatible → fecha/hora; selecciones conservadas entre
+  mensajes; revalidación (servicio/profesional/horario/conflicto) en la MISMA transacción de la
+  guardia; confirmación al cliente de lo realmente guardado.
+- CANCELAR/REAGENDAR: citas del cliente, lista numerada, interpretación de la respuesta
+  (guard/opción), ID conservado, confirmación/duración original; selección inválida o ajena sin
+  mutación; nunca la primera cita silenciosamente.
+- Fixes de dominio: `crm/store.py::use` → `_UoW` reutilizable (Python 3.13 rompía reagendar al
+  reabrir el mismo uow) y `MotorSimulado.intencion` con límites de palabra ('reagendar' ya no se
+  clasifica como 'reservar').
+- El catálogo ya tenía `duration_min` y `professional_id` (migración v5); no hizo falta migración.
+
+### Corrección SEL-01: revalidación transaccional de la asociación servicio→profesional (28-10-2026)
+- **Defecto (reproducido por el revisor**, `REVISION_SELECCION_RESERVAS_CODEX.md` +
+  `revision_seleccion_codex/repro_compatibilidad.py`): el cliente elige al profesional 1; el
+  hook `pre_escritura` reasigna el servicio al profesional 2; `_reservar_conn` releía
+  `active/publish_state/duration_min` del servicio pero NO su `professional_id`, y confiaba en
+  la lista `compatibles` calculada antes de la transacción → la cita se creaba con el
+  profesional 1 (COMPAT_RACE).
+- **Corrección acotada** en `crm/canal.py`:
+  - `_reservar_conn`: el SELECT de revalidación incluye `professional_id` y corre con la MISMA
+    conexión transaccional del INSERT; si la restricción vigente no coincide con el profesional
+    seleccionado devuelve `{'ok': False, 'code': 'seleccion_caducada', 'profesionales':
+    <opciones actuales releídas con la misma conexión>}`; verifica también
+    `crm_professionals.active` (devuelve `invalid` con mensaje claro si servicio/profesional
+    inactivo o duración no válida). Sin INSERT ni confirmación en caso incompatible.
+  - `_run_dialog` (reservar): maneja `seleccion_caducada` tras la guardia → mensaje claro
+    pidiendo otra selección con la lista refrescada; el pending conserva servicio/fecha/hora y
+    descarta el `profesional_id` obsoleto (`pend_sin_prof`), de modo que el siguiente turno
+    re-interpreta la respuesta contra la lista actual. Sin sustitución silenciosa del
+    profesional; servicios sin restricción (`professional_id` NULL) intactos.
+- **Regresión nueva**: `test_sel01_reasignacion_servicio_en_pre_escritura` (convierte la
+  reproducción del revisor; RED antes del fix: `citas_creadas==1`; GREEN tras el fix: 0 citas) +
+  `test_sel01_servicio_sin_restriccion_conserva_flujo`.
+- Evidencia real: ver EX-029 y `EVIDENCIA_CONTINUACION_FUNCIONAL.md` (§ SEL-01). Sigue sin
+  declararse SEL-01 aprobado (lo hace el revisor), C02 cerrado ni el programa completo; el punto
+  3 NO se inicia. Sin commit/push, sin proveedores ni datos reales.
+
 ## Acreditación (comandos reales)
 - `pytest tests/test_c02_services.py` → 8 passed (catálogo, conocimiento, idempotencia WhatsApp,
   claim exclusivo/recovery, outbox, bandeja/toma/pausa, conflicto).
@@ -234,17 +276,31 @@ ingesta/claim/outbox; bandeja tomar/retornar/pausar/alarmar).
   (config_funcional + canal + frontend + services) → 33 passed/exit 0;
   `scripts/e2e_crm_c02.py` → exit 0 (fases cat + bandeja, TODOS LOS CHECKS OK, VERIFY_OK,
   recarga persistente de configuración). Sin proveedores reales.
+- Selección explícita en el canal (28-10-2026, EX-028):
+  `tests/test_c02_seleccion_cita.py` → 10 passed/exit 0 (9 verificaciones del encargo);
+  `tests/test_c02_canal.py + test_c02_config_funcional.py` → 16 passed/exit 0 (seeds adaptados);
+  regresión ampliada (seleccion + canal + config + services + frontend + webhook_http +
+  reservation_service) → **61 passed, exit 0, ~123s**. Sin proveedores reales.
+- SEL-01 (28-10-2026, EX-029): red → green de la regresión del revisor
+  (`test_sel01_reasignacion_servicio_en_pre_escritura` + `test_sel01_servicio_sin_restriccion_conserva_flujo`):
+  1 failed/1 passed (código anterior) → 2 passed (tras el fix); suite de selección →
+  **12 passed, exit 0, 51.46s**; regresión ampliada (las 7 suites de EX-028 + 2 SEL-01) →
+  **63 passed, exit 0, 137.07s**. Sin proveedores reales.
 
 ## Pendiente / marcado con honestidad (§10.6)
 - **§10.1 no completado**: la edición de catálogo hoy cubre nombre/tipo/precio y la vista
   general; faltan campos de detalle (vigencia, stock, profesional, notas) en la UI y el índice
   derivado de catálogo en el bot.
 - **§10.2 Conocimiento/config**: se implementó el dominio de documentos (publicar/recuperar/
-  desactivar) pero **sin** la pantalla de administración de conocimiento/config en el frontend
-  ni el formulario de negocio/especialistas/horarios estructurados (se reutilizaría
-  `business_profile` como autoridad única).
-- **§10.3 Chat interno**: no se implementó la ventana de consulta con el motor real ni las
-  lecturas BD.
+  desactivar) y en el punto 3 se completó la pantalla de conocimiento editable con carga de
+  documentos (.docx/.pdf/.xlsx/.csv/.txt/.md), vista previa, procedencia, borrador→publicar→
+  desactivar, público/privado y permisos admin+CSRF (se reutilizó `business_profile` como
+  autoridad única del negocio; formulario de negocio/especialistas/horarios estructurados en
+  `config.html`).
+- **§10.3 Chat interno**: en el punto 3 se implementó la ventana de consulta con el adaptador IA
+  inyectable (contrato, simulado, remoto dry-run sin credenciales), fuentes identificables
+  (documento/ID/versión/procedencia), abstención honesta, lecturas BD autorizadas (catálogo,
+  agenda resumida, stock) y solo consulta (sin escrituras).
 - **§10.4 Bandeja humana**: base de dominio y rutas listas, pero **sin** la interfaz navegable
   de la bandeja para responder/tomar realmente en el navegador.
 - **RF-02 canal WhatsApp real**: el webhook y el worker simulados funcionan en pruebas; el
@@ -262,3 +318,168 @@ ingesta/claim/outbox; bandeja tomar/retornar/pausar/alarmar).
   publicar; revisión en la base).
 - Webhook: enviar POST firmado a `/webhook` (ver `test_c02_webhook_http.py`); no es invocable
   sin la firma del proveedor.
+
+
+## Reanudación 2026-10-28 — Regla del propietario y verificación de C02 punto 3
+
+### Regla del propietario (24-10-28, vigente)
+Escrita en ESTADO.md, RELEVO_ABACUS.md, CONTINUACION_FUNCIONAL.md y LISTA_SALIDA_PRODUCCION.md:
+el producto operativo usa integraciones reales o indica «no disponible»; los dobles de prueba
+sólo dentro de pruebas automatizadas o desarrollo explícito y nunca acreditan producción.
+
+### Fallo confirmado corregido
+`crm/chat_adapter.py:adaptador_por_defecto`: sin `CRM_CHAT_PROVEEDOR` devolvía
+`AdaptadorSimulado`. Ahora devuelve `AdaptadorRemotoConfigurable` modo `no_configurado`
+(«IA no configurada», cero respuestas simuladas); `simulado` exige selección explícita de
+pruebas/desarrollo; el proveedor declarado usa el cliente HTTP remoto real y un fallo del
+proveedor da error claro sin cambiar al simulado. Pruebas añadidas que eliminan las 4
+variables CRM_CHAT_* del entorno (arranque real sin configuración).
+
+### Verificación pendiente completada (E2E navegador, BD temporales, exit 0)
+1. Documentos: cargar → publicar → consultar con fuentes (v1/v2) → desactivar → sin fuentes.
+2. Inventario válido: vista previa → confirmar → persistir → stock correcto en BD (REV-P1=15).
+3. Inventario inválido: rechazo completo, cero cambios (BAD-X ausente).
+4. Usuario sin permiso: no obtiene borradores ni información interna (cubierto por suite;
+   ver EVIDENCIA).
+5. Arranque sin proveedor: aviso «IA no configurada», ninguna respuesta simulada
+   (p3noconfig sin proveedor Y con proveedor sin clave, ambas PASS).
+6. Regresión: 154 passed (13 archivos C02 + adaptador remoto), sin excluir pruebas activas.
+
+### Defectos reales corregidos durante la verificación (crm/c02_services.py:kb_search)
+- `_fold()` (NFKD): «sabado» recupera «sábados» (antes no).
+- Desempate por densidad de coincidencias (antes un fragmento genérico vencía al específico).
+- `_STOPWORDS_ES`: «¿a qué hora abren los lunes?» — la palabra vacía «los» inflaba el score
+  del fragmento de los sábados (regresión detectada por la suite y corregida).
+
+Tests nuevos: `test_kb_search_normaliza_acentos_y_prioriza_fragmento_especifico`,
+`test_kb_search_ignora_palabras_vacias_del_espanol` (tests/test_c02_chat.py).
+
+### Estados registrados
+- Cliente remoto: IMPLEMENTADO y PROBADO LOCALMENTE (servidor local ficticio).
+- Validación externa del proveedor: PENDIENTE (requiere autorización y credenciales reales).
+- Despliegue: NO activado. Sin commit/push/secretos/configuración de infraestructura.
+
+
+## MODO-01 (2026-10-28) — Mapeo de inventario a columnas reales
+
+### Cambio
+`crm/static/crm_c02_inventory.js` (paso1/paso2): el asistente ya NO sugiere una columna F
+con lista fija A..H para un CSV que sólo tiene A..E. Conserva las columnas reales devueltas
+por upload, genera las opciones desde la hoja seleccionada, sugiere sólo columnas existentes,
+deja opcionales ausentes «(sin usar)», recalcula y elimina asociaciones al cambiar de hoja y
+permite revisar el mapeo antes de confirmar. Validación backend intacta.
+
+### Verificación
+- Harness navegador: 13 checks PASS, exit 0 (capturas evidencias/modo01-*.png).
+- `python scripts/e2e_crm_c02.py`: exit 0, 5 fases.
+- `pytest tests/test_c02_inventory.py`: 17 passed.
+- Regresión C02 completa: 155 passed, exit 0.
+
+### Estados
+- Implementado y VERIFICADO en navegador + suite + E2E completo.
+- Pendiente real: validación externa del proveedor IA, migración/restauración C02,
+  instalación reproducible/health, integraciones reales (WhatsApp/Google/recordatorios).
+- deploy.yml NO activado. Sin commit/push/secretos.
+
+
+## PREPARACIÓN OPERATIVA LOCAL (2026-10-28) — A/B/C/D terminados y verificados
+
+### Cambios
+- **A. Disponibilidad y arranque**: `crm/health.py` (nuevo; `probe_database` sólo lectura
+  con razones estables, `chat_ia_estado` declara la IA sin configurar como limitación sin
+  simular), `crm/app.py` (`GET /health` liveness sin BD; `GET /ready` readiness BD+esquema
+  200/503; 503 claro en rutas normales y `/api/*` ante `sqlite3.OperationalError`;
+  `/health`,`/ready` se sirven sin sesión ni BD previa), `serve_crm.py` (nuevo; arranque
+  OPERATIVO con waitress, nunca cae al servidor de desarrollo), `run_crm.py` documentado
+  como desarrollo. `requirements-crm.txt` + `waitress>=3.0.2,<4.0`.
+- **B. Migración con contenido** (sin cambios de producto): prueba nueva que construye una
+  base v5 REAL (migraciones genuinas 1..5) con datos sintéticos de 17 tablas, respaldo
+  previo `Connection.backup()`, `initialize` → v6..v12, conservación exacta + FK +
+  integridad, lectura por la app, segunda inicialización sin duplicados y recuperación del
+  respaldo anterior (restaurar+arrancar migra preservando datos).
+- **C. Instalación reproducible**: `requirements-crm.lock.txt` (38 pins exactos, generado
+  con `pip install --dry-run --report`), entorno aislado `.venv-op` (py 3.13.1) instalado
+  DESDE el lock, y `scripts/verificar_instalacion_operativa.py` (arranque waitress con
+  configuración sintética + /health + /ready + siembra + lectura funcional por HTTP).
+- **D. Documentos**: `GUIA_OPERACION_Y_RECUPERACION.md` y `EVIDENCIA_PREPARACION_OPERATIVA.md`
+  (nuevas); LISTA_SALIDA_PRODUCCION, ESTADO, MATRIZ, REGISTRO y RELEVO actualizados.
+- Hallazgo corregido (sólo fixture de test): `tests/test_crm.py` era dependiente de la hora
+  (`check_window` lee `crm_settings`/perfil por defecto, no `app.config['PROFILE']`); el
+  fixture ahora siembra `crm_settings` 24×7. CERO cambios de producto.
+
+### Verificación (comandos y resultados reales, exit 0)
+- `pytest tests/test_c02_health.py` → 5 passed, 2.56s.
+- `pytest tests/test_crm.py` (fixture corregido) → 26 passed, 66.61s.
+- `pytest tests/test_c02_migracion_contenido.py` → 1 passed, 3.18s.
+- `pip install -r requirements-crm.lock.txt` (en `.venv-op`) → exit 0.
+- `python scripts/verificar_instalacion_operativa.py` → INSTALACION_OPERATIVA_VERIFICADA.
+
+### Estados
+- Terminado y verificado: A, B, C, D (alcance exacto en EVIDENCIA_PREPARACION_OPERATIVA.md).
+- Pendiente NO cerrado: copias PROGRAMADAS (sólo política propuesta), validación externa
+  del proveedor IA, WhatsApp/Google/recordatorios reales, despliegue.
+- deploy.yml NO activado. Sin commit/push/secretos/datos de clientes. NO se declara C02
+  cerrado ni producción aprobada.
+
+## Cierre documental de la preparación operativa — 2026-10-28
+
+Contraste de la guía contra el código actual, sin cambios de producto:
+- **Coincidencias verificadas**: comandos de instalación y arranque (§1/§3 de la guía,
+  lock de 38 pins, waitress 3.0.2 en `.venv-op`), variables de entorno (app.py/
+  chat_adapter.py), endpoints `/health` y `/ready` con 503 claro y arranque que aplica
+  migraciones (`create_app`→`initialize`), comando CLI `create-admin` (crm/app.py:667).
+- **Hueco corregido (sólo documento)**: el comando de respaldo de la guía no creaba la
+  carpeta `backups`, inexistente en instalación limpia; se añadió `mkdir backups` y la
+  instrucción de fechado. El alcance §0 ya no afirma «todos los comandos fueron
+  ejecutados»: distingue implementador, revisor, reproducciones propias y pasos del
+  operador sobre la base real (no ejecutados).
+- **Reproducciones propias** (mismas bases temporales sintéticas, `.venv-op`):
+  6 passed in 3.20s, exit 0 (health + migración) e INSTALACION_OPERATIVA_VERIFICADA,
+  exit 0 (waitress + /health + /ready + lecturas HTTP autenticadas).
+- **Coherencia documental**: LISTA_SALIDA_PRODUCCION (filas restauración y E2E actualizadas;
+  bloqueos 2-4 marcados CUBIERTOS, 7-8 añadidos), REGISTRO (CIERRE-DOC-OP-20261028),
+  ESTADO.md (entrada superior), RELEVO_ABACUS.md (CIERRE DOCUMENTAL), MATRIZ sin cambios
+  (sección preparación operativa vigente).
+- Estados antiguos «PASO B EN EJECUCIÓN» y «PRÓXIMA ACCIÓN EXACTA: PASO D» del RELEVO
+  marcados como CERRADOS conservando la historia.
+- Lista para la REVISIÓN FINAL de preparación operativa del revisor. Producción NO
+  aprobada; C02 NO cerrado. Sin commit/push/secretos/datos de clientes.
+
+## WhatsApp real (transporte + worker + canal sin IA simulada) — WH-REAL 2026-10-28
+
+- **Implementado**: migración v13 (`crm_outbox.provider_message_id` + estado
+  `diferido`), `outbox_webhook_status` idempotente y `en_ventana_servicio` (24 h),
+  `TransporteWhatsAppReal` (contrato oficial de Meta verificado; timeout efectivo;
+  reintentos sólo seguros; wamid; aceptación≠entrega; fuera de ventana sin plantilla →
+  diferido; sin credenciales → no_configurado sin simular), webhook `statuses[]`
+  actualizando el outbox, egress con `diferido`, `MotorIA` (indisponibilidad explícita
+  → humano; el modelo no ejecuta SQL ni muta) y worker operativo (proceso aparte,
+  parada ordenada, recuperación de abandonados, `store.initialize` al arrancar).
+- **Evidencia**: `EVIDENCIA_WHATSAPP_REAL.md` (7 passed in 10.00s sobre fake Graph API
+  local + 63 passed de regresión + humo del worker con exit 0).
+- **Validación EXTERNA PENDIENTE** (autorización/configuración del propietario).
+  Frase de cierre: **Transporte real implementado y probado localmente; validación
+  externa pendiente.** WhatsApp NO operativo; C02 NO cerrado.
+
+## Corrección de la revisión (WH-01..04) + recorrido positivo MotorIA — WH-FIX 2026-10-28
+
+- WH-01: el transporte hace UNA sola petición; timeout/desconexión/5xx/acuse
+  ilegible/2xx sin wamid conservan `incierto` (sólo 4xx = rechazo cierto); retiradas
+  las configs de reintento y plantilla genérica.
+- WH-02: el worker carga el .env de la instalación antes de BD/motor/transporte
+  (procesos independientes del web comparten configuración).
+- WH-03: migración v14 `crm_wa_delivery_events` — los estados tempranos se persisten
+  (durables, deduplicados) y se reconcilian al guardar el wamid; nada se pierde tras
+  el ack 200; los estados nunca retroceden.
+- WH-04: fuera de la ventana sólo se envía una plantilla EXPLÍCITA con parámetros;
+  sin ella la salida queda `diferido` con el texto descartado visible y sin llamada
+  a Meta; el humano nunca se marca enviado con otro contenido.
+- Recorrido positivo MotorIA: MotorIA con el cliente HTTP real (AdaptadorRemoto-
+  Configurable) contra un servidor local + TransporteWhatsAppReal contra el fake:
+  webhook firmado → reserva en el dominio → visible en el panel (/api/agenda) →
+  mensaje enviado con wamid; indisponibilidad de IA deriva a humano sin fabricar;
+  la toma humana gana (CH-01).
+- Evidencia: `EVIDENCIA_WHATSAPP_REAL.md` §5 (11 passed in 18.46s + regresión
+  332 passed / 2 FAILED preexistentes por calendario).
+- Sin commit/push/secretos/datos de clientes; WhatsApp NO operativo; C02 NO cerrado;
+  esperando la revisión del revisor de WH-FIX.
