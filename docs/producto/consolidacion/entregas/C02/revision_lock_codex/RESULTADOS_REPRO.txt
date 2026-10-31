@@ -1,0 +1,2 @@
+LOCK_ALIAS {"same_database_file": true, "same_lock_path": false, "both_acquired": true}
+ALIAS_RACE_AFTER_MARK {"events": ["take_committed_via_same_db_alias", "transport_called"], "receipts": 1}
