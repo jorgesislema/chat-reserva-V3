@@ -1070,7 +1070,8 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                               'reagendar_cita_id': ult['id']})
 
     # consulta / sin intención clara
-    return _resp('consulta', None, pending={})
+    saludo = saludo_negocio(path)
+    return _resp('consulta', saludo or None, pending={})
 
 
 def _confirma_si(t: str) -> bool:
