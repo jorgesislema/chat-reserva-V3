@@ -2,10 +2,8 @@
    agenda. Sin scripts inline (CSP estricta); el historial vive en el DOM y las
    peticiones las hace crm_c02_chat.js. #}
 <div class="c02-chat-block" data-csrf="{{ csrf }}">
-  <hr class="c02-separator">
-  <div class="section-title"><h2>Chat de IA interno</h2>
-    <span class="badge" id="c02-chat-fuente">conexión KB + agenda</span></div>
-  <p class="muted">Haga una consulta al asistente interno. Responde con el conocimiento publicado (RAG) y con el estado real de la agenda y los profesionales.</p>
+  <p class="muted">Haga una consulta al asistente interno. Responde con el conocimiento publicado (RAG) y con el estado real de la agenda y los profesionales.
+  <span class="badge" id="c02-chat-fuente">conexión KB + agenda</span></p>
   <div class="inline-chat">
     <div class="inbox-messages c02-chat-log" id="c02-chat-log" role="log" aria-live="polite">
       <div class="inbox-message note">Asistente interno conectado. Pruebe: «¿qué horarios tienen?», «¿qué profesional está activo?» o «tengo cita».</div>
