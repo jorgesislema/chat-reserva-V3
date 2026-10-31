@@ -1,6 +1,9 @@
-/* C02 — Biblioteca de envíos (sólo lectura, 2026-10-29).
-   Lista el historial del outbox (GET /api/c02/outbox) sin ninguna acción de
-   reenvío ni mutación. CSP estricta: sin inline. */
+/* C02 — Biblioteca de envíos (2026-10-29; cancelación admin 2026-10-31).
+   Lista el historial del outbox (GET /api/c02/outbox) sin reenvío. Un
+   administrador puede cancelar una tarea PENDIENTE que aún no comenzó a
+   enviarse (POST /api/c02/outbox/:id/cancel) con confirmación y motivo
+   obligatorio; el servidor valida estado/atomicidad y lo audita. CSP
+   estricta: sin inline. */
 (function () {
   'use strict';
 
@@ -21,6 +24,41 @@
         if (!r.ok) throw new Error((j.error && j.error.message) || 'Error de servidor');
         return j;
       });
+    });
+  }
+
+  function esElegibleCancelar(it) {
+    return it.state === 'pendiente' && it.attempts === 0 &&
+           !it.provider_message_id && !it.began_at;
+  }
+
+  function cancelarItem(id) {
+    var ok = window.confirm('¿Cancelar la tarea de salida ' + id +
+      ' (pendiente, sin enviar)? Esta acción no se puede deshacer.');
+    if (!ok) return;
+    var motivo = window.prompt('Motivo de la cancelación (obligatorio):', '');
+    if (motivo === null) return;
+    motivo = String(motivo || '').trim();
+    if (motivo.length < 3) {
+      window.alert('El motivo es obligatorio (mínimo 3 caracteres).');
+      return;
+    }
+    fetch('/api/c02/outbox/' + id + '/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+      body: JSON.stringify({ motivo: motivo })
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) throw new Error((j.message) || 'Error de servidor');
+        status.textContent = 'Tarea ' + id + ' cancelada.';
+        status.className = 'status-line info';
+        status.style.display = '';
+        cargar();
+      });
+    }).catch(function (e) {
+      status.textContent = 'No se pudo cancelar: ' + e.message;
+      status.className = 'status-line error';
+      status.style.display = '';
     });
   }
 
@@ -76,6 +114,20 @@
       tr.appendChild(td(it.attempts));
       tr.appendChild(td(it.eventos));
       tr.appendChild(td(it.provider_message_id || '—'));
+      var acc = document.createElement('td');
+      if (esElegibleCancelar(it)) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'button danger';
+        btn.textContent = 'Cancelar tarea';
+        btn.addEventListener('click', (function (id) {
+          return function () { cancelarItem(id); };
+        })(it.id));
+        acc.appendChild(btn);
+      } else {
+        acc.textContent = '—';
+      }
+      tr.appendChild(acc);
       tbody.appendChild(tr);
     });
     status.textContent = items.length + ' envíos registrados.';
