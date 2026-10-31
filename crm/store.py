@@ -658,6 +658,70 @@ def _migration_017_c02_peligro_evidencia(db):
     db.execute('DROP TABLE crm_human_alerts_v16')
 
 
+def _migration_018_c02_outbox_cancelar(db):
+    """v18 — cancelación auditable de tareas de salida que aún no comenzaron
+    (preparación WhatsApp real).
+
+    - Expande el vocabulario de estados de ``crm_outbox`` con ``cancelado``.
+      Sólo un administrador cancela (flujo `outbox_cancel`), y únicamente una
+      tarea ``pendiente`` con ``attempts=0``, ``began_at`` vacío y sin
+      ``provider_message_id`` (ningún envío ha empezado ni salió nada a Meta).
+      SQLite no permite alterar un CHECK: se reconstruye la tabla preservando
+      todas las filas, columnas e índices (rebuild sin pérdida, mismo patrón
+      que v9/v13). Las tareas heredadas conservan su estado.
+    - Añade ``detail`` a ``crm_audit`` (aditivo; NULL en filas previas) para
+      registrar el MOTIVO obligatorio de la cancelación.
+    """
+    db.execute('DROP INDEX IF EXISTS crm_outbox_pending')
+    db.execute('DROP INDEX IF EXISTS crm_outbox_request')
+    db.execute('DROP INDEX IF EXISTS crm_outbox_conv')
+    db.execute('DROP INDEX IF EXISTS crm_outbox_wamid')
+    db.execute('ALTER TABLE crm_outbox RENAME TO crm_outbox_v17')
+    db.execute(
+        """CREATE TABLE crm_outbox (
+             id INTEGER PRIMARY KEY,
+             operation_id INTEGER,
+             channel TEXT NOT NULL DEFAULT 'whatsapp',
+             recipient TEXT NOT NULL,
+             payload TEXT NOT NULL,
+             correlation TEXT,
+             state TEXT NOT NULL DEFAULT 'pendiente'
+               CHECK(state IN ('pendiente','intento','autorizado','enviado',
+                               'fallo','incierto','diferido','cancelado')),
+             provider_state TEXT,
+             attempts INTEGER NOT NULL DEFAULT 0,
+             conversation_id INTEGER,
+             origin TEXT NOT NULL DEFAULT 'ia',
+             generation INTEGER NOT NULL DEFAULT 0,
+             request_id TEXT,
+             claimed_by TEXT,
+             claimed_at TEXT,
+             began_at TEXT,
+             provider_message_id TEXT,
+             created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+    db.execute(
+        """INSERT INTO crm_outbox
+             (id, operation_id, channel, recipient, payload, correlation,
+              state, provider_state, attempts, conversation_id, origin,
+              generation, request_id, claimed_by, claimed_at, began_at,
+              provider_message_id, created_at, updated_at)
+           SELECT id, operation_id, channel, recipient, payload, correlation,
+              state, provider_state, attempts, conversation_id, origin,
+              generation, request_id, claimed_by, claimed_at, began_at,
+              provider_message_id, created_at, updated_at
+           FROM crm_outbox_v17""")
+    db.execute('DROP TABLE crm_outbox_v17')
+    db.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS crm_outbox_request
+           ON crm_outbox(request_id) WHERE request_id IS NOT NULL""")
+    db.execute('CREATE INDEX IF NOT EXISTS crm_outbox_pending ON crm_outbox(state, created_at)')
+    db.execute(
+        'CREATE INDEX IF NOT EXISTS crm_outbox_conv ON crm_outbox(conversation_id, state)')
+    db.execute(
+        'CREATE INDEX IF NOT EXISTS crm_outbox_wamid ON crm_outbox(provider_message_id)')
+    db.execute('ALTER TABLE crm_audit ADD COLUMN detail TEXT')
+
+
 def _migration_015_c02_biblioteca(db):
     """v15 — Biblioteca de recursos privados y plantillas WhatsApp (requisito
     del punto 5, 2026-10-29). NO sustituye al historial de envíos (outbox).
@@ -760,6 +824,7 @@ MIGRATIONS = [
     (15, _migration_015_c02_biblioteca),
     (16, _migration_016_c02_atencion_reclamos),
     (17, _migration_017_c02_peligro_evidencia),
+    (18, _migration_018_c02_outbox_cancelar),
 ]
 
 _CRM_TABLES = ('crm_users', 'crm_professionals', 'crm_appointments', 'crm_leads')
@@ -837,6 +902,6 @@ def initialize(path):
                 raise
 
 
-def audit(db, user_id, action):
-    db.execute("INSERT INTO crm_audit(user_id,action,created_at) VALUES (?,?,?)",
-               (user_id, action, now()))
+def audit(db, user_id, action, detail=None):
+    db.execute("INSERT INTO crm_audit(user_id,action,detail,created_at) VALUES (?,?,?,?)",
+               (user_id, action, detail, now()))
