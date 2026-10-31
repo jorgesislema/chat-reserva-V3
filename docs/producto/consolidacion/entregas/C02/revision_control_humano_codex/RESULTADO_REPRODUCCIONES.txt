@@ -1,0 +1,5 @@
+RACE {"state": "humano_asignado", "ai_received_after_take": 1}
+FIRST {'entregadas': 0, 'fallidas': 1, 'invalidadas': 0, 'resultados': [{'outbox_id': 1, 'origen': 'humano', 'correlation': 'msg-1', 'estado': 'error:TimeoutError'}]}
+REQUEUE {'ok': True, 'code': 'ok', 'requeued': 1}
+SECOND {'entregadas': 1, 'fallidas': 0, 'invalidadas': 0, 'resultados': [{'outbox_id': 1, 'origen': 'humano', 'correlation': 'msg-1', 'estado': 'entregado'}]}
+DUPLICATES 2
