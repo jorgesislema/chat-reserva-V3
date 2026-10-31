@@ -26,7 +26,6 @@ Los resultados son diccionarios estructurados con las claves ``ok``, ``code``,
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import json
-import re
 import uuid
 
 from crm.store import connect, now
@@ -283,11 +282,16 @@ def _conflict(conn, professional_id, start_utc, end_utc, exclude_id):
 def save_appointment(path, *, professional_id, start, end, title, zone,
                      appointment_id=None, lead_id=None, actor=None, clock=None,
                      expected_version=None, reason=None, role='user',
-                     channel=None, window_policy=None):
+                     channel=None, window_policy=None, uow=None):
     """Crea o reprograma una cita aplicando las reglas comunes.
 
     Args:
         path: ruta de la base SQLite.
+        uow: unidad de trabajo opcional (``crm.store.use`` sobre una conexión ya
+            abierta). Si se entrega, esta función comparte ESA transacción: no
+            abre conexión propia, no ejecuta BEGIN ni commit (los decide el
+            dueño de la conexión). El contrato de validación/reglas es idéntico;
+            sólo cambia el contenedor transaccional.
         professional_id: id del profesional.
         start, end: fechas ISO (locales a ``zone`` o con offset explícito).
         title: título de la cita.
@@ -348,8 +352,9 @@ def save_appointment(path, *, professional_id, start, end, title, zone,
         except (TypeError, ValueError):
             return _result(INVALID_TITLE, 'El cliente indicado no es válido')
 
-    with connect(path) as conn:
-        conn.execute('BEGIN IMMEDIATE')
+    with (uow if uow is not None else connect(path)) as conn:
+        if uow is None:
+            conn.execute('BEGIN IMMEDIATE')
 
         professional = conn.execute(
             'SELECT id, name, active FROM crm_professionals WHERE id=?',
@@ -439,7 +444,8 @@ def save_appointment(path, *, professional_id, start, end, title, zone,
         saved = conn.execute(
             'SELECT * FROM crm_appointments WHERE id=?', (shown_id,)
         ).fetchone()
-        conn.commit()
+        if uow is None:
+            conn.commit()
 
     return {
         'ok': True,
@@ -450,10 +456,15 @@ def save_appointment(path, *, professional_id, start, end, title, zone,
 
 
 def cancel_appointment(path, *, appointment_id, actor=None, expected_version=None,
-                       reason=None, clock=None):
-    """Cancela una cita. Cancelar dos veces no duplica efectos."""
-    with connect(path) as conn:
-        conn.execute('BEGIN IMMEDIATE')
+                       reason=None, clock=None, uow=None):
+    """Cancela una cita. Cancelar dos veces no duplica efectos.
+
+    ``uow``: unidad de trabajo opcional (``crm.store.use``): comparte la
+    transacción de quien abrió la conexión, sin BEGIN ni commit propios.
+    """
+    with (uow if uow is not None else connect(path)) as conn:
+        if uow is None:
+            conn.execute('BEGIN IMMEDIATE')
 
         old = conn.execute(
             'SELECT * FROM crm_appointments WHERE id=?', (appointment_id,)
@@ -498,7 +509,8 @@ def cancel_appointment(path, *, appointment_id, actor=None, expected_version=Non
         saved = conn.execute(
             'SELECT * FROM crm_appointments WHERE id=?', (appointment_id,)
         ).fetchone()
-        conn.commit()
+        if uow is None:
+            conn.commit()
 
     return {
         'ok': True,
@@ -737,13 +749,14 @@ def write_history(conn, appointment_id, action, actor, before=None, after=None,
 
 def reprogram_appointment(path, *, appointment_id, start, end, title, zone,
                           expected_version, reason=None, actor=None, role='user',
-                          clock=None, window_policy=None):
+                          clock=None, window_policy=None, uow=None):
     """Reprograma cargando profesional/cliente actuales; la versión evita carreras.
 
     Conserva el canal de creación original; la política de horario se aplica
-    igual que en un alta.
+    igual que en un alta. ``uow``: unidad de trabajo opcional (comparte la
+    transacción de quien abrió la conexión con ``save_appointment``).
     """
-    with connect(path) as conn:
+    with (uow if uow is not None else connect(path)) as conn:
         old = conn.execute('SELECT * FROM crm_appointments WHERE id=?',
                            (appointment_id,)).fetchone()
     if not old:
@@ -753,6 +766,6 @@ def reprogram_appointment(path, *, appointment_id, start, end, title, zone,
         title=(title or old['title']), zone=zone, appointment_id=appointment_id,
         lead_id=old['lead_id'], actor=actor, clock=clock,
         expected_version=expected_version, reason=reason, role=role,
-        channel=old['channel'], window_policy=window_policy,
+        channel=old['channel'], window_policy=window_policy, uow=uow,
     )
 
