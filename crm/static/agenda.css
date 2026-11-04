@@ -197,7 +197,9 @@
 [data-theme="dark"] .agenda-dialog::backdrop{background:rgba(5,10,8,.55)}
 [data-theme="dark"] .dialog-head{color:var(--ink,#e3ece6)}
 [data-theme="dark"] .agenda-field{color:#a7b6ae}
-[data-theme="dark"] .agenda-field select,.agenda-field input,.agenda-field textarea{
+[data-theme="dark"] .agenda-field select,
+[data-theme="dark"] .agenda-field input,
+[data-theme="dark"] .agenda-field textarea{
   background:#141c18;border-color:#33453c;color:var(--ink,#e3ece6)}
 [data-theme="dark"] .tz-pill{background:var(--agenda-soft);border-color:var(--agenda-line);color:#b9c9bf}
 [data-theme="dark"] .segmented{background:var(--agenda-soft);border-color:var(--agenda-line)}

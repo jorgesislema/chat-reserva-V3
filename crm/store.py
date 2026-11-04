@@ -842,6 +842,13 @@ def _migration_020_profesional_whatsapp(db):
     db.execute('ALTER TABLE crm_professionals ADD COLUMN whatsapp TEXT')
 
 
+def _migration_021_cita_paciente(db):
+    """Datos del paciente en la cita: quien asiste, teléfonos y quién reserva."""
+    for columna in ('patient_name', 'patient_phone', 'patient_phone_alt',
+                    'booked_by', 'patient_notes'):
+        db.execute('ALTER TABLE crm_appointments ADD COLUMN %s TEXT' % columna)
+
+
 MIGRATIONS = [
     (1, _migration_001_initial),
     (2, _migration_002_agenda),
@@ -863,6 +870,7 @@ MIGRATIONS = [
     (18, _migration_018_c02_outbox_cancelar),
     (19, _migration_019_c02_chat_memoria),
     (20, _migration_020_profesional_whatsapp),
+    (21, _migration_021_cita_paciente),
 ]
 
 _CRM_TABLES = ('crm_users', 'crm_professionals', 'crm_appointments', 'crm_leads')

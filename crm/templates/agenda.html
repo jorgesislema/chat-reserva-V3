@@ -139,8 +139,24 @@
               {% for l in agenda_leads %}<option value="{{ l.id }}">{{ l.name }} · {{ l.phone }}</option>{% endfor %}
             </select>
           </label>
+          <label class="agenda-field">Paciente (quien asiste)
+            <input name="patient_name" maxlength="200" placeholder="Nombre del paciente">
+          </label>
+          <label class="agenda-field">Teléfono principal
+            <input name="patient_phone" maxlength="30" inputmode="tel" placeholder="0999990001">
+          </label>
+          <label class="agenda-field">Teléfono auxiliar
+            <input name="patient_phone_alt" maxlength="30" inputmode="tel" placeholder="Opcional">
+          </label>
+          <label class="agenda-field">Reserva a nombre de
+            <input name="booked_by" maxlength="200" placeholder="Opcional: el padre, la madre...">
+          </label>
           <label class="agenda-field">Detalle de la cita
-            <input name="title" maxlength="200" required placeholder="Consulta · Nombre">
+            <input name="title" maxlength="200" placeholder="Se completa con el paciente">
+          </label>
+          <label class="agenda-field agenda-field-wide">Observaciones
+            <textarea name="patient_notes" rows="2" maxlength="600"
+                      placeholder="Alergias, indicaciones, quién acompaña..."></textarea>
           </label>
           <label class="agenda-field">Fecha de inicio
             <input type="date" name="start_date" required>

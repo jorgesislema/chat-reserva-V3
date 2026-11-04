@@ -751,6 +751,42 @@ def create_app(test_config=None):
             return api_error(result['code'], result['message'], service_status(result['code']))
         return jsonify(serialize_detail(result))
 
+    def _guardar_paciente(database, appointment_id, datos, actor):
+        """Guarda los datos del paciente y, si hace falta, crea el contacto.
+
+        Si la cita no tiene lead y llegan nombre y teléfono, se crea (o se reusa)
+        el contacto para que aparezca en Leads. El teléfono es la identidad.
+        """
+        nombre = (datos.get('patient_name') or '').strip()[:200]
+        telefono = (datos.get('patient_phone') or '').strip()[:30]
+        alt = (datos.get('patient_phone_alt') or '').strip()[:30]
+        reserva = (datos.get('booked_by') or '').strip()[:200]
+        notas = (datos.get('patient_notes') or '').strip()[:600]
+        if not any((nombre, telefono, alt, reserva, notas)):
+            return
+        from crm.store import connect as _connect
+        with _connect(database) as conn:
+            cita = conn.execute('SELECT lead_id FROM crm_appointments WHERE id=?',
+                                (appointment_id,)).fetchone()
+            lead_id = cita['lead_id'] if cita else None
+            if not lead_id and telefono:
+                sello = datetime.now(timezone.utc).isoformat()
+                conn.execute(
+                    """INSERT INTO crm_leads(name,phone,email,source,stage,notes,
+                           created_at,updated_at)
+                       VALUES (?,?,'','Panel','Cita agendada',?,?,?)
+                       ON CONFLICT(phone) DO NOTHING""",
+                    (nombre or 'Paciente', telefono, notas or '', sello, sello))
+                fila = conn.execute('SELECT id FROM crm_leads WHERE phone=?',
+                                    (telefono,)).fetchone()
+                lead_id = fila['id'] if fila else None
+            conn.execute(
+                """UPDATE crm_appointments SET patient_name=?, patient_phone=?,
+                       patient_phone_alt=?, booked_by=?, patient_notes=?, lead_id=COALESCE(lead_id, ?)
+                   WHERE id=?""",
+                (nombre or None, telefono or None, alt or None, reserva or None,
+                 notas or None, lead_id, appointment_id))
+
     @app.post('/api/appointments')
     @protected_api()
     def api_appointment_create():
@@ -759,16 +795,22 @@ def create_app(test_config=None):
             professional_id = int(data.get('professional_id'))
         except (TypeError, ValueError):
             return api_error('invalid', 'Seleccione un profesional')
+        titulo = (data.get('title') or '').strip()
+        if not titulo:
+            paciente = (data.get('patient_name') or '').strip()
+            titulo = ('Consulta · ' + paciente) if paciente else 'Consulta'
         result = save_appointment(
             app.config['DATABASE'], professional_id=professional_id,
             start=data.get('start'), end=data.get('end'),
-            title=data.get('title') or '', zone=_eff_zone(app.config['DATABASE']),
+            title=titulo, zone=_eff_zone(app.config['DATABASE']),
             lead_id=data.get('lead_id') or None, actor=g.user['id'],
             role=g.user['role'], channel='web',
             reason=data.get('reason') or None,
             window_policy=lambda s, e: _eff_check_window(app.config['DATABASE'], s, e))
         if not result['ok']:
             return api_error(result['code'], result['message'], service_status(result['code']))
+        _guardar_paciente(app.config['DATABASE'], result['appointment']['id'], data,
+                          actor=g.user['id'])
         detail = appointment_detail(app.config['DATABASE'],
                                     appointment_id=result['appointment']['id'],
                                     role=g.user['role'])

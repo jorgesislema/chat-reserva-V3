@@ -656,13 +656,19 @@
       showFormError(form, 'El fin debe ser posterior al inicio');
       return;
     }
+    var paciente = form.elements.patient_name ? form.elements.patient_name.value.trim() : '';
     var payload = {
       professional_id: form.elements.professional_id.value,
       lead_id: form.elements.lead_id.value || null,
-      title: form.elements.title.value.trim(),
+      title: form.elements.title.value.trim() || (paciente ? 'Consulta · ' + paciente : ''),
       start: startLocal,
       end: endLocal,
-      reason: form.elements.reason.value.trim()
+      reason: form.elements.reason.value.trim(),
+      patient_name: paciente,
+      patient_phone: form.elements.patient_phone ? form.elements.patient_phone.value.trim() : '',
+      patient_phone_alt: form.elements.patient_phone_alt ? form.elements.patient_phone_alt.value.trim() : '',
+      booked_by: form.elements.booked_by ? form.elements.booked_by.value.trim() : '',
+      patient_notes: form.elements.patient_notes ? form.elements.patient_notes.value.trim() : ''
     };
     if (!payload.professional_id) { showFormError(form, 'Seleccione un profesional'); return; }
     if (!payload.title) { showFormError(form, 'Indique el detalle de la cita'); return; }
