@@ -696,6 +696,18 @@ def adaptador_por_defecto() -> ChatAdapter:
     proveedor = (os.getenv('CRM_CHAT_PROVEEDOR') or '').strip().lower()
     if proveedor == 'simulado':
         return AdaptadorSimulado()
+    # Meta Model API directa: si hay META_API_KEY, manda sobre OpenRouter.
+    # Es compatible OpenAI en /chat/completions, así que no hace falta otro
+    # adaptador; sólo cambiar base, modelo y clave.
+    meta_key = (os.getenv('META_API_KEY') or '').strip()
+    if meta_key:
+        base = (os.getenv('META_BASE_URL') or 'https://api.meta.ai/v1').rstrip('/')
+        os.environ['CRM_CHAT_PROVEEDOR'] = 'openai-compatible'
+        os.environ['CRM_CHAT_ENDPOINT'] = base + '/chat/completions'
+        os.environ['CRM_CHAT_PROVEEDOR_API_KEY'] = meta_key
+        os.environ['CRM_CHAT_MODEL'] = (os.getenv('META_MODEL')
+                                        or 'muse-spark-1.3').strip()
+        return AdaptadorRemotoConfigurable(proveedor='openai-compatible')
     return AdaptadorRemotoConfigurable(proveedor=proveedor)
 
 

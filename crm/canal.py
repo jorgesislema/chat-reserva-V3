@@ -807,6 +807,41 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
 
     # Estado previo de diálogo si existe, si no del mensaje actual.
     pending = svc.conv_pending(path, conv_id) if conv_id else {}
+    # Turno de la ficha: el bot acaba de reservar y preguntó para quién es.
+    if pending.get('intencion') == 'paciente' and pending.get('cita_id'):
+        bajo = _normalizar(body or '')
+        if not any(k in bajo for k in ('cancelar', 'reagendar', 'reprogramar')):
+            familia = any(k in bajo for k in ('hija', 'hijo', 'madre', 'padre',
+                                              'esposa', 'esposo', 'herman', 'abuel',
+                                              'familiar', 'otra persona', 'tercera persona'))
+            mismo = (not familia) and bool(re.search(
+                r'\b(para mi|soy yo|yo mismo|yo misma|es para mi|personalmente)\b', bajo))
+            cliente = ((conv or {}).get('client_name') or 'Paciente')
+            texto_limpio = (body or '').strip()
+            if familia:
+                nombre_hijo = re.search(
+                    r'(?:hija|hijo|madre|padre|esposa|esposo|herman[ao]|abuel[ao]|familiar)\s+'
+                    r'(?:se llama\s+)?(.+)$', texto_limpio, re.IGNORECASE)
+                paciente = (nombre_hijo.group(1) if nombre_hijo else texto_limpio)[:200]
+            elif mismo:
+                paciente = cliente
+            else:
+                paciente = texto_limpio[:200]
+            if paciente:
+                with store.connect(path) as conn:
+                    conn.execute(
+                        'UPDATE crm_appointments SET patient_name=?, booked_by=? WHERE id=?',
+                        (paciente, cliente, pending['cita_id']))
+            if conv_id:
+                svc.conv_clear_pending(path, conv_id)
+            return _resp('paciente',
+                         'Gracias, la ficha queda a nombre de %s. ¿Necesita algo más?'
+                         % (paciente or cliente), pending={})
+        # Cambió de tema (cancelar, reagendar...): se suelta la ficha pendiente
+        # para no secuestrar la intención del mensaje.
+        if conv_id:
+            svc.conv_clear_pending(path, conv_id)
+        pending = {}
     if pending.get('intencion'):
         intencion = pending['intencion']
         extra = pending.get('extra') or {}
@@ -975,7 +1010,12 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             return _resp('reservar', res['message'], need_datos=False, pending={})
         if conv_id:
             svc.conv_clear_pending(path, conv_id)
-        return _resp('reservar', res['message'], need_datos=False, pending={},
+        return _resp('reservar',
+                     res['message'] + ' ¿La cita es para usted o para otra persona? '
+                     'Si es para otra persona, escriba el nombre del paciente.',
+                     need_datos=False,
+                     pending={'intencion': 'paciente',
+                              'cita_id': res['appointment_id']},
                      ok=True, appointment_id=res['appointment_id'],
                      extra={'appointment_id': res['appointment_id']})
 

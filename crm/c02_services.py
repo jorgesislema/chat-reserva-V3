@@ -2107,6 +2107,14 @@ def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
         return {'ok': False, 'error': f'Error del adaptador: {exc}', 'answer': '',
                 'modo': getattr(adaptador, 'modo', '')}
     fuentes = [f.a_dict() for f in resp.fuentes]
+    # Blindaje de citas: si la respuesta cita una fuente que no existe, no se
+    # publica: se sustituye por la abstención estándar. Evita que un modelo
+    # real «adorne» la respuesta con referencias inventadas.
+    citas = [int(n) for n in re.findall(r'\[(\d{1,2})\]', resp.answer or '')]
+    if citas and max(citas) > len(fuentes):
+        resp.answer = ('No encuentro información suficiente en el contexto autorizado '
+                       'para responder con certeza.')
+        resp.abstencion = True
     # El turno se guarda TRAS responder y NUNCA tumba el chat: con su pregunta
     # original, la búsqueda resuelta y las fuentes reales citadas.
     turno_guardado = None
