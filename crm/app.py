@@ -482,6 +482,41 @@ def create_app(test_config=None):
             audit(conn, g.user['id'], 'Alta de cuenta Google')
         return redirect(url_for('home', tab='accounts'))
 
+    def _reasignar_citas_futuras(conn, professional_id):
+        """Mueve las citas futuras del profesional a otro activo con el hueco libre.
+
+        Las que no encuentran hueco se quedan con él: siguen visibles en la agenda
+        (la regla del panel es no ocultar reservas) para moverlas a mano.
+        """
+        ahora = datetime.now(timezone.utc).isoformat()
+        candidatos = [r['id'] for r in conn.execute(
+            'SELECT id FROM crm_professionals WHERE active=1 AND id<>? ORDER BY id',
+            (professional_id,))]
+        citas = conn.execute(
+            "SELECT id, start, end FROM crm_appointments WHERE professional_id=? "
+            "AND status='active' AND start>=? ORDER BY start", (professional_id, ahora)).fetchall()
+        movidas = 0
+        sin_hueco = 0
+        for cita in citas:
+            destino = None
+            for candidato in candidatos:
+                choque = conn.execute(
+                    "SELECT 1 FROM crm_appointments WHERE professional_id=? AND status='active' "
+                    "AND start<? AND end>? LIMIT 1", (candidato, cita['end'], cita['start'])).fetchone()
+                if not choque:
+                    destino = candidato
+                    break
+            if destino is None:
+                sin_hueco += 1
+                continue
+            conn.execute('UPDATE crm_appointments SET professional_id=?, updated_at=? WHERE id=?',
+                         (destino, ahora, cita['id']))
+            conn.execute('INSERT INTO crm_appointment_history (appointment_id, action, reason, created_at) '
+                         'VALUES (?,?,?,?)',
+                         (cita['id'], 'reasignada', 'Baja del profesional %d' % professional_id, ahora))
+            movidas += 1
+        return movidas, sin_hueco
+
     @app.post('/professionals')
     @protected(admin=True)
     def professional_save():
@@ -498,7 +533,9 @@ def create_app(test_config=None):
                 if activos >= planes.LIMITE_PROFESIONALES:
                     flash(planes.MENSAJE_PROFESIONALES, 'error')
                     return redirect(url_for('home', tab='team'))
-            values = (required('name'), required('specialty'), email(), calendar_id, account)
+            values = (required('name'), required('specialty'), email(),
+                      request.form.get('whatsapp', '').strip() or None,
+                      calendar_id, account)
             if identifier:
                 previous = conn.execute('SELECT * FROM crm_professionals WHERE id=?', (identifier,)).fetchone()
                 if not previous:
@@ -506,10 +543,16 @@ def create_app(test_config=None):
                 if previous['calendar_id'] != calendar_id and conn.execute(
                         'SELECT 1 FROM crm_appointments WHERE professional_id=? LIMIT 1', (identifier,)).fetchone():
                     raise ValueError('Este profesional ya tiene citas: conserve su calendario o cree otro profesional')
-                conn.execute('UPDATE crm_professionals SET name=?,specialty=?,email=?,calendar_id=?,account_id=?,active=? WHERE id=?',
-                             (*values, int(request.form.get('active') == '1'), identifier))
+                nuevo_activo = int(request.form.get('active') == '1')
+                conn.execute('UPDATE crm_professionals SET name=?,specialty=?,email=?,whatsapp=?,calendar_id=?,account_id=?,active=? WHERE id=?',
+                             (*values, nuevo_activo, identifier))
+                if not nuevo_activo:
+                    movidas, sin_hueco = _reasignar_citas_futuras(conn, int(identifier))
+                    if movidas or sin_hueco:
+                        flash('Citas futuras: %d reasignadas y %d sin hueco en la agenda de los '
+                              'demás profesionales.' % (movidas, sin_hueco), 'info')
             else:
-                conn.execute('INSERT INTO crm_professionals(name,specialty,email,calendar_id,account_id) VALUES (?,?,?,?,?)', values)
+                conn.execute('INSERT INTO crm_professionals(name,specialty,email,whatsapp,calendar_id,account_id) VALUES (?,?,?,?,?,?)', values)
             audit(conn, g.user['id'], 'Actualización de profesionales')
         return redirect(url_for('home', tab='team'))
 

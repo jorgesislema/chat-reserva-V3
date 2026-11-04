@@ -39,9 +39,9 @@ SLOTS = ['09:00', '10:00', '11:00', '12:00', '14:00', '15:00', '16:00', '17:00']
 FREE_POR_DIA = 4
 
 PROFESIONALES = [
-    ('Dra. Ana Torres', 'Odontología general'),
-    ('Dr. Luis Mendoza', 'Ortodoncia'),
-    ('Dra. Sofía Rivera', 'Endodoncia'),
+    ('Dra. Ana Torres', 'Odontología general', '0999990001'),
+    ('Dr. Luis Mendoza', 'Ortodoncia', '0999990002'),
+    ('Dra. Sofía Rivera', 'Endodoncia', '0999990003'),
 ]
 
 SERVICIOS = ['Consulta general', 'Limpieza dental', 'Control de ortodoncia',
@@ -138,14 +138,16 @@ def _sembrar(path: str) -> None:
             return  # ya sembrada
 
         ids_prof = []
-        for name, specialty in PROFESIONALES:
+        for name, specialty, whatsapp in PROFESIONALES:
             row = conn.execute('SELECT id FROM crm_professionals WHERE name=?', (name,)).fetchone()
             if row:
                 ids_prof.append(row['id'])
                 continue
             ids_prof.append(conn.execute(
-                'INSERT INTO crm_professionals(name,specialty,email,active) VALUES (?,?,?,1)',
-                (name, specialty, name.split()[-1].lower() + '@clinicasonrisa.ec')).lastrowid)
+                'INSERT INTO crm_professionals(name,specialty,email,whatsapp,active) '
+                'VALUES (?,?,?,?,1)',
+                (name, specialty, name.split()[-1].lower() + '@clinicasonrisa.ec',
+                 whatsapp)).lastrowid)
 
         etapas = ['Nuevo'] * 14 + ['Contactado'] * 12 + ['Cita agendada'] * 22 + ['Ganado'] * 12 + ['Perdido'] * 4
         origenes = (['WhatsApp'] * 24 + ['Instagram'] * 14 + ['Referido'] * 12 +

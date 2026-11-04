@@ -837,6 +837,11 @@ def _migration_015_c02_biblioteca(db):
 
 # Lista ordenada de migraciones. Añadir nuevas versiones al final; nunca editar
 # una migración ya publicada.
+def _migration_020_profesional_whatsapp(db):
+    """Teléfono de WhatsApp del profesional para avisos urgentes."""
+    db.execute('ALTER TABLE crm_professionals ADD COLUMN whatsapp TEXT')
+
+
 MIGRATIONS = [
     (1, _migration_001_initial),
     (2, _migration_002_agenda),
@@ -857,6 +862,7 @@ MIGRATIONS = [
     (17, _migration_017_c02_peligro_evidencia),
     (18, _migration_018_c02_outbox_cancelar),
     (19, _migration_019_c02_chat_memoria),
+    (20, _migration_020_profesional_whatsapp),
 ]
 
 _CRM_TABLES = ('crm_users', 'crm_professionals', 'crm_appointments', 'crm_leads')

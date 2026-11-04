@@ -1270,6 +1270,31 @@ def conv_alert_active_count(path):
     return int(row['n'])
 
 
+def _avisar_especialistas(path, conversation_id, reason):
+    """Encola un aviso breve al WhatsApp de cada profesional activo con número.
+
+    No lleva datos del paciente: sólo el motivo y la indicación de entrar al
+    panel. En la demo el mensaje queda «pendiente» en la cola y no sale nada.
+    """
+    from uuid import uuid4
+
+    stamp = now()
+    texto = ('Urgencia en la bandeja (%s). Entra al panel para atender la '
+             'conversación.' % reason)
+    with connect(path) as conn:
+        filas = conn.execute(
+            "SELECT whatsapp FROM crm_professionals WHERE active=1 "
+            "AND whatsapp IS NOT NULL AND trim(whatsapp) <> ''").fetchall()
+        for fila in filas:
+            conn.execute(
+                """INSERT INTO crm_outbox (operation_id, channel, recipient, payload,
+                       correlation, state, conversation_id, origin, created_at, updated_at)
+                   VALUES (?,?,?,?,?,'pendiente',?,'sistema',?,?)""",
+                (uuid4().hex, 'whatsapp', fila['whatsapp'], json.dumps({'text': texto}),
+                 'aviso-especialista', conversation_id, stamp, stamp))
+    return len(filas)
+
+
 def conv_raise_alert(path, *, conversation_id, reason, priority='alta', message=None,
                      evidence=None):
     """Crea una alerta humana persistente (antes de pedir todos los datos).
@@ -1302,6 +1327,8 @@ def conv_raise_alert(path, *, conversation_id, reason, priority='alta', message=
         alert_id = fila['id'] if fila else None
     # La nota interna se escribe FUERA de la transacción de la alerta: evitar
     # anidar conexiones con el lock de escritura de la primera (database locked).
+    if alert_id and priority != 'normal':
+        _avisar_especialistas(path, conversation_id, reason)
     if message and alert_id:
         conv_add_message(path, conversation_id, direction='internal', body=message,
                          author_type='sistema')
