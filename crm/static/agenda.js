@@ -225,7 +225,7 @@
     var data = state.data;
     if (!data) { return; }
     if (!data.appointments.length) {
-      surface.appendChild(el('p', 'agenda-empty', 'No hay citas en este período. Haga clic en un hueco para crear una.'));
+      surface.appendChild(el('p', 'agenda-empty', 'No hay citas en este período. Haga clic en un espacio libre para crear una.'));
     }
     if (state.view === 'day') { renderDay(); }
     else if (state.view === 'week') { renderWeek(); }

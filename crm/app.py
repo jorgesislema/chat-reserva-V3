@@ -579,7 +579,7 @@ def create_app(test_config=None):
             conn.execute('UPDATE crm_professionals SET active=0 WHERE id=?', (identifier,))
             movidas, sin_hueco = _reasignar_citas_futuras(conn, identifier)
             audit(conn, g.user['id'], 'Baja de profesional: %s' % prof['name'])
-        flash('%s queda inactivo. Citas futuras: %d reasignadas y %d sin hueco.'
+        flash('%s queda inactivo. Citas futuras: %d reasignadas y %d sin espacio.'
               % (prof['name'], movidas, sin_hueco), 'info')
         return redirect(url_for('home', tab='team'))
 
@@ -615,7 +615,7 @@ def create_app(test_config=None):
                 if not nuevo_activo:
                     movidas, sin_hueco = _reasignar_citas_futuras(conn, int(identifier))
                     if movidas or sin_hueco:
-                        flash('Citas futuras: %d reasignadas y %d sin hueco en la agenda de los '
+                        flash('Citas futuras: %d reasignadas y %d sin espacio en la agenda de los '
                               'demás profesionales.' % (movidas, sin_hueco), 'info')
             else:
                 conn.execute('INSERT INTO crm_professionals(name,specialty,email,whatsapp,calendar_id,account_id) VALUES (?,?,?,?,?,?)', values)

@@ -411,7 +411,7 @@ def main() -> int:
     print('  Contraseña (única de este arranque):')
     print('  >>> %s <<<' % password)
     print('  Base:      %s' % DB)
-    print('  Agenda:    %d citas activas · %d leads · 4 huecos libres por día laborable' % (citas, leads))
+    print('  Agenda:    %d citas activas · %d leads · 4 espacios libres por día laborable' % (citas, leads))
     print('  Catálogo:  %d artículos (%d añadidos ahora)' % (articulos, añadidos))
     if os.getenv('CRM_CHAT_PROVEEDOR', '').lower() == 'simulado':
         print('  IA:        modo simulado (sin llamadas al proveedor).')

@@ -23,7 +23,7 @@ porque el CI seguiría rojo por 5 pruebas preexistentes).
 - Contraseña: la de `--clave`, o la guardada en `.pytest_cache\presentacion\clave.txt`
   (la que haya en ese archivo; no se copia aquí). Sobrevive a los reinicios: no cambia en cada arranque.
 - Base: `.pytest_cache\presentacion\clinica.db` (835 citas, 64 contactos, 18 artículos,
-  4 huecos libres por día laborable hasta el 31/12/2026).
+  4 espacios libres por día laborable hasta el 31/12/2026).
 - `scripts\demo_portafolio.py` es la demo **antigua** (marcas `[DEMO]`, contraseña
   efímera). No usar para fotos.
 

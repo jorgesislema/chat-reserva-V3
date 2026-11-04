@@ -669,7 +669,8 @@ def _texto_lista_profesionales(compatibles) -> str:
     lineas = '\n'.join('%d. %s' % (i, p['name'])
                        for i, p in enumerate(compatibles, 1))
     return ('¿Con qué profesional quieres la cita? Si ya te has atendido antes con alguno, '
-            'elígelo; si es tu primera vez, escribe «no» y te asigno uno disponible.\n%s\n'
+            'elígelo; si es tu primera vez, escribe «no» y te asigno al que tenga más \n'
+            'disponibilidad.\n%s\n'
             'Indica el número.' % lineas)
 
 
@@ -971,7 +972,10 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
     # Turno de la ficha: el bot acaba de reservar y preguntó para quién es.
     if pending.get('intencion') == 'paciente' and pending.get('cita_id'):
         bajo = _normalizar(body or '')
-        if not any(k in bajo for k in ('cancel', 'reagend', 'reprogram', 'anul')):
+        if (not any(k in bajo for k in ('cancel', 'reagend', 'reprogram', 'anul'))
+                and not detectar_peticion_humana(body or '', contexto)
+                and not re.search(r'\b(persona|humano|asesor|operador|agente|'
+                                  r'recepcionista)\b', bajo)):
             familia = any(k in bajo for k in ('hija', 'hijo', 'madre', 'padre',
                                               'esposa', 'esposo', 'herman', 'abuel',
                                               'familiar', 'otra persona', 'tercera persona'))
@@ -1192,8 +1196,8 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                                  need_datos=True,
                                  pending={**pend, 'fecha': None, 'hora': None})
                 return _resp('reservar',
-                             'Lamentablemente a las %s no tengo hueco y no encuentro otro '
-                             'cercano. ¿Probamos otro día?' % hora,
+                             'A las %s no tengo disponibilidad y no encuentro otro '
+                             'espacio cerca. ¿Probamos otro día?' % hora,
                              need_datos=True, pending={**pend, 'fecha': None, 'hora': None})
             return _resp('reservar', res['message'], need_datos=False, pending={})
         if conv_id:
