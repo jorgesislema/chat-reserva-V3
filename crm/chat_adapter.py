@@ -57,9 +57,6 @@ _PROMPT_SISTEMA = (
     'Eres el asistente de consulta interna de una clínica dental.\n'
     'Reglas estrictas:\n'
     '- Responde ÚNICAMENTE con la información del CONTEXTO del mensaje del usuario.\n'
-    '- El HISTORIAL de turnos anteriores es SOLO contexto conversacional '
-    '(referencias como «ese»): NO lo cito como [n]. Las fuentes [n] corresponden '
-    'exclusivamente al CONTEXTO numerado del mensaje actual.\n'
     '- Si el contexto no contiene la información, ABSTENTE y di que no hay '
     'información suficiente; NO inventes datos, identificadores, versiones, '
     'procedencias ni referencias.\n'
@@ -70,11 +67,6 @@ _PROMPT_SISTEMA = (
     '- Cita cada afirmación con la fuente correspondiente como [n].\n'
     '- Responde en español, breve y directo.'
 )
-
-# Máximo de parejas pregunta/respuesta previas que se envían al proveedor en
-# un turno (tope doble con la poda de la memoria: nunca una conversación
-# completa).
-_MAX_HISTORIAL_TURNOS = 6
 
 
 @dataclass
@@ -117,18 +109,15 @@ class ProveedorError(Exception):
 
 
 class ChatAdapter(ABC):
-    """Contrato: un adaptador recibe la pregunta, el historial acotado de
-    turnos previos (solo contexto conversacional, nunca citable como [n]) y
-    las herramientas autorizadas; devuelve una respuesta con fuentes. Nunca
-    escribe en la BD."""
+    """Contrato: un adaptador recibe la pregunta y herramientas autorizadas,
+    devuelve una respuesta con fuentes. Nunca escribe en la BD."""
 
     nombre: str = 'base'
     modo: str = 'simulado'
 
     @abstractmethod
     def consultar(self, pregunta: str, *, herramientas: Dict[str, Callable],
-                  rol: str, historial: Optional[List[Dict[str, Any]]] = None,
-                  ) -> RespuestaChat:
+                  rol: str) -> RespuestaChat:
         raise NotImplementedError
 
 
@@ -153,10 +142,7 @@ class AdaptadorSimulado(ChatAdapter):
     modo = 'simulado'
 
     def consultar(self, pregunta: str, *, herramientas: Dict[str, Callable],
-                  rol: str, historial: Optional[List[Dict[str, Any]]] = None,
-                  ) -> RespuestaChat:
-        # El historial no cambia la heurística: el responder ya resolvió las
-        # referencias en la pregunta y cada turno re-ejecuta la recuperación.
+                  rol: str) -> RespuestaChat:
         q = pregunta.lower()
         ctx = _mejor_contexto(herramientas, pregunta, q, rol)
         fuentes: List[Fuente] = []
@@ -313,8 +299,7 @@ class AdaptadorRemotoConfigurable(ChatAdapter):
         return bool(self._api_key) and bool(self._endpoint)
 
     def consultar(self, pregunta: str, *, herramientas: Dict[str, Callable],
-                  rol: str, historial: Optional[List[Dict[str, Any]]] = None,
-                  ) -> RespuestaChat:
+                  rol: str) -> RespuestaChat:
         if not self.configurado:
             # Modo operativo sin configuración: respuesta EXPLÍCITA, nunca una
             # simulación silenciosa.
@@ -338,23 +323,10 @@ class AdaptadorRemotoConfigurable(ChatAdapter):
                 fuentes=[], abstencion=True,
                 resumen='sin_contexto_autorizado;' + traza,
                 proveedor=self.proveedor)
-        # Historial ACOTADO (solo contexto conversacional; nunca fuentes
-        # citables): cada turno previo va como pregunta/respuesta con las
-        # fuentes que respaldaron AQUELLA respuesta, marcadas como historial.
-        mensajes = [{'role': 'system', 'content': _PROMPT_SISTEMA}]
-        for turno in (historial or [])[-_MAX_HISTORIAL_TURNOS:]:
-            fuente_hist = ', '.join(
-                '%s «%s»' % (f.get('tipo', ''), f.get('nombre', ''))
-                for f in turno.get('fuentes') or [] if isinstance(f, dict)) \
-                or ('abstención' if turno.get('abstencion') else 'sin fuentes')
-            mensajes.append({'role': 'user', 'content':
-                             f'[Historial] Pregunta anterior: '
-                             f'{(turno.get("question") or "")[:400]}'})
-            mensajes.append({'role': 'assistant', 'content':
-                             f'[Historial] Respuesta anterior: '
-                             f'{(turno.get("answer") or "")[:800]} '
-                             f'(fuente: {fuente_hist})'})
-        mensajes.append({'role': 'user', 'content': self._prompt_usuario(q, contexto)})
+        mensajes = [
+            {'role': 'system', 'content': _PROMPT_SISTEMA},
+            {'role': 'user', 'content': self._prompt_usuario(q, contexto)},
+        ]
         try:
             payload, latencia = self._enviar_peticion(mensajes)
         except ProveedorError as exc:
@@ -571,15 +543,10 @@ class AdaptadorRemotoConfigurable(ChatAdapter):
 
 def _mapear_citas(contenido: str, contexto: List[Dict[str, Any]]):
     """Mapea las citas [n] del contenido SOLO a las fuentes reales del
-    contexto. Admite citas empaquetadas ([1, 2, 3] o [1,2]); una cita fuera de
-    rango no inventa ninguna referencia."""
-    numeros = sorted({
-        int(m)
-        for grupo in re.findall(r'\[([\d,\s]+)\]', contenido or '')
-        for m in re.split(r'[,;\s]+', grupo) if m
-        if 1 <= int(m) <= len(contexto)
-    })
-    return contenido, [contexto[i - 1]['fuente'] for i in numeros]
+    contexto. Una cita fuera de rango no inventa ninguna referencia."""
+    usadas = sorted({int(m) for m in re.findall(r'\[(\d+)\]', contenido)
+                     if 1 <= int(m) <= len(contexto)})
+    return contenido, [contexto[i - 1]['fuente'] for i in usadas]
 
 
 class ClasificadorIntenciones:

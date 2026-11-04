@@ -1,10 +1,14 @@
 'use client'
 
 import { Outlet } from 'react-router-dom'
-import { Sidebar } from '@/components/layout/sidebar'
-import { Header } from '@/components/layout/header'
+import { Sidebar } from '@/components/layout/Sidebar'
+import { Header } from '@/components/layout/Header'
+import { cn } from '@/utils'
+import { useState } from 'react'
 
 export function Layout() {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+
   return (
     <div className="min-h-screen bg-surface flex">
       <Sidebar collapsed={false} />
@@ -17,3 +21,5 @@ export function Layout() {
     </div>
   )
 }
+
+export { Layout }

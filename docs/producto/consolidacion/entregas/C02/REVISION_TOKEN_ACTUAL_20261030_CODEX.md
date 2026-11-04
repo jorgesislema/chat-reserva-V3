@@ -1,6 +1,0 @@
-## 2026-10-30 — REVISOR: TOKEN ACTUAL VÁLIDO, META HTTP 200
-
-Verificación nueva solicitada por el propietario, usando .venv-op/Scripts/python.exe y dotenv_values sobre el .env absoluto de esta raíz. WHATSAPP_TOKEN y WHATSAPP_ACCESS_TOKEN presentes, una definición cada una, interpolación coincidente; PHONE_ID, VERIFY_TOKEN y APP_SECRET presentes sin duplicados. En el proceso de comprobación no había variables WhatsApp exportadas que sustituyeran las del archivo. Consulta de lectura GET Graph v25.0 al PHONE_ID con fields=verified_name, usando explícitamente el token resuelto del archivo: HTTP200 y verified_name presente. No mensajes enviados ni claves impresas. No se certifica duración/permisos de todas las operaciones sólo por esta lectura.
-El diagnóstico anterior de token expirado ya no describe el archivo actual. No pedir regenerar/guardar otra vez este token sin nueva evidencia. .env contiene configuración; .venv-op es el entorno Python. No se modificaron ambos ni la base.
-PRÓXIMA ACCIÓN EXACTA: continuar con el bloqueo de conexión pública ngrok y la validación del webhook. Verificar red/autorizar servicio según corresponda, sin alterar DNS/certificados ni desactivar protecciones. Reutilizar proxy y base ficticia; conservar autorizaciones expresas y no asumir nuevas. No repetir diagnóstico de token por rutina.
-

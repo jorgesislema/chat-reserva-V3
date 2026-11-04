@@ -144,7 +144,3 @@ Cada entrega incluye: pruebas unitarias de reglas, integración web/bot/DB, caso
 regresión del área afectada y evidencia de recorridos. Servicios externos simulados por defecto;
 pruebas reales sólo en recursos de prueba identificados y con autorización de envío/escritura.
 No retirar tests para ocultar fallos; separar errores del entorno, defectos previos y regresiones.
-
-
-## Aclaración del propietario — 2026-10-28 — Básico
-Incluye chat interno IA y biblioteca de plantillas Meta aprobadas/documentos PDF para envío autorizado, también publicidad permitida. No moverlos automáticamente a planes superiores. Semáforo de calidad del número empresarial propuesto: dato oficial con estado desconocido/fecha, sin promesa de predecir o evitar suspensión. Alcance y fuentes en consolidacion/ALCANCE_BASICO_WHATSAPP_BIBLIOTECA_CALIDAD.md. Sólo planificación, no funcionalidad acreditada ni autorización para envíos reales.

@@ -18,7 +18,6 @@ transporte inyectable y un adaptador de modelo configurable (véase C02/ENTREGA)
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
@@ -1796,181 +1795,6 @@ def _agenda_summary(path):
             'citas_abiertas': citas_abiertas}
 
 
-# ---------------------------------------------------------------------------
-# Memoria multi-turno del chat interno (punto 6 C02): acotada, por conversación
-# y rol, sin convertir la conversación completa en un envío al proveedor.
-# ---------------------------------------------------------------------------
-_MEMORIA_TURNOS_DEFECTO = 4          # pares pregunta/respuesta conservados
-_MEMORIA_MAX_TURNOS = 10
-_MEMORIA_MAX_QUESTION = 300          # chars por pregunta en la memoria
-_MEMORIA_MAX_ANSWER = 800            # chars por respuesta en la memoria
-_MEMORIA_MAX_FUENTES = 4             # fuentes por turno conservadas
-
-# Palabras de referencia/elipsis (en forma plegada): si una pregunta queda sin
-# palabras de contenido tras retirar estas, es una referencia al turno previo
-# («¿y ese cuánto cuesta?», «¿y el precio?»).
-_REFERENCIA_TOKENS = frozenset(
-    'ese esa eso esos esas este esta estos estas ello ella mismo misma '
-    'tal tales cual cuales cuanto cuanta cuantos cuantas cuesta cuestan '
-    'vale valen precio precios coste costo costos'.split())
-
-# Prefijos que quitan de la pregunta para extraer el sujeto («cuanto cuesta
-# la limpieza dental» -> «limpieza dental»), en forma plegada.
-_SUJETO_PREFIXS = (
-    'cuanto cuesta', 'cuanto cuestan', 'cuanto vale', 'cuanto valen',
-    'que es', 'que son', 'cual es', 'cuales son', 'que', 'como', 'cuando',
-    'donde', 'quien', 'quienes', 'hay', 'tengo cita', 'necesito', 'quiero',
-    'quisiera', 'puedo', 'pueden')
-
-
-def _memoria_limite(limite_turnos):
-    try:
-        v = int(os.getenv('CRM_C02_CHAT_MEMORIA_TURNOS', ''))
-    except (TypeError, ValueError):
-        v = 0
-    if limite_turnos is not None:
-        v = int(limite_turnos)
-    if v < 1:
-        v = _MEMORIA_TURNOS_DEFECTO
-    return min(v, _MEMORIA_MAX_TURNOS)
-
-
-def chat_memoria_cargar(path, conversation_id, limite_turnos=None, role=None):
-    """Turnos conservados de una conversación del chat interno, del más viejo
-    al más reciente, limitados a los últimos ``limite_turnos``. Con ``role``
-    se filtran SOLO los turnos de ese rol: la memoria nunca se arrastra a otro
-    rol. Devuelve (turnos, siguiente_turno) donde siguiente_turno es el turno
-    a escribir (máximo global de la conversación + 1)."""
-    limite = _memoria_limite(limite_turnos)
-    if not conversation_id or not isinstance(conversation_id, str) \
-            or len(conversation_id) > 64:
-        return [], 1
-    try:
-        import sqlite3 as _sqlite3
-        with connect(path) as conn:
-            fila = conn.execute(
-                'SELECT MAX(turno) AS m FROM crm_c02_chat_memory '
-                'WHERE conversation_id=?', (conversation_id,)).fetchone()
-            siguiente = (int(fila['m'] or 0) + 1) if fila else 1
-            sql = ('SELECT turno, question, question_busqueda, answer, fuentes, '
-                   'abstencion FROM crm_c02_chat_memory WHERE conversation_id=?')
-            params = [conversation_id]
-            if role:
-                sql += ' AND role=?'
-                params.append(role)
-            sql += ' ORDER BY turno DESC LIMIT ?'
-            params.append(limite)
-            rows = conn.execute(sql, params).fetchall()[::-1]
-    except _sqlite3.OperationalError:
-        return [], 1
-    turnos = []
-    for r in rows:
-        try:
-            fuentes = json.loads(r['fuentes'] or '[]')
-        except (TypeError, ValueError):
-            fuentes = []
-        turnos.append({'turno': int(r['turno']), 'question': r['question'],
-                       'question_busqueda': r['question_busqueda'],
-                       'answer': r['answer'], 'fuentes': fuentes,
-                       'abstencion': bool(r['abstencion'])})
-    return turnos, siguiente
-
-
-def chat_memoria_guardar(path, conversation_id, *, turno, role, question,
-                         question_busqueda, answer, fuentes=None,
-                         abstencion=False, user_id=None, limite_turnos=None):
-    """Guarda el turno y PODA los anteriores que excedan el límite (atómico:
-    leer el turno siguiente y podar en la misma transacción). Un fallo de
-    memoria jamás tumba el chat: quien llama decide ignorarlo."""
-    limite = _memoria_limite(limite_turnos)
-    if not conversation_id or not isinstance(conversation_id, str) \
-            or len(conversation_id) > 64:
-        return False
-    fuentes_json = json.dumps(
-        [f if isinstance(f, dict) else getattr(f, 'a_dict', lambda: {})()
-         for f in (fuentes or [])][:_MEMORIA_MAX_FUENTES], ensure_ascii=False)
-    if turno is None:
-        _, turno = chat_memoria_cargar(path, conversation_id, limite_turnos=limite)
-    stamp = datetime.now(timezone.utc).isoformat()
-    try:
-        import sqlite3 as _sqlite3
-        with connect(path) as conn:
-            conn.execute('BEGIN IMMEDIATE')
-            conn.execute(
-                """INSERT INTO crm_c02_chat_memory
-                   (conversation_id, turno, role, user_id, question,
-                    question_busqueda, answer, fuentes, abstencion, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (conversation_id, int(turno), role, user_id,
-                 (question or '')[:_MEMORIA_MAX_QUESTION],
-                 (question_busqueda or '')[:_MEMORIA_MAX_QUESTION],
-                 (answer or '')[:_MEMORIA_MAX_ANSWER], fuentes_json,
-                 1 if abstencion else 0, stamp))
-            conn.execute(
-                """DELETE FROM crm_c02_chat_memory
-                   WHERE conversation_id=? AND turno <= ?""",
-                (conversation_id, int(turno) - limite))
-            conn.execute('COMMIT')
-        return True
-    except _sqlite3.OperationalError:
-        return False
-
-
-def _es_referencia_a_turno_anterior(pregunta: str) -> bool:
-    """True si la pregunta es una referencia/elipsis SIN sujeto propio
-    («¿y ese cuánto cuesta?», «¿y el precio?»): tras retirar conectores,
-    palabras de referencia y pronombres no queda ninguna palabra de contenido
-    con la que volver a recuperar fuentes."""
-    palabras = [w for w in _words_filtradas(_fold(pregunta or ''))
-                if w not in _REFERENCIA_TOKENS]
-    return not palabras
-
-
-def _sujeto_turno(pregunta: str, max_len: int = 80) -> str:
-    """Extrae el sujeto sustantivo de la pregunta de un turno previo para
-    resolver referencias. Heurística determinista y acotada; si una pregunta
-    ya fue resuelta («... (sujeto)»), se reutiliza el sujeto entre paréntesis.
-    Sin sujeto extraíble devuelve texto acotado de la pregunta original."""
-    s = (pregunta or '').strip()
-    m = re.search(r'\(([^()]{2,80})\)\s*$', s)
-    if m:
-        return m.group(1).strip()
-    s = _fold(s)
-    s = re.sub(r'^[¿?¡!.,;:()\-"\']+', '', s).strip()
-    for prefijo in _SUJETO_PREFIXS:
-        if s.startswith(prefijo + ' '):
-            s = s[len(prefijo):].strip()
-            break
-    for articulo in ('el ', 'la ', 'los ', 'las ', 'un ', 'una ', 'unos ',
-                     'unas '):
-        if s.startswith(articulo):
-            s = s[len(articulo):].strip()
-            break
-    for conector in ('y ', 'o ', 'entonces '):
-        if s.startswith(conector):
-            s = s[len(conector):].strip()
-            break
-    s = re.sub(r'[¿?]+$', '', s).strip()
-    return (s or _fold(pregunta or ''))[:max_len].strip()
-
-
-def _resolver_referencia(pregunta: str, historial) -> str:
-    """Resuelve una referencia al turno anterior («¿y ese cuánto cuesta?»)
-    combinándola con el sujeto del último turno. La pregunta resuelta se usa
-    para VOLVER a recuperar las fuentes actuales y como texto del turno. Sin
-    referencia o sin historial del mismo contexto, devuelve la pregunta tal
-    cual (y el adaptador se abstendrá si no hay datos)."""
-    pregunta = (pregunta or '').strip()
-    if not pregunta or not historial or not _es_referencia_a_turno_anterior(pregunta):
-        return pregunta
-    previo = historial[-1]
-    sujeto = _sujeto_turno(previo.get('question') or
-                           previo.get('question_busqueda') or '')
-    if not sujeto:
-        return pregunta
-    return f'{pregunta} ({sujeto})'
-
-
 def _herramientas_chat(path, role):
     """Funciones autorizadas que el adaptador IA puede consultar (sólo lectura).
 
@@ -2026,23 +1850,13 @@ def _herramientas_chat(path, role):
             'agenda_resumen': agenda_resumen, 'stock_consultar': stock_consultar}
 
 
-def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
-                            conversation_id=None, limite_turnos=None,
-                            user_id=None):
-    """Chat interno sobre el adaptador IA inyectable (puntos 3 y 6 C02).
-
-    Multi-turno con memoria ACOTADA: con ``conversation_id`` se cargan los
-    turnos previos del MISMO contexto (conversación y rol), se resuelven
-    referencias («¿y ese cuánto cuesta?»), se vuelven a recuperar las fuentes
-    ACTUALES para la pregunta y se guarda el turno con sus fuentes reales,
-    podando los anteriores al límite. Sin ``conversation_id`` se comporta
-    igual que antes (stateless). La respuesta siempre declara las fuentes
-    identificables y se ABSTIENE (``abstencion=True``) cuando no hay
-    información suficiente; no inventa datos y no expone borradores, notas
-    internas ni datos de clientes.
+def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None):
+    """Chat interno sobre el adaptador IA inyectable (punto 3 C02, paso C).
 
     ``adaptador`` viene inyectado (contrato ChatAdapter); por defecto el
-    simulado.
+    simulado. La respuesta siempre declara las fuentes identificables y se
+    ABSTIENE (``abstencion=True``) cuando no hay información suficiente; no
+    inventa datos y no expone borradores, notas internas ni datos de clientes.
     """
     pregunta = (pregunta or '').strip()
     if not pregunta:
@@ -2050,33 +1864,13 @@ def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
     if adaptador is None:
         from crm import chat_adapter
         adaptador = chat_adapter.ADAPTADOR_ACTIVO
-    historial = []
-    siguiente_turno = None
-    if conversation_id:
-        historial, siguiente_turno = chat_memoria_cargar(
-            path, conversation_id, limite_turnos=limite_turnos, role=role)
-    # Referencia/elipsis del turno anterior resuelta ANTES de recuperar: la
-    # pregunta resuelta vuelve a consultar las fuentes actuales.
-    pregunta_resuelta = _resolver_referencia(pregunta, historial) \
-        if conversation_id else pregunta
     herramientas = _herramientas_chat(path, role)
     try:
-        resp = adaptador.consultar(pregunta_resuelta, herramientas=herramientas,
-                                   rol=role, historial=historial)
+        resp = adaptador.consultar(pregunta, herramientas=herramientas, rol=role)
     except Exception as exc:  # el adaptador nunca debe tumbar el chat interno
         return {'ok': False, 'error': f'Error del adaptador: {exc}', 'answer': '',
                 'modo': getattr(adaptador, 'modo', '')}
     fuentes = [f.a_dict() for f in resp.fuentes]
-    # El turno se guarda TRAS responder y NUNCA tumba el chat: con su pregunta
-    # original, la búsqueda resuelta y las fuentes reales citadas.
-    turno_guardado = None
-    if conversation_id:
-        if chat_memoria_guardar(
-                path, conversation_id, turno=siguiente_turno, role=role,
-                question=pregunta, question_busqueda=pregunta_resuelta,
-                answer=resp.answer, fuentes=fuentes, abstencion=resp.abstencion,
-                user_id=user_id, limite_turnos=limite_turnos):
-            turno_guardado = siguiente_turno
     # Telemetría del proveedor (punto 3C): se registra proveedor/modelo,
     # latencia y uso de tokens ÚNICAMENTE si el proveedor los reportó; si no,
     # figura «no disponible», nunca un cero inventado. La telemetría nunca
@@ -2117,10 +1911,7 @@ def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
             'modo': getattr(adaptador, 'modo', 'simulado'),
             'fallo_proveedor': getattr(resp, 'fallo_proveedor', False),
             'telemetria': telemetria,
-            'resumen': resp.resumen,
-            'turno': turno_guardado,
-            'historial': len(historial),
-            'pregunta_resuelta': pregunta_resuelta if conversation_id else None}
+            'resumen': resp.resumen}
 
 
 def _catalog_search(path, query, limit=4, solo_publicados=True):

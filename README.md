@@ -12,19 +12,10 @@ objetivo no deben confundirse con las disponibles actualmente. Para retomar el t
    y la [evidencia de P02C](docs/producto/evidencias/p02c/). El historial de P01 está en
    [REPORTE_P01.md](docs/producto/REPORTE_P01.md).
 
-Desde la entrega **C01** (27-10-2026) el proyecto trabaja el "frontend único" de la consolidación:
-el CRM en Flask/Jinja/JS es la única interfaz activa y fuente de reservas. El expediente de
-trazabilidad (requisitos, decisiones, inventario de retiro y ejecuciones reales) está en
-[docs/producto/consolidacion/](docs/producto/consolidacion/ALCANCE.md) y el resumen de la
-entrega en [docs/producto/consolidacion/entregas/C01/ENTREGA.md](docs/producto/consolidacion/entregas/C01/ENTREGA.md).
-
 El trabajo se realiza por entregas con cambios, pruebas y límites en el estado de continuidad.
 P01 y P2 están aceptadas; G01 está **aceptada por Codex tras G01B**
 ([dictamen independiente](docs/producto/REVISION_G01B_CODEX.md)). P03 está implementada con
 pruebas simuladas y conserva pendiente su validación en calendario real exclusivo autorizado.
-C01 (agenda real con frontend renovado) está implementada y verificada por E2E; queda pendiente
-la aceptación visual del propietario y los canales reales (WhatsApp/Google) como indica el
-expediente.
 
 ## SaaS de reservas: modelo multi-tenant nativo
 
@@ -49,34 +40,6 @@ políticas, todo configurable desde el panel web sin tocar código ni `.env`.
 ---
 P04–P08 siguen pendientes; el producto completo todavía no está terminado.
 
-### Panel de administración SaaS (React) — corrección verificada el 26-10-2026
-
-La UI React (`frontend/`) quedó conectada de verdad con la API del SaaS y verificada en
-navegador real; antes no compilaba (86+ errores de TypeScript) ni acertaba las rutas HTTP.
-El detalle de defectos corregidos y evidencias está en
-[ENTREGA_CORRECCION_V3_2026-10-26](docs/producto/ENTREGA_CORRECCION_V3_2026-10-26.md).
-
-Cómo abrir el panel en local (sin `.env`, sin proveedores; el backend usa una base temporal):
-
-```bash
-# 1) Backend WSGI sobre base temporal (migra si falta). API key sintética, ej. sk-test
-python -m saas.api.server --db %TEMP%\saas-demo\saas.db --port 8090 --migrate
-
-# 2) Frontend dev (proxy /api -> 127.0.0.1:8090 ya configurado en vite.config.ts)
-cd frontend && npm run dev
-```
-
-Abra **http://localhost:5173** e ingrese con la API key de la base usada.
-Build de producción: `cd frontend && npm run build` (genera `frontend/dist`).
-Verificación del recorrido en navegador (Playwright local):
-`cd frontend && node e2e/navegador.e2e.mjs`.
-
-Recordatorios y entrega de WhatsApp: la CLI `scripts/run_reminders.py` admite `--dry-run`
-(no escribe nada) y `--execute` (registra envíos **simulados** sin marcar entregas; la entrega
-real solo la confirma un transporte conectado, punto único de integración
-`repo.mark_reminder_delivered`). No ejecute `--transport whatsapp` sin un transporte real.
-
-
 Aplicación local con acceso por contraseña, roles administrador/usuario, profesionales,
 varias cuentas y calendarios Google, agenda y gestión comercial de leads. El bot de
 WhatsApp existente se conserva y ahora puede consultar profesionales y guardar citas en el CRM.
@@ -91,8 +54,7 @@ WhatsApp existente se conserva y ahora puede consultar profesionales y guardar c
 | Google Calendar | Varias cuentas, calendarios independientes, estados de sincronización, conflictos en revisión y reintentos |
 | Leads | Etapas comerciales, origen, responsable, notas, valor y seguimiento |
 | Análisis | Embudo, conversión por origen y oportunidades abiertas |
-| Catálogo | Artículos editables con revisión y publicación (C02); notas internas separadas de lo público |
-| Conversaciones | Previsualización de diseño **no operativa** (rotulada «Previsualización») |
+| Administración | Gestión de usuarios y registro de actividad |
 
 ![Resumen del CRM con datos ficticios](docs/crm-preview.png)
 
@@ -136,9 +98,6 @@ Si el puerto está ocupado, cierre el dashboard anterior antes de iniciar el CRM
 
 No ejecute `app_corporativa.py` o `streamlit run ui/app.py` para acceder al CRM nuevo:
 son interfaces anteriores con modelos diferentes. El inicio recomendado es `run_crm.py`.
-Por defecto escucha en `127.0.0.1:8050`; puede cambiarlo con las variables
-`CRM_HOST`, `CRM_PORT` y `CRM_THREADED` (por ejemplo para entornos de prueba aislados,
-`set CRM_PORT=8060` antes de arrancar).
 El servidor escucha exclusivamente en localhost; no necesita VPS, Docker ni túneles.
 La interfaz y los datos funcionan sin Internet. Google Calendar, WhatsApp y la IA sí requieren red.
 El servidor de Flask se usa para una instalación local de una computadora; no publique este arranque en Internet.
@@ -414,19 +373,8 @@ importación diferida. Para verificar sin tocar `.venv-crm`, cree un entorno apa
 ```powershell
 python -m venv .venv-verify
 .\.venv-verify\Scripts\python.exe -m pip install -r requirements-crm-test.txt
-.\.venv-verify\Scripts\python.exe -m pytest tests/test_crm.py tests/test_reservation_service.py tests/test_demo_seed.py tests/test_p01b.py tests/test_p02.py tests/test_p02b.py tests/test_p02c.py tests/test_p03.py tests/test_analytics.py tests/test_business_profile.py tests/test_g01_reservas.py tests/test_c01_previews.py tests/test_c02_services.py tests/test_c02_webhook_http.py tests/test_c02_canal.py tests/test_c02_frontend.py -q --basetemp=.pytest_cache/pruebas-crm
+.\.venv-verify\Scripts\python.exe -m pytest tests/test_crm.py tests/test_reservation_service.py tests/test_demo_seed.py tests/test_p01b.py tests/test_p02.py tests/test_p02b.py tests/test_p02c.py tests/test_p03.py tests/test_analytics.py tests/test_business_profile.py tests/test_g01_reservas.py -q --basetemp=.pytest_cache/pruebas-crm
 ```
-
-`tests/test_c01_previews.py` (entrega C01) verifica que las previsualizaciones de Catálogo y
-Conversaciones se sirven con CSP estricta (sin `unsafe-inline`) y el recorrido de agenda
-crear→consultar/recargar→reagendar→cancelar sobre fixtures, con verificación de la base de
-datos (conserva el mismo `event_id` y crece el historial).
-
-Los módulos `tests/test_c02_*.py` (entrega C02) cubren: servicios de dominio (catálogo,
-conocimiento, canal durable, bandeja humana), el **webhook de WhatsApp** (`/webhook`) con
-recorrido HTTP real (HMAC, idempotencia durable, CSRF eximido), el **worker de canal** y el
-**catálogo editable en el frontend único** (CRUD sobre rutas API autenticadas con control de
-versión).
 
 Si pip hereda una ruta CA inválida, apunte `PIP_CERT`, `REQUESTS_CA_BUNDLE` y `SSL_CERT_FILE`
 a un `cacert.pem` válido (por ejemplo el de `certifi`) **sólo** para ese comando.
@@ -481,80 +429,6 @@ Mes, detalle/historial y carrera de vistas. P02C cubre intervalos de 49 h/24 h, 
 fin inválido y el payload real del formulario. Playwright es una
 herramienta de verificación, **no** una dependencia del producto; no se instala en `.venv-crm`.
 
-### E2E de la agenda en navegador (entrega C01)
-
-Ejecuta el recorrido completo de la agenda en un navegador real (Playwright + Chromium local)
-contra una base sintética, verificando la base de datos al final. No usa producción:
-
-```powershell
-.\.venv-verify\Scripts\python.exe scripts/e2e_crm_agenda.py
-```
-
-Requisitos: entorno `.venv-verify` con `requirements-crm-test.txt`, `node` y `@playwright/test`
-en `frontend/` con Chromium descargado (`npx playwright install chromium`). Verifica con la
-interfaz real (y la DB de fixtures) crear → consultar/recargar → reagendar → cancelar, la
-persistencia tras recargar, la sesión inválida que redirige a `/login`, y el uso desde móvil
-(vista día) y teclado (guardado con Enter). Ortograma de arranque: `run_crm.py` respeta
-`CRM_HOST`/`CRM_PORT`/`CRM_THREADED`, y el runner arranca y cierra sus propios servidores en
-puertos libres.
-
-### E2E de las pantallas C02 en navegador (corrección R1–R5)
-
-Recorre en un navegador real las ventanas de C02 contra una base sintética y verifica la base
-de datos al final: fase `cat` (catálogo con alta de artículo, conocimiento crear+publicar, chat
-interno, configuración de IA) y fase `bandeja` (tomar el chat y responder como operador). No usa
-producción:
-
-```powershell
-.\.venv-verify\Scripts\python.exe scripts/e2e_crm_c02.py
-```
-
-Mismos requisitos que el E2E de agenda (`.venv-verify`, `node`, `@playwright/test` y Chromium en
-`frontend/`). La persistencia (artículo, documento publicado, saludo y la respuesta del operador)
-se verifica de forma determinista sobre la base de fixtures; las capturas quedan en
-`docs/producto/consolidacion/evidencias/c02/`.
-
-## CI/CD (GitHub Actions)
-
-El pipeline vive en `.github/workflows/` y usa las mismas herramientas que el desarrollo local.
-No requiere secretos, proveedores reales ni despacho de mensajes: la suite usa bases SQLite
-temporales y servicios simulados.
-
-### CI — `ci.yml` (automático)
-
-Se ejecuta en cada push a `main` y en cada pull request contra `main`:
-
-1. **Validación de workflows** — `actionlint` comprueba la sintaxis y las expresiones `${{ }}`
-   de los propios `.yml` (y falla ante comandos de shell inseguros).
-2. **Lint Python** (`ruff==0.8.6`, igual que en desarrollo) — sólo sobre los archivos `.py` del
-   diff (base del PR o commit anterior en push): la deuda existente no bloquea, los problemas
-   nuevos sí.
-3. **Tests** — `python -m pytest tests/` con Python 3.13. Los archivos de las eras P01–P03, G01
-   y Qdrant obsoletos desde la consolidación C01 están excluidos con `--ignore` (fallan también
-   en local: reescribirlos contra el estado actual está pendiente).
-4. **Build frontend** — `npm ci`, `npm run lint` (oxlint) y `npm run build` (`tsc -b && vite
-   build`) con Node 22 y caché de npm en `frontend/`.
-
-Reproducción local de cada paso (Windows):
-
-```powershell
-ruff check <archivos-py-del-diff>          # o la lista completa de crm/
-python -m pytest tests/ -q --durations=5 --ignore tests/test_g01_reservas.py --ignore tests/test_p01b.py --ignore tests/test_p02.py --ignore tests/test_p02c.py --ignore tests/test_p03.py --ignore tests/test_qdrant.py --ignore tests/test_database.py --deselect tests/test_reservation_service.py::test_migrations_idempotent_preserve_and_equivalent
-cd frontend; npm ci; npm run lint; npm run build
-```
-
-### CD — `deploy.yml` (manual)
-
-Despliegue a un VPS por SSH + rsync, disparado **sólo manualmente** desde la pestaña Actions
-(`workflow_dispatch`) para tener control explícito de cada salida. Compila el frontend dentro
-del flujo, instala dependencias y reinicia el servicio.
-
-Secretos de repositorio requeridos (Settings → Secrets and variables → Actions), sin valores por
-defecto en el repositorio: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_SSH_KEY` y
-`DEPLOY_RESTART_CMD`. **Antes del primer despliegue real** haga un ensayo verificable: conecte
-por SSH y pruebe `DEPLOY_RESTART_CMD`, y ejecute `rsync --dry-run` con los mismos excludes para
-revisar el conjunto de archivos que reemplazaría (revisión pendiente para activar el flujo).
-
 ## Problemas frecuentes
 
 | Problema | Acción |
@@ -572,27 +446,6 @@ La agenda se presenta en vistas Día, Semana y Mes con filtros por profesional/e
 históricos locales no se migran automáticamente, y el sistema representa un solo negocio por
 instalación. Consulte el diagnóstico para los pendientes de la cola del bot, audio, horarios por
 profesional y otras extensiones.
-
-## Ver el frontend con datos ficticios (demo aislada)
-
-Para probar **la interfaz** cuanto antes, sin tocar la base del negocio ni configurar Google,
-arranque una demostración aislada en una base temporal con datos ficticios:
-
-```powershell
-.\.venv-verify\Scripts\python.exe scripts/demo_frontend.py
-```
-
-Abre **http://127.0.0.1:8050** con el usuario `admin@demo.local` y la contraseña que imprime en
-la terminal (se genera nueva en cada arranque y **no** existe una contraseña fija de demo en el repositorio). La demo:
-- usa una base temporal en `.pytest_cache/demo-frontend/` (se descarta al cerrar la terminal);
-- carga el perfil 24×7 de pruebas y los datos ficticios de `seed_demo_crm` (3 profesionales
-  `[DEMO]`, 60 contactos y reservas demo) **sin llamar a Google ni enviar mensajes**;
-- no toca `analitica.db` ni el `.env` del negocio.
-
-Se detiene con **Ctrl+C**. Sirve para revisar Resumen, Agenda (Día/Semana/Mes), las
-previsualizaciones de Catálogo y Conversaciones, y el resto del panel antes de una instalación
-real. Para la instalación del cliente (datos reales), siga la sección
-**Instalación reproducible en Windows**.
 
 ## Datos ficticios para probar la agenda
 
@@ -628,6 +481,3 @@ Prueba aislada del generador y de la exclusión de Google:
 - [Arquitectura y extensión](docs/ARQUITECTURA_CRM.md).
 - [Diagnóstico, correcciones y pendientes](docs/AUDITORIA.md).
 - [Guía para otro negocio](docs/ADAPTAR_NEGOCIO.md).
-- [Expediente de trazabilidad (consolidación)](docs/producto/consolidacion/ALCANCE.md): alcance,
-  matriz de requisitos, decisiones, inventario de retiro y registro de ejecuciones reales;
-  resumen de la entrega en [entregas/C01/ENTREGA.md](docs/producto/consolidacion/entregas/C01/ENTREGA.md).

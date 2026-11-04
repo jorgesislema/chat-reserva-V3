@@ -1,9 +1,7 @@
 # Instalación mínima del CRM local. El bot conserva requirements.txt.
-# serve_crm.py (arranque operativo) requiere waitress.
 Flask>=3.1.3,<4.0
 python-dotenv>=1.2.3,<2.0
 google-api-python-client>=2.201.0,<3.0
 google-auth-httplib2>=0.4.1,<1.0
-waitress>=3.0.2,<4.0
 tzdata>=2026.3,<2027
 pytest>=9.1.1,<10.0

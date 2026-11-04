@@ -1,4 +1,4 @@
-import axios, { type AxiosError, type AxiosRequestConfig, type InternalAxiosRequestConfig } from 'axios'
+import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
 
