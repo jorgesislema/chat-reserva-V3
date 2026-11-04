@@ -3584,3 +3584,17 @@ bases temporales ignoradas por git (`.pytest_cache/`): ninguna credencial ajena 
 - **Pendiente**: franja de almuerzo en horario y fechas cerradas; confirmar antes de crear la
   cita; responder «no» tras reservar; programador de recordatorios.
 - Pruebas: `test_crm` y `test_c02_frontend` → **33 pasan**.
+
+## 2026-11-04 — PRUEBAS DE CHAT, RESERVAS Y CHAT INTERNO
+
+- Nueva `tests/test_c02_agenda_y_ficha.py` con **7 pruebas**: resumen con citas de hoy y
+  mañana usando los estados en español, lista de pacientes de un día (solo administración y
+  `None` para un rol normal), la pregunta «¿para quién es la cita?» guardando a la hija o al
+  titular, un solo especialista que se anuncia sin preguntar, varios especialistas con
+  «primera vez» y alternativas cuando el hueco está ocupado.
+- Batería ejecutada (canal, canal RAG, selección de cita, atención, detección contextual,
+  chat, multi-turno, la nueva y servicio de reservas): **146 pasan**, **5 fallos
+  preexistentes** de `test_c02_deteccion_contextual.py` y la prueba de migraciones que el
+  propio CI excluye con `--deselect`.
+- Dos defectos aparecieron al escribir las pruebas (orden de parámetros en un INSERT y el
+  nombre del día en inglés): corregidos en la prueba, no en el producto.
