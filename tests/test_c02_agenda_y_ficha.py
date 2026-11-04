@@ -159,7 +159,7 @@ def test_un_solo_especialista_se_anuncia_sin_preguntar(path):
 
     _paso(path, 'quiero una limpieza dental', 's1', ctx)
     textos = ' '.join(_textos(path))
-    assert 'Le atenderá Dra. Ana' in textos
+    assert 'Te atenderá Dra. Ana' in textos
     assert '¿Con qué profesional' not in textos
 
 
@@ -170,10 +170,10 @@ def test_varios_especialistas_preguntan_por_primera_vez(path):
     ctx = _ctx('Dra. Ana', 'Dr. Luis')
 
     _paso(path, 'quiero una limpieza dental', 'v1', ctx)
-    assert 'ya se ha atendido antes' in ' '.join(_textos(path))
+    assert 'ya te has atendido antes' in ' '.join(_textos(path))
 
     _paso(path, 'no, es mi primera vez', 'v2', ctx)
-    assert 'Le atenderá' in ' '.join(_textos(path))
+    assert 'Te atenderá' in ' '.join(_textos(path))
 
 
 # --- Alternativas -----------------------------------------------------------

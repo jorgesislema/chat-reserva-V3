@@ -357,11 +357,34 @@ def _extract_professional(texto: str, contexto: dict) -> Optional[str]:
     return None
 
 
+_DIAS_SEMANA = {'lunes': 0, 'martes': 1, 'miercoles': 2, 'miércoles': 2, 'jueves': 3,
+                'viernes': 4, 'sabado': 5, 'sábado': 5, 'domingo': 6}
+_MESES = {'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5, 'junio': 6,
+          'julio': 7, 'agosto': 8, 'septiembre': 9, 'setiembre': 9, 'octubre': 10,
+          'noviembre': 11, 'diciembre': 12}
+
+
 def _extract_datetime(texto: str) -> tuple[Optional[str], Optional[str]]:
-    """Extrae fecha y hora simples: "mañana/hoy/AAAA-MM-DD" + "HH:MM", "DHH".hH"."""
+    """Fecha y hora en lenguaje natural.
+
+    Acepta «mañana/hoy», «AAAA-MM-DD», «el jueves», «5 de noviembre» y horas
+    como «11:30», «11.30», «a las 11» o «alas 11».
+    """
     t = (texto or '').lower()
     fecha = None
     hora = None
+
+    mt = re.search(r'(\d{1,2})[:.h](\d{2})', t)
+    if mt:
+        hora = '%02d:%s' % (int(mt.group(1)), mt.group(2))
+    else:
+        mh = re.search(r'\b(?:a\s+las?|alas?|a\s+la)\s*(\d{1,2})\b', t)
+        if mh and 0 <= int(mh.group(1)) <= 23:
+            h = int(mh.group(1))
+            if 1 <= h <= 7:
+                h += 12  # un consultorio no abre a las 3 de la madrugada
+            hora = '%02d:00' % h
+
     for token_date in ('mañana', 'manana', 'hoy'):
         if token_date in t:
             base = datetime.now().date()
@@ -376,9 +399,27 @@ def _extract_datetime(texto: str) -> tuple[Optional[str], Optional[str]]:
                 fecha = date(int(m.group(1)), int(m.group(2)), int(m.group(3))).isoformat()
             except ValueError:
                 fecha = None
-    mt = re.search(r'(\d{1,2})[:.h](\d{2})', t)
-    if mt:
-        hora = f'{int(mt.group(1)):02d}:{mt.group(2)}'
+
+    if fecha is None:
+        for nombre, indice in _DIAS_SEMANA.items():
+            if re.search(r'\b%s\b' % nombre, t):
+                hoy = datetime.now().date()
+                adelante = (indice - hoy.weekday()) % 7
+                # «el jueves» dicho en jueves se entiende para la semana que viene.
+                fecha = (hoy + timedelta(days=adelante or 7)).isoformat()
+                break
+
+    if fecha is None:
+        md = re.search(r'\b(\d{1,2})\s+de\s+([a-záéíóú]+)', t)
+        if md and md.group(2) in _MESES:
+            try:
+                anio = datetime.now().year
+                candidata = date(anio, _MESES[md.group(2)], int(md.group(1)))
+                if candidata < datetime.now().date():
+                    candidata = date(anio + 1, _MESES[md.group(2)], int(md.group(1)))
+                fecha = candidata.isoformat()
+            except ValueError:
+                fecha = None
     return fecha, hora
 
 
@@ -398,7 +439,7 @@ def responder_primer_mensaje(path, phone: str, texto: str,
     elif intencion == 'reagendar':
         cuerpo = '¿Cuál es el nuevo horario que prefiere?'
     elif intencion == 'cancelar':
-        cuerpo = '¿Confirma que desea cancelar su cita?'
+        cuerpo = '¿Confirmas que quieres cancelar tu cita?'
     elif intencion == 'humano':
         return {'intencion': 'humano', 'texto': 'Entiendo, un momento por favor.',
                 'necesita_datos': False, 'extra': extra}
@@ -556,10 +597,25 @@ def _alternativas(path, profesional_id, fecha, hora, limite=3):
     return libres
 
 
+def _saludo_hora(path) -> str:
+    """Saludo según la hora del negocio (buenos días / tardes / noches)."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    try:
+        hora = datetime.now(ZoneInfo(effective_profile(path).zone)).hour
+    except Exception:  # noqa: BLE001
+        hora = 9
+    if hora < 12:
+        return 'Muy buenos días, ¿en qué te puedo ayudar?'
+    if hora < 19:
+        return 'Muy buenas tardes, ¿en qué te puedo ayudar?'
+    return 'Muy buenas noches, ¿en qué te puedo ayudar?'
+
 def _texto_lista_servicios(servicios) -> str:
     lineas = '\n'.join('%d. %s (%d min)' % (i, s['name'], s['duration_min'])
                        for i, s in enumerate(servicios, 1))
-    return ('¿Qué necesita?\n%s\nPuede decirme el nombre o el número.' % lineas)
+    return ('¿Qué necesitas?\n%s\nPuedes decirme el nombre o el número.' % lineas)
 
 
 def _profesional_libre(path, compatibles, fecha=None):
@@ -585,9 +641,9 @@ def _profesional_libre(path, compatibles, fecha=None):
 def _texto_lista_profesionales(compatibles) -> str:
     lineas = '\n'.join('%d. %s' % (i, p['name'])
                        for i, p in enumerate(compatibles, 1))
-    return ('¿Con qué profesional desea la cita? Si ya se ha atendido antes con alguno, '
-            'elíjalo; si es su primera vez, escriba «no» y le asigno uno disponible.\n%s\n'
-            'Indique el número.' % lineas)
+    return ('¿Con qué profesional quieres la cita? Si ya te has atendido antes con alguno, '
+            'elígelo; si es tu primera vez, escribe «no» y te asigno uno disponible.\n%s\n'
+            'Indica el número.' % lineas)
 
 
 def _texto_lista_citas(path, citas, verbo='cancelar'):
@@ -913,7 +969,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             if conv_id:
                 svc.conv_clear_pending(path, conv_id)
             return _resp('paciente',
-                         'Gracias, la ficha queda a nombre de %s. ¿Necesita algo más?'
+                         'Gracias, la ficha queda a nombre de %s. ¿Necesitas algo más?'
                          % (paciente or cliente), pending={})
         # Cambió de tema (cancelar, reagendar...): se suelta la ficha pendiente
         # para no secuestrar la intención del mensaje.
@@ -994,7 +1050,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                                  pending={**pend, 'servicios_en_espera': [s['id'] for s in servicios]})
         serv = next((s for s in servicios if s['id'] == servicio_id), None)
         if serv is None:
-            return _resp('reservar', 'Ese servicio ya no está disponible; elija otro.',
+            return _resp('reservar', 'Ese servicio ya no está disponible; elige otro.',
                          need_datos=True,
                          pending={**pend, 'servicios_en_espera': [s['id'] for s in servicios]})
         pend['servicio_id'] = serv['id']
@@ -1033,30 +1089,30 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                     pend['profesional_nombre'] = compatibles[0]['name']
         if not profesional_id:
             if not compatibles:
-                return _resp('reservar', 'No hay un profesional disponible para ese servicio; elija otro.',
+                return _resp('reservar', 'No hay un profesional disponible para ese servicio; elige otro.',
                              need_datos=True,
                              pending={**pend, 'servicios_en_espera': [s['id'] for s in servicios]})
             return _resp('reservar', _texto_lista_profesionales(compatibles),
                          need_datos=True,
                          pending={**pend, 'profesionales_en_espera': [p['id'] for p in compatibles]})
         if not any(p['id'] == profesional_id for p in compatibles):
-            return _resp('reservar', 'El profesional seleccionado no está disponible para ese servicio; elija otro.',
+            return _resp('reservar', 'El profesional seleccionado no está disponible para ese servicio; elige otro.',
                          need_datos=True,
                          pending={**pend, 'profesionales_en_espera': [p['id'] for p in compatibles]})
         pend['profesional_id'] = profesional_id
 
         # 3) Fecha y hora.
         if hora and not fecha:
-            return _resp('reservar', '¿Para qué día desea la cita?',
+            return _resp('reservar', '¿Para qué día quieres la cita?',
                          need_datos=True, pending=pend)
         if fecha and not hora:
-            return _resp('reservar', '¿A qué hora prefiere (por ejemplo 10:30)?',
+            return _resp('reservar', '¿A qué hora prefieres (por ejemplo 10:30)?',
                          need_datos=True, pending=pend)
         if not fecha and not hora:
             nombre = pend.get('profesional_nombre')
-            prefijo = ('Le atenderá %s. ' % nombre) if nombre else ''
-            return _resp('reservar', prefijo + '¿Qué día le viene bien? '
-                         'Puede decirme «el jueves a las 11» o «mañana 10:30».',
+            prefijo = ('Te atenderá %s. ' % nombre) if nombre else ''
+            return _resp('reservar', prefijo + '¿Qué día te viene bien? '
+                         'Puedes decirme «el jueves a las 11» o «mañana 10:30».',
                          need_datos=True, pending=pend)
 
         # 4) Ejecución con revalidación de servicio/profesional/horario en la
@@ -1104,20 +1160,20 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                     else:
                         lista = ', '.join(opciones[:-1]) + ' o ' + opciones[-1]
                     return _resp('reservar',
-                                 'A las %s no tengo hueco ese día. Tengo %s. '
-                                 '¿Cuál le sirve?' % (hora, lista),
+                                 'Lamentablemente a las %s no tengo hueco. Tengo %s. '
+                                 '¿Cuál te sirve?' % (hora, lista),
                                  need_datos=True,
                                  pending={**pend, 'fecha': None, 'hora': None})
                 return _resp('reservar',
-                             'A las %s no tengo hueco ese día y no encuentro otro '
+                             'Lamentablemente a las %s no tengo hueco y no encuentro otro '
                              'cercano. ¿Probamos otro día?' % hora,
                              need_datos=True, pending={**pend, 'fecha': None, 'hora': None})
             return _resp('reservar', res['message'], need_datos=False, pending={})
         if conv_id:
             svc.conv_clear_pending(path, conv_id)
         return _resp('reservar',
-                     res['message'] + ' ¿La cita es para usted o para otra persona? '
-                     'Si es para otra persona, escriba el nombre del paciente.',
+                     res['message'] + ' ¿Es para ti la cita? '
+                     'Si es para otra persona, dime su nombre.',
                      need_datos=False,
                      pending={'intencion': 'paciente',
                               'cita_id': res['appointment_id']},
@@ -1128,14 +1184,14 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
         lead = _find_or_create_lead(path, phone, 'Cliente WhatsApp')
         citas = svc.appointments_for_lead(path, lead, only_upcoming=True)
         if not citas:
-            return _resp('cancelar', 'No encontré ninguna cita suya pendiente para cancelar.',
+            return _resp('cancelar', 'No encontré ninguna cita tuya pendiente para cancelar.',
                          pending={})
         # Confirmación de la cita ya elegida (nunca una cita ajena: se validan
         # siempre contra las citas del lead de esta conversación).
         if pending.get('confirmar_cancelar') and pending.get('cita_id'):
             cita = next((c for c in citas if c['id'] == pending['cita_id']), None)
             if not cita:
-                return _resp('cancelar', 'Esa cita ya no está pendiente; no se modificó nada.',
+                return _resp('cancelar', 'Esa cita ya no está pendiente; no cambié nada.',
                              pending={})
             if _confirma_si(body or ''):
                 if hook_pre_escritura is not None:
@@ -1149,13 +1205,13 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                 if res.get('ok'):
                     if conv_id:
                         svc.conv_clear_pending(path, conv_id)
-                    return _resp('cancelar', 'Listo, su cita #%d quedó cancelada. Para agendar otra, avíseme.'
+                    return _resp('cancelar', 'Listo, tu cita #%d quedó cancelada. Para agendar otra, avísame.'
                                  % cita['id'],
                                  pending={}, ok=True, appointment_id=cita['id'])
                 return _resp('cancelar', res.get('message', 'No se pudo cancelar.'),
                              pending={**pending, 'intencion': 'cancelar',
                                       'confirmar_cancelar': True, 'cita_id': cita['id']})
-            return _resp('cancelar', 'De acuerdo, mantengo su cita.', pending={})
+            return _resp('cancelar', 'De acuerdo, mantengo tu cita.', pending={})
         # Elegir entre las varias citas; una selección inválida vuelve a pedir
         # aclaración sin modificar nada.
         if pending.get('citas_pendientes'):
@@ -1166,11 +1222,11 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                 cita = next((c for c in citas if c['id'] == cita_id), None)
                 if not cita:
                     return _resp('cancelar',
-                                 'Esa cita ya no está pendiente; elija otra.',
+                                 'Esa cita ya no está pendiente; elige otra.',
                                  need_datos=True,
                                  pending={**pending, 'intencion': 'cancelar',
                                           'citas_pendientes': [c['id'] for c in citas]})
-                return _resp('cancelar', '¿Confirma que desea cancelar la cita #%d (%s a las %s)?'
+                return _resp('cancelar', '¿Confirmas que quieres cancelar la cita #%d (%s a las %s)?'
                              % (cita_id, cita['start'][:10], cita['start'][11:16]),
                              need_datos=True,
                              pending={**pending, 'intencion': 'cancelar',
@@ -1186,7 +1242,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                                   'citas_pendientes': [c['id'] for c in citas]})
         # Una sola cita: confirmar directamente.
         ult = citas[0]
-        return _resp('cancelar', '¿Confirma que desea cancelar su cita?',
+        return _resp('cancelar', '¿Confirmas que quieres cancelar tu cita?',
                      need_datos=True,
                      pending={**pending, 'intencion': 'cancelar',
                               'confirmar_cancelar': True, 'cita_id': ult['id']})
@@ -1198,13 +1254,13 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
         if not fecha: fecha = pending.get('fecha')
         if not hora: hora = pending.get('hora')
         if not citas:
-            return _resp('reagendar', 'No encuentro una cita suya para reprogramar; ¿quiere agendar una nueva?',
+            return _resp('reagendar', 'No encuentro una cita tuya para reprogramar; ¿quieres agendar una nueva?',
                          pending={})
         # Selección explícita de la cita: nunca tomar la primera silenciosamente.
         if pending.get('reagendar_cita_id'):
             cita = next((c for c in citas if c['id'] == pending['reagendar_cita_id']), None)
             if not cita:
-                return _resp('reagendar', 'Esa cita ya no está pendiente; elija otra.',
+                return _resp('reagendar', 'Esa cita ya no está pendiente; elige otra.',
                              need_datos=True,
                              pending={**pending, 'intencion': 'reagendar',
                                       'citas_pendientes': [c['id'] for c in citas]})
@@ -1215,7 +1271,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             if num and 1 <= num <= len(lista):
                 cita = next((c for c in citas if c['id'] == lista[int(num) - 1]), None)
                 if not cita:
-                    return _resp('reagendar', 'Esa cita ya no está pendiente; elija otra.',
+                    return _resp('reagendar', 'Esa cita ya no está pendiente; elige otra.',
                                  need_datos=True,
                                  pending={**pending, 'intencion': 'reagendar',
                                           'citas_pendientes': [c['id'] for c in citas]})
@@ -1234,10 +1290,10 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             ult = citas[0]
         if not fecha or not hora:
             if fecha and not hora:
-                return _resp('reagendar', '¿A qué nueva hora prefiere?',
+                return _resp('reagendar', '¿A qué nueva hora prefieres?',
                              pending={**pending, 'intencion': 'reagendar', 'fecha': fecha,
                                       'reagendar_cita_id': ult['id']})
-            return _resp('reagendar', '¿Qué nuevo horario prefiere (día y hora, por ejemplo "mañana 11:00")?',
+            return _resp('reagendar', '¿Qué nuevo horario prefieres (día y hora, por ejemplo «mañana 11:00»)?',
                          pending={**pending, 'intencion': 'reagendar',
                                   'reagendar_cita_id': ult['id']})
         if not _profesionales_activos(path, contexto):
@@ -1261,7 +1317,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
         if res.get('ok'):
             if conv_id:
                 svc.conv_clear_pending(path, conv_id)
-            return _resp('reagendar', 'Listo, reprogramé su cita #%d para %s a las %s (%d min).'
+            return _resp('reagendar', 'Listo, reprogramé tu cita #%d para %s a las %s (%d min).'
                          % (ult['id'], fecha, hora, duracion),
                          pending={}, ok=True, appointment_id=ult['id'])
         return _resp('reagendar', res.get('message', 'No se pudo reprogramar.'),
@@ -1273,7 +1329,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
     # flujo previo (saludo_negocio) sin gastar recuperación ni llamada.
     saludo = saludo_negocio(path)
     if _es_saludo(body or ''):
-        return _resp('consulta', saludo or 'Hola, ¿en qué puedo ayudarle?',
+        return _resp('consulta', saludo or _saludo_hora(path),
                      pending={})
     res_rag = _consulta_rag(path, body or '', conv)
     if res_rag is None:
@@ -1387,8 +1443,9 @@ def _reservar_conn(conn, path, phone, lead, fecha, hora, profesionales, zonas, n
         nombre_prof = prof.get('name') or 'el profesional'
         return {'ok': True, 'appointment': result['appointment'],
                 'appointment_id': result['appointment']['id'],
-                'message': 'Listo ✅ Su cita de %s es el %s a las %s con %s. '
-                           '¿Le va bien así?'
+                'message': 'Listo ✅ Tu cita de %s es el %s a las %s con %s. '
+                           '¿Te va bien así? Si puedes llegar 15 minutos antes, mejor: '
+                           'así preparamos tu ficha.'
                            % (str(titulo).replace('Reserva: ', ''), _fecha_larga(fecha),
                               hora, nombre_prof)}
     return {'ok': False, 'code': result.get('code'),
