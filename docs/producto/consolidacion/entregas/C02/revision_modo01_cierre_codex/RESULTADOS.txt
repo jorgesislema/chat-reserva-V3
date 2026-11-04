@@ -1,4 +1,0 @@
-155 passed,20 warnings in 109.63s,exit0
-E2E cinco fases PASS/VERIFY_OK,exit0
-BD p3 REV-P1 stock15; documento desactivado v2; IMPORTS1
-Cambio XLSX Inventario A..E -> SoloNombres A..B: opciones reales, kind/stock/active/details vacios; SHEETS_PASS,exit0

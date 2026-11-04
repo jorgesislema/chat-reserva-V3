@@ -705,53 +705,6 @@ def _guardia_fallida(res):
             'extra': res, 'pending': {}}
 
 
-def _es_saludo(texto: str) -> bool:
-    """Saludo/check-in puro: conserva el flujo previo (saludo_negocio) y no
-    gasta una recuperación RAG ni una llamada al proveedor en un saludo.
-    Con signo de interrogación o con más de unas pocas palabras NO es un
-    saludo: va al RAG."""
-    t = (texto or '').strip()
-    if not t or '?' in t or '¿' in t:
-        return False
-    n = _normalizar(t)
-    if not n:
-        return False
-    if any(f in n for f in ('hola', 'buenos dias', 'buenas tardes',
-                            'buenas noches', 'buen dia', 'buena tarde',
-                            'muy buenas', 'que tal', 'como esta', 'como estas',
-                            'hello', 'hii', 'buenas')):
-        return len(n.split()) <= 6
-    return False
-
-
-def _consulta_rag(path, texto, conv) -> Optional[dict]:
-    """Recupera en la base del negocio (RAG existente del chat interno) el
-    contexto pertinente al mensaje y responde con memoria multi-turno de la
-    conversación.
-
-    Rol SIEMPRE 'user' (cliente público del canal): las herramientas filtran
-    la KB a conocimiento público publicado y el catálogo a publicado/activo;
-    jamás documentos internos o privados de administración. La memoria es por
-    conversación ('wa-<id>' derivado de crm_conversations), por rol y por
-    negocio (cada base es un negocio). Un seguimiento como «¿y ese cuánto
-    cuesta?» se resuelve contra el turno anterior y vuelve a recuperar las
-    fuentes actuales. Devuelve el dict de ``responder_chat_internal`` o None
-    si el RAG/proveedor falló (el llamador deriva a humano; nunca se fabrica
-    una respuesta).
-    """
-    conv_id = conv.get('id') if conv else None
-    if not conv_id:
-        return None
-    try:
-        res = svc.responder_chat_internal(
-            path, (texto or ''), role='user', conversation_id='wa-%d' % int(conv_id))
-    except Exception:
-        return None
-    if not res.get('ok'):
-        return None
-    return res
-
-
 def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                 wa_message_id=None, hook_pre_escritura=None) -> dict:
     """Procesa un mensaje dentro de la conversación y devuelve resultado de salida.
@@ -1116,38 +1069,9 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                      pending={**pending, 'intencion': 'reagendar',
                               'reagendar_cita_id': ult['id']})
 
-    # consulta / sin intención clara → RAG multi-turno del chat interno
-    # (conocimiento público publicado; rol 'user'). Un saludo puro conserva el
-    # flujo previo (saludo_negocio) sin gastar recuperación ni llamada.
+    # consulta / sin intención clara
     saludo = saludo_negocio(path)
-    if _es_saludo(body or ''):
-        return _resp('consulta', saludo or None, pending={})
-    res_rag = _consulta_rag(path, body or '', conv)
-    if res_rag is None:
-        # El RAG o su proveedor no está disponible: NUNCA se fabrica una
-        # respuesta; se deriva a humano con alerta y pausa de egress (la
-        # misma política segura de la intención 'indisponible').
-        if conv_id:
-            svc.conv_raise_alert(path, conversation_id=conv_id,
-                                 reason='fallo_servicio', priority='alta')
-            svc.conv_add_message(path, conv_id, direction='internal',
-                                 body='RAG para consulta no disponible: %s'
-                                 % (body or '')[:160], author_type='sistema')
-            svc.conv_set_egress_paused(path, conv_id, True)
-        return {'intencion': 'indisponible', 'texto': None, 'paused': True,
-                'extra': {'razon': 'rag_no_disponible'}, 'pending': None}
-    # Trazabilidad del turno para el equipo (mensaje interno; el cliente jamás
-    # lo ve): qué fuentes reales respaldaron la respuesta, sin identificadores
-    # internos de documentos.
-    fuentes = res_rag.get('fuentes') or []
-    if conv_id and fuentes:
-        traza = '; '.join('%s «%s»' % (f.get('tipo'), f.get('nombre'))
-                          for f in fuentes if isinstance(f, dict) and f.get('nombre'))
-        if traza:
-            svc.conv_add_message(path, conv_id, direction='internal',
-                                 body='Fuentes del turno RAG: %s' % traza,
-                                 author_type='sistema')
-    return _resp('consulta', res_rag.get('answer') or saludo, pending={})
+    return _resp('consulta', saludo or None, pending={})
 
 
 def _confirma_si(t: str) -> bool:

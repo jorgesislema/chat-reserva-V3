@@ -1,2 +1,0 @@
-61 passed in 64.97s, exit 0
-COMPAT_RACE service_current_professional=2; appointment.professional_id=1; citas_creadas=1

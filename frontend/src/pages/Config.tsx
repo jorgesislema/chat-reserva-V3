@@ -449,3 +449,5 @@ export function Config() {
     </div>
   )
 }
+
+export { Config }

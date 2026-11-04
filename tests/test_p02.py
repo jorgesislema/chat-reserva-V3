@@ -126,11 +126,11 @@ def test_migration_v2_adopts_states_preserves_data_and_user_version(tmp_path):
         assert db.execute('PRAGMA user_version').fetchone()[0] == 5
         assert db.execute("SELECT 1 FROM sqlite_master WHERE name='crm_appointment_notes'").fetchone()
         assert db.execute("SELECT 1 FROM sqlite_master WHERE name='crm_appointment_history'").fetchone()
-    assert versions(path) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    assert versions(path) == [1, 2, 3, 4]
     initialize(path)
     with connect(path) as db:
         assert db.execute('SELECT COUNT(*) FROM crm_appointments').fetchone()[0] == 3
-    assert versions(path) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    assert versions(path) == [1, 2, 3, 4]
 
 
 def test_migration_v2_failure_rolls_back_and_retries(tmp_path, monkeypatch):

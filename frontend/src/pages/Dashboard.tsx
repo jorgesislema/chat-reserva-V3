@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Calendar, MessageSquare, TrendingUp, AlertTriangle } from 'lucide-react'
 import { cn } from '@/utils'
@@ -97,12 +98,12 @@ export function Dashboard() {
           <p className="text-text-secondary mt-1">Bienvenido al panel de administración</p>
         </div>
         <div className="flex gap-2">
-          <Link to="/config" className="inline-flex items-center justify-center rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface-elevated transition-colors">
-            Configuración
-          </Link>
-          <Link to="/conversations" className="inline-flex items-center justify-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white hover:bg-primary-700 transition-colors">
-            Ver conversaciones
-          </Link>
+          <Button variant="secondary" asChild>
+            <Link to="/config">Configuración</Link>
+          </Button>
+          <Button asChild>
+            <Link to="/conversations">Ver conversaciones</Link>
+          </Button>
         </div>
       </div>
 
@@ -178,9 +179,9 @@ export function Dashboard() {
             </p>
           </CardContent>
           <div className="p-6 pt-0">
-            <Link to="/alerts" className="inline-flex items-center justify-center w-full rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface-elevated transition-colors">
-              Gestionar alertas
-            </Link>
+            <Button variant="outline" asChild className="w-full">
+              <Link to="/alerts">Gestionar alertas</Link>
+            </Button>
           </div>
         </Card>
       </div>
@@ -239,3 +240,5 @@ export function Dashboard() {
     </div>
   )
 }
+
+export { Dashboard }

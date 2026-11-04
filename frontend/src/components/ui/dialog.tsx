@@ -47,7 +47,8 @@ const DialogContent = React.forwardRef<
     </DialogPrimitive.Close>
   </DialogPrimitive.Content>
 </DialogPortal>
-))
+  )
+)}
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
 const DialogHeader = ({
@@ -71,7 +72,7 @@ const DialogTitle = React.forwardRef<
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
   <h2 ref={ref} className={cn('text-lg font-semibold leading-none tracking-tight', className)} {...props} />
-))
+)
 DialogTitle.displayName = 'DialogTitle'
 
 const DialogDescription = React.forwardRef<
@@ -79,8 +80,10 @@ const DialogDescription = React.forwardRef<
   React.HTMLAttributes<HTMLParagraphElement>
 >(({ className, ...props }, ref) => (
   <p ref={ref} className={cn('text-sm text-text-muted', className)} {...props} />
-))
+)
 DialogDescription.displayName = 'DialogDescription'
+
+const DialogClose = DialogPrimitive.Close
 
 export {
   Dialog,

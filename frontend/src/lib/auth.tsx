@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { useEffect, useState, type ReactNode } from 'react'
+
 export interface Tenant {
   id: string
   slug: string
@@ -72,7 +73,7 @@ export const useAuth = () => {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const { apiKey, setTenant, setLoading, logout, isLoading } = useAuth()
+  const { apiKey, setTenant, setLoading, logout, isAuthenticated } = useAuth()
   const [checked, setChecked] = useState(() => !apiKey)
 
   useEffect(() => {

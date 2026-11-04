@@ -1,13 +1,11 @@
 export function cn(...inputs: (string | undefined | null | false | Record<string, boolean>)[]): string {
   return inputs
     .filter(Boolean)
-    .flatMap((input) => {
-      if (typeof input === 'string') return input.split(' ')
-      if (input && typeof input === 'object') {
-        return Object.entries(input).filter(([, v]) => v).map(([k]) => k)
-      }
-      return []
-    })
+    .flatMap((input) =>
+      typeof input === 'string'
+        ? input.split(' ')
+        : Object.entries(input).filter(([, v]) => v).map(([k]) => k)
+    )
     .join(' ')
 }
 
@@ -56,7 +54,7 @@ export function debounce<T extends (...args: any[]) => any>(
   func: T,
   wait: number
 ): (...args: Parameters<T>) => void {
-  let timeout: ReturnType<typeof setTimeout> | null = null
+  let timeout: NodeJS.Timeout | null = null
   return (...args: Parameters<T>) => {
     if (timeout) clearTimeout(timeout)
     timeout = setTimeout(() => func(...args), wait)
