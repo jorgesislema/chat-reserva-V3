@@ -147,6 +147,7 @@ def main() -> int:
     print(f'  Base temporal: {DB}')
     print('  Negocio ejemplo: Clínica Dental Sonrisa (ficticio). Datos [DEMO].')
     print('  Asistente IA: MODO SIMULADO (sin llamadas al proveedor real).')
+    print('  Aviso: demo antigua con marcas [DEMO]. Para la presentación use demo_presentacion.py.')
     app = create_app(cfg)
     app.run(host='127.0.0.1', port=8050, debug=False)
     return 0

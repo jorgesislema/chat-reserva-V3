@@ -1779,12 +1779,17 @@ def kb_search(path, query, limit=4):
             "SELECT id, name, visibility, version, procedencia "
             "FROM crm_kb_documents WHERE state='publicado'").fetchall()
         for doc in docs:
+            nombre = _fold(doc['name'] or '')
             frags = conn.execute(
                 'SELECT body, doc_version FROM crm_kb_fragments WHERE doc_id=?',
                 (doc['id'],)).fetchall()
             for f in frags:
                 body = _fold(f['body'] or '')
-                score = sum(1 for w in words if w in body)
+                # El nombre del documento cuenta: «¿qué horarios tienen?» debe
+                # encontrar «Horarios y citas» aunque el fragmento diga
+                # «atiende de lunes a viernes». Vale más una coincidencia en el
+                # cuerpo que en el título.
+                score = sum(2 if w in body else 1 for w in words if w in body or w in nombre)
                 if score:
                     # Desempate por densidad: del mismo modo que el usuario
                     # pregunta por una palabra, el fragmento MÁS ESPECÍFICO

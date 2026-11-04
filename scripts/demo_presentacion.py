@@ -31,6 +31,8 @@ if str(ROOT) not in sys.path:
 
 WORK = ROOT / '.pytest_cache' / 'presentacion'
 DB = WORK / 'clinica.db'
+CLAVE_FILE = WORK / 'clave.txt'
+SECRETO_FILE = WORK / 'secreto.txt'
 EMAIL = 'admin@clinicasonrisa.ec'
 ZONE = 'America/Guayaquil'
 NEGOCIO = 'Clínica Dental Sonrisa'
@@ -65,8 +67,18 @@ CATALOGO = [
     ('Evaluación ortodóntica', 'servicio', 2500, None, 30),
     ('Control de ortodoncia', 'servicio', 4000, None, 30),
     ('Endodoncia unirradicular', 'servicio', 12000, None, 90),
+    ('Ortodoncia mensual (ajuste)', 'servicio', 3500, None, 20),
+    ('Extracción simple', 'servicio', 6000, None, 45),
+    ('Extracción de muela del juicio', 'servicio', 18000, None, 90),
+    ('Corona de porcelana', 'servicio', 35000, None, 60),
+    ('Prótesis removible', 'servicio', 42000, None, 60),
+    ('Radiografía panorámica', 'servicio', 4500, None, 15),
+    ('Sellantes preventivos', 'servicio', 5000, None, 30),
+    ('Blanqueamiento casero (kit)', 'producto', 9500, 12, None),
     ('Kit de higiene dental', 'producto', 1200, 24, None),
     ('Enjuague fluorado 250 ml', 'producto', 900, 40, None),
+    ('Cepillo eléctrico', 'producto', 4500, 8, None),
+    ('Hilo dental (unidad)', 'producto', 350, 60, None),
 ]
 
 CONOCIMIENTO = [
@@ -74,6 +86,7 @@ CONOCIMIENTO = [
         'La clínica atiende de lunes a viernes de 08:00 a 18:00.',
         'Las citas se confirman por WhatsApp con al menos 24 horas de anticipación.',
         'Las cancelaciones avisadas con menos de 24 horas se reprograman una sola vez.',
+        'No se atiende sábados ni domingos; tampoco en feriados nacionales.',
     ]),
     ('Servicios y precios de referencia', [
         'Consulta dental 35 USD, limpieza 45 USD, blanqueamiento LED 85 USD.',
@@ -121,6 +134,36 @@ def _limpiar() -> None:
     for p in (DB, Path(str(DB) + '-wal'), Path(str(DB) + '-shm')):
         if p.exists():
             p.unlink()
+
+
+def _completar_catalogo(path: str) -> int:
+    """Añade los artículos que falten, aunque la agenda ya estuviera sembrada."""
+    from crm import c02_services as c02
+    from crm.store import connect
+
+    with connect(path) as conn:
+        existentes = {r['name'] for r in conn.execute('SELECT name FROM crm_catalog_items')}
+    añadidos = 0
+    for name, kind, price, stock, dur in CATALOGO:
+        if name in existentes:
+            continue
+        item = c02.catalog_create(path, name=name, kind=kind, created_by=1)['item_id']
+        rev = 1
+        if dur is not None:
+            c02.catalog_update(path, item_id=item, expected_revision=rev, field='duration_min',
+                               value=dur, actor=1, publish=True)
+            rev += 1
+        c02.catalog_update(path, item_id=item, expected_revision=rev, field='price_cents',
+                           value=price, actor=1, publish=True)
+        rev += 1
+        c02.catalog_update(path, item_id=item, expected_revision=rev, field='currency',
+                           value='USD', actor=1, publish=True)
+        rev += 1
+        if stock is not None:
+            c02.catalog_update(path, item_id=item, expected_revision=rev, field='stock',
+                               value=stock, actor=1, publish=True)
+        añadidos += 1
+    return añadidos
 
 
 def _sembrar(path: str) -> None:
@@ -286,6 +329,34 @@ def _sembrar(path: str) -> None:
                           motor=canal.MotorSimulado()).paso(contexto=ctx)
 
 
+def _secreto() -> str:
+    """Clave de sesión estable entre reinicios (no viaja en el repositorio)."""
+    if SECRETO_FILE.exists():
+        valor = SECRETO_FILE.read_text(encoding='utf-8').strip()
+        if valor:
+            return valor
+    valor = secrets.token_hex(32)
+    SECRETO_FILE.write_text(valor, encoding='utf-8')
+    return valor
+
+
+def _clave() -> str:
+    """Contraseña del administrador: --clave, CRM_DEMO_PASSWORD o una guardada."""
+    if '--clave' in sys.argv:
+        i = sys.argv.index('--clave')
+        if i + 1 < len(sys.argv) and len(sys.argv[i + 1]) >= 8:
+            return sys.argv[i + 1]
+    if os.getenv('CRM_DEMO_PASSWORD'):
+        return os.environ['CRM_DEMO_PASSWORD']
+    if CLAVE_FILE.exists():
+        valor = CLAVE_FILE.read_text(encoding='utf-8').strip()
+        if valor:
+            return valor
+    valor = secrets.token_urlsafe(12)
+    CLAVE_FILE.write_text(valor, encoding='utf-8')
+    return valor
+
+
 def main() -> int:
     from werkzeug.security import generate_password_hash
 
@@ -297,12 +368,14 @@ def main() -> int:
 
     WORK.mkdir(parents=True, exist_ok=True)
     os.environ['CRM_DATABASE'] = str(DB)
-    os.environ['CRM_CHAT_PROVEEDOR'] = 'simulado'
+    # La IA del .env manda; el modo simulado se pide de forma explícita.
+    if '--simulado' in sys.argv:
+        os.environ['CRM_CHAT_PROVEEDOR'] = 'simulado'
     os.environ.setdefault('CRM_PERFIL_NEGOCIO', str(ROOT / 'perfiles' / 'ejemplo-consultorio.json'))
     os.environ['CRM_TIMEZONE'] = ZONE
 
-    secret = secrets.token_hex(32)
-    password = secrets.token_urlsafe(12)
+    secret = _secreto()
+    password = _clave()
     cfg = {'TESTING': False, 'DATABASE': str(DB), 'SECRET_KEY': secret, 'DEMO_BANNER': '0'}
     create_app(cfg)
 
@@ -314,10 +387,13 @@ def main() -> int:
             (EMAIL, 'Administrador', generate_password_hash(password)))
 
     _sembrar(str(DB))
+    añadidos = _completar_catalogo(str(DB))
 
     with connect(str(DB)) as conn:
         citas = conn.execute("SELECT COUNT(*) c FROM crm_appointments WHERE status='active'").fetchone()['c']
         leads = conn.execute('SELECT COUNT(*) c FROM crm_leads').fetchone()['c']
+        articulos = conn.execute(
+            'SELECT COUNT(*) c FROM crm_catalog_items WHERE active=1').fetchone()['c']
 
     print('')
     print('%s — instalación de presentación' % NEGOCIO)
@@ -327,7 +403,12 @@ def main() -> int:
     print('  >>> %s <<<' % password)
     print('  Base:      %s' % DB)
     print('  Agenda:    %d citas activas · %d leads · 4 huecos libres por día laborable' % (citas, leads))
-    print('  Datos ficticios. Sin WhatsApp, sin Meta y sin proveedor de IA.')
+    print('  Catálogo:  %d artículos (%d añadidos ahora)' % (articulos, añadidos))
+    if os.getenv('CRM_CHAT_PROVEEDOR', '').lower() == 'simulado':
+        print('  IA:        modo simulado (sin llamadas al proveedor).')
+    else:
+        print('  IA:        proveedor del .env (%s).' % os.getenv('CRM_CHAT_MODEL', 'sin modelo'))
+    print('  Datos ficticios. Sin WhatsApp y sin Meta.')
     print('')
 
     # Cada arranque estrena copia para el simulador de conversaciones.
