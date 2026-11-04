@@ -320,7 +320,14 @@ class MotorSimulado(MotorCanal):
         if any(k in t for k in ('reagenda', 'reprogramar', 'cambiar mi cita',
                                 'mover mi cita', 'reagendar')):
             return 'reagendar', {}
-        if re.search(r'\breservar\b|\bagendar\b', t) or any(
+        # Petición de cita en lenguaje natural: «quisiera una cita», «necesito
+        # cita», «pedir cita»... Se exige verbo de petición para no confundir
+        # «tengo una cita» (consulta) con una reserva nueva.
+        pide_cita = re.search(
+            r'(quiero|quisiera|querr[ií]a|necesito|podr[ií]a|puedo|me gustar[ií]a|'
+            r'agendar|agéndame|reservar|resérvame|pedir|sacar|separar|'
+            r'tomar)\s+(una\s+|mi\s+)?cita', t)
+        if re.search(r'\breservar\b|\bagendar\b', t) or pide_cita or any(
                 k in t for k in ('cita para', 'reservar para', 'quiero cita',
                                  'horario para', 'reservar cita')):
             return 'reservar', {'profesional': _extract_professional(t, contexto)}
@@ -1121,7 +1128,8 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
     # flujo previo (saludo_negocio) sin gastar recuperación ni llamada.
     saludo = saludo_negocio(path)
     if _es_saludo(body or ''):
-        return _resp('consulta', saludo or None, pending={})
+        return _resp('consulta', saludo or 'Hola, ¿en qué puedo ayudarle?',
+                     pending={})
     res_rag = _consulta_rag(path, body or '', conv)
     if res_rag is None:
         # El RAG o su proveedor no está disponible: NUNCA se fabrica una

@@ -175,14 +175,22 @@ def catalog_create(path, *, name, kind='servicio', professional_id=None, created
         return _err(EMPTY, 'El nombre del artículo es obligatorio')
     if kind not in KINDS:
         return _err(INVALID, 'Tipo de artículo no válido')
+    from crm import planes
     stamp = now()
     with connect(path) as conn:
+        activos = conn.execute(
+            'SELECT COUNT(*) AS n FROM crm_catalog_items WHERE active=1').fetchone()['n']
+        if activos >= planes.LIMITE_ARTICULOS:
+            return _err('limite', planes.MENSAJE_ARTICULOS)
         code = 'ART-{:04d}'.format(conn.execute('SELECT COUNT(*) AS n FROM crm_catalog_items').fetchone()['n'] + 1)
+        # Un producto o regalo lleva existencias por defecto; un servicio, no.
+        stock_na = 0 if kind in ('producto', 'regalo') else 1
         cursor = conn.execute(
             """INSERT INTO crm_catalog_items
-               (code, name, kind, publish_state, current_revision, created_at, updated_at)
-               VALUES (?,?,?,'borrador',1,?,?)""",
-            (code, name, kind, stamp, stamp))
+               (code, name, kind, stock_na, publish_state, current_revision,
+                created_at, updated_at)
+               VALUES (?,?,?,?,'borrador',1,?,?)""",
+            (code, name, kind, stock_na, stamp, stamp))
         item_id = cursor.lastrowid
         conn.execute(
             """INSERT INTO crm_catalog_revisions

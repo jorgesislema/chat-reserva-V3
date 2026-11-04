@@ -49,7 +49,7 @@
   }
 
   function modoLabel(m) {
-    return { simulado: 'adaptador simulado (solo pruebas/desarrollo)',
+    return { simulado: 'asistente local (sin proveedor externo)',
              remoto: 'proveedor de IA conectado',
              no_configurado: 'IA no configurada' }[m] || m || '';
   }

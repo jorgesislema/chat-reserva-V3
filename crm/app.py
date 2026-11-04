@@ -288,7 +288,9 @@ def create_app(test_config=None):
             demo = (app.config.get('DEMO_BANNER') or '').lower() in ('1', 'true', 'si')
         except Exception:
             demo = False
+        from crm import planes
         return dict(csrf=session['csrf'], business=app.config['BUSINESS_NAME'], stages=STAGES,
+                    limite_profesionales=planes.LIMITE_PROFESIONALES,
                     user=g.user, zone=app.config['TIMEZONE'], accent=app.config['ACCENT'],
                     demo=demo)
 
@@ -489,6 +491,13 @@ def create_app(test_config=None):
         if bool(calendar_id) != bool(account):
             raise ValueError('Seleccione cuenta y calendario, o deje ambos vacíos para uso local')
         with db() as conn:
+            from crm import planes
+            if not identifier:
+                activos = conn.execute(
+                    'SELECT COUNT(*) AS n FROM crm_professionals WHERE active=1').fetchone()['n']
+                if activos >= planes.LIMITE_PROFESIONALES:
+                    flash(planes.MENSAJE_PROFESIONALES, 'error')
+                    return redirect(url_for('home', tab='team'))
             values = (required('name'), required('specialty'), email(), calendar_id, account)
             if identifier:
                 previous = conn.execute('SELECT * FROM crm_professionals WHERE id=?', (identifier,)).fetchone()
@@ -1299,6 +1308,107 @@ def create_app(test_config=None):
         if not ruta:
             abort(404)
         return send_file(ruta, as_attachment=True, download_name=nombre)
+
+    # --- Páginas legales públicas (requisito de Meta y de cualquier cliente) ---
+    @app.get('/privacidad')
+    def legal_privacidad():
+        return _legal('privacidad')
+
+    @app.get('/eliminacion-de-datos')
+    def legal_eliminacion():
+        return _legal('eliminacion')
+
+    @app.get('/terminos')
+    def legal_terminos():
+        return _legal('terminos')
+
+    def _legal(clave):
+        from crm import legal
+        documento = legal.DOCUMENTOS[clave]
+        return render_template('legal.html', titulo=documento['titulo'],
+                               bloques=documento['bloques'],
+                               negocio=app.config['BUSINESS_NAME'],
+                               contacto=legal.CONTACTO,
+                               actualizado=legal.ACTUALIZADO)
+
+    # --- Simulador de conversaciones (WhatsApp) sobre una copia de la base ---
+    @app.post('/api/c02/simulador')
+    @protected()
+    def c02_simulador():
+        """Corre el diálogo real del canal sobre una copia de la base.
+
+        No envía nada por WhatsApp ni modifica los datos operativos: la copia
+        (``<base>.simulador.db``) se crea con la API de respaldo de SQLite y se
+        puede reiniciar desde la pantalla.
+        """
+        from uuid import uuid4
+
+        from crm import canal as _canal
+        from crm import c02_services as _c02
+        from crm.store import connect as _connect
+
+        cuerpo = request.get_json(silent=True) or {}
+        origen = app.config['DATABASE']
+        arena = origen + '.simulador.db'
+        if cuerpo.get('reiniciar') or not Path(arena).exists():
+            with sqlite3.connect(origen) as src, sqlite3.connect(arena) as dst:
+                src.backup(dst)
+        texto = (cuerpo.get('texto') or '').strip()[:400]
+        telefono = '593999000777'
+        if texto:
+            _c02.wa_ingest(arena, external_id='sim-' + uuid4().hex,
+                           phone=telefono, body=texto)
+        with _connect(arena) as conn:
+            profesionales = [dict(r) for r in conn.execute(
+                'SELECT id, name FROM crm_professionals WHERE active=1 ORDER BY name')]
+        zona = 'America/Guayaquil'
+        perfil = os.getenv('CRM_PERFIL_NEGOCIO')
+        if perfil and Path(perfil).is_file():
+            try:
+                zona = json.loads(Path(perfil).read_text(encoding='utf-8')).get('zona') or zona
+            except (ValueError, OSError):
+                pass
+        contexto = {'professionals': profesionales, 'zonas': [zona], 'now_local': None}
+        _canal.WorkerCanal(arena, worker='w-simulador',
+                           motor=_canal.MotorSimulado()).paso(contexto=contexto)
+        sello = datetime.now(timezone.utc).isoformat()
+        with _connect(arena) as conn:
+            # En el simulador no hay transporte: lo que el bot dejó en la cola de
+            # salida se pinta como mensaje enviado, sólo dentro de la copia.
+            salientes = conn.execute(
+                "SELECT id, payload, conversation_id FROM crm_outbox "
+                "WHERE recipient=? AND state='pendiente' ORDER BY id", (telefono,)).fetchall()
+            for fila in salientes:
+                salida = ''
+                try:
+                    salida = (json.loads(fila['payload'] or '{}') or {}).get('text', '')
+                except ValueError:
+                    salida = ''
+                if salida and fila['conversation_id']:
+                    conn.execute(
+                        "INSERT INTO crm_conversation_messages"
+                        " (conversation_id, direction, author_type, body, created_at)"
+                        " VALUES (?,?,?,?,?)",
+                        (fila['conversation_id'], 'outbound', 'ia', salida, sello))
+                conn.execute(
+                    "UPDATE crm_outbox SET state='enviado', attempts=attempts+1, updated_at=?"
+                    " WHERE id=?", (sello, fila['id']))
+            conv = conn.execute(
+                'SELECT * FROM crm_conversations WHERE client_key=? ORDER BY id DESC LIMIT 1',
+                (telefono,)).fetchone()
+            mensajes = [] if not conv else [dict(r) for r in conn.execute(
+                "SELECT direction, author_type, body, created_at "
+                "FROM crm_conversation_messages WHERE conversation_id=? "
+                "AND direction IN ('inbound','outbound') ORDER BY id",
+                (conv['id'],))]
+        return jsonify(
+            ok=True,
+            estado=(conv['state'] if conv else 'ia_activa'),
+            derivado=bool(conv and conv['state'] == 'esperando_humano'),
+            mensajes=[{'dir': 'out' if m['direction'] == 'outbound' else 'in',
+                      'autor': m['author_type'],
+                       'texto': m['body'], 'hora': (m['created_at'] or '')[11:16]}
+                      for m in mensajes])
 
     # --- Plantillas WhatsApp (declaración local; aprobación = Meta) ---
     @app.get('/api/c02/plantillas')

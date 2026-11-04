@@ -41,7 +41,8 @@ from crm.store import connect, now
 
 _IntegrityError = sqlite3.IntegrityError
 
-CATEGORIAS = ('catalogo', 'lista_precios', 'documento')
+CATEGORIAS = ('catalogo', 'lista_precios', 'documento', 'publicidad',
+              'post_tratamiento')
 ESTADOS_RECURSO = ('activo', 'retirado')
 # Estados de plantilla según Meta: `aprobante` sólo lo fija una verificación
 # EXTERNA (approve_reason del proveedor); localmente sólo se declaran borrador

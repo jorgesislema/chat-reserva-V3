@@ -1,0 +1,45 @@
+{# Simulador de conversaciones — mismo motor y datos del canal, sobre una copia de
+   la base. No envía nada por WhatsApp ni toca los datos reales. Sin scripts inline. #}
+<section>
+  <div class="page-head">
+    <div>
+      <p class="muted">Escriba como si fuera un paciente. El bot responde con el mismo motor del canal,
+        la agenda, el catálogo y el conocimiento reales, sobre una copia de los datos: nada de esto sale
+        por WhatsApp ni modifica tus registros.</p>
+    </div>
+    <div class="topbar-actions">
+      <button class="button ghost" id="sim-reset" type="button">Nueva conversación</button>
+    </div>
+  </div>
+
+  <div class="sim-wrap" id="sim-app" data-csrf="{{ csrf }}">
+    <div class="sim-phone">
+      <div class="sim-screen">
+        <div class="sim-head">
+          <strong>Clínica Dental Sonrisa</strong>
+          <span>en línea</span>
+        </div>
+        <div class="sim-body" id="sim-body" aria-live="polite"></div>
+        <form class="sim-form" id="sim-form">
+          <input id="sim-text" maxlength="400" placeholder="Escriba un mensaje" autocomplete="off" required>
+          <button class="button" type="submit">Enviar</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="sim-side">
+      <div class="card">
+        <h2>Qué probar</h2>
+        <p class="muted">Escriba «hola», «¿qué horarios tienen?», «quiero una cita», «quiero cancelar»,
+          «cuánto cuesta la limpieza» o «quiero hablar con una persona».</p>
+        <p class="sim-meta" id="sim-estado">Sin mensajes todavía.</p>
+      </div>
+      <div class="card">
+        <h2>Cómo se comporta</h2>
+        <p class="muted">El saludo y el mensaje fuera de horario salen de «Negocio y horarios». Los
+          precios y las existencias vienen del catálogo; los horarios, de la agenda. Si el paciente
+          pide una persona, la conversación se deriva y el control queda en la bandeja humana.</p>
+      </div>
+    </div>
+  </div>
+</section>

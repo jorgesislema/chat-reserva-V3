@@ -3484,3 +3484,64 @@ bases temporales ignoradas por git (`.pytest_cache/`): ninguna credencial ajena 
   de aplicación ni consultas IA: solo cambios de texto y documentación.
 - Pendiente del propietario: revisar el material y decidir destino/aprobación
   de publicación. No se publica, despliega, comitea ni retira noindex.
+
+## 2026-11-04 — CIERRE DEL DEMO V3: ALCANCE DECLARADO, APLAZAMIENTOS Y ESTADO DE PUBLICACIÓN
+
+- **Decisión de alcance**: V3 se cierra como base terminada y trazable para el portafolio. El hilo
+  C02/Instabox se cierra DOCUMENTALMENTE como «validación externa aplazada»: la ventana de la VM
+  venció el 2026-11-01 (~21:58Z) sin que llegara el evento de Meta, y no se abre una ventana nueva
+  porque no bloquea ni la demo local ni el material del portafolio.
+- **Terminado y reproducible**: demo local (`scripts/demo_portafolio.py`, sólo `127.0.0.1:8050`,
+  datos ficticios, asistente en modo simulado explícito y contraseña efímera por arranque); panel
+  CRM con agenda, catálogo con revisiones, conocimiento con publicación y reversión, biblioteca,
+  bandeja con derivación humana; paquete `despliegue/vps-crm/` preparado y sin desplegar.
+- **Aplazado a la siguiente versión** (fila propia en la matriz, sin borrar ninguna existente):
+  RF-02-05 (WhatsApp extremo a extremo con Meta), RF-03-04 (Google real autorizado), RF-04
+  (recordatorios), RF-05-02 (detalle completo de catálogo), RF-12-01 (telemetría) y RF-14-01
+  (retiro de duplicados). RF-13-04 (revisión visual) queda del lado del propietario: no es deuda
+  técnica.
+- **Ejecuciones de este cierre** (detalle y salidas en `REGISTRO_EJECUCIONES.md`,
+  `CKPT-CIERRE-20261104`): suite 426 pasadas, 4 omitidas y 9 fallos **preexistentes en `aucla`**
+  antes de este cierre —5 reales en `test_c02_deteccion_contextual.py`, 3 causados por el `.env`
+  local y 1 dependiente de orden—. No son regresiones de este trabajo y no se corrigen aquí, pero
+  harán fallar el CI del PR (ver registro). Demo arrancada, verificada y detenida; página del caso
+  re-verificada tras añadir la sección «Edición base y camino de ampliación».
+- **Publicación**: sigue en revisión local. Se conservan `noindex` y el rótulo «Revisión local ·
+  sin publicar» hasta que el propietario apruebe el material y elija hosting.
+- **Git**: el trabajo consolidado quedó en la rama `aucla` (commit `544573e`, empujada a origin);
+  este cierre documental se añade encima, sin reescribir historial ni tocar el resto de ramas.
+- Sin cambios funcionales, sin tocar integraciones, `.env`, datos operativos ni la suite de pruebas.
+
+## 2026-11-04 — INSTALACIÓN DE PRESENTACIÓN (`scripts/demo_presentacion.py`)
+
+- Nueva entrada de arranque para fotos y demostraciones comerciales: base propia en
+  `.pytest_cache/presentacion/clinica.db`, sólo `127.0.0.1:8050`, sin proveedor de IA externo y sin Meta.
+- Datos sembrados: 3 profesionales, 64 contactos con orígenes y etapas variadas, **840 citas** de
+  lunes a viernes hasta el **2026-12-31** y **cuatro huecos libres por día laborable** para pruebas y capturas.
+- El sembrador no usa la marca `[DEMO]` y arranca con `DEMO_BANNER=0`: la interfaz no muestra el aviso
+  de datos ficticios. Los datos siguen siendo ficticios y este archivo lo deja por escrito.
+- Catálogo: los productos nacen con existencias aplicables (`stock_na=0` en `catalog_create`) y la
+  columna Inventario ya se edita en la celda, con revisión. El precio muestra la moneda del artículo.
+- Biblioteca: categorías nuevas `publicidad` y `post_tratamiento` (modelo, formulario y etiquetas).
+  Sembrados tres recursos enviables y tres plantillas de WhatsApp.
+- **Plantillas**: se siembran como `pendiente_verificar`. NO se marcan como aprobadas: la aprobación
+  la fija sólo Meta con verificación externa y el modelo rechaza el estado `aprobada` desde la API.
+  Para verlas «Aprobada por Meta» hace falta conectar la app a la WABA y sincronizar de verdad.
+- Verificado: arranque, `/health` y `/login` 200, login de administrador, edición de existencias de
+  punta a punta (24 → 30, revisión +1) y render de biblioteca y plantillas. Sin secretos, sin envíos.
+
+## 2026-11-04 — SIMULADOR DE CONVERSACIONES (pestaña «Simulador de chat»)
+
+- Pestaña nueva que corre el diálogo real del canal (`MotorSimulado`) sobre una **copia** de la base
+  (`.simulador.db`, copia por la API de respaldo de SQLite), con burbujas tipo WhatsApp y botón
+  «Nueva conversación». La copia se estrena en cada arranque y no toca los datos operativos.
+- Lo que el bot deja en la cola de salida se pinta como mensaje enviado **dentro de la copia**; no
+  sale nada por WhatsApp y no se modifica ningún registro real.
+- Verificado a mano: «Hola, quiero reservar una limpieza dental» → lista de profesionales → «2» →
+  «¿Para qué día y a qué hora?», con las respuestas alineadas a la derecha. Suite afectada:
+  `test_crm.py`, `test_c02_frontend.py`, `test_c02_atencion.py` → **53 passed**.
+- Hallazgo del propio simulador: con «quiero una cita» sin nombrar servicio, el canal no encola
+  ninguna respuesta (silencio). Es un hueco del diálogo, no del simulador, y queda anotado para la
+  siguiente corrección; con un servicio nombrado el flujo avanza bien.
+- Sin proveedor externo (`CRM_CHAT_PROVEEDOR=simulado`): las respuestas libres son deterministas y
+  citan el conocimiento publicado. Con proveedor real respondería el modelo.

@@ -157,6 +157,10 @@
       });
     }
     td.appendChild(input);
+    var cur = document.createElement('small');
+    cur.className = 'muted';
+    cur.textContent = ' ' + (it.currency || 'USD');
+    td.appendChild(cur);
     return td;
   }
 
@@ -193,8 +197,31 @@
       td.classList.add('muted');
       return td;
     }
-    if (it.stock === null || it.stock === undefined) { td.textContent = '—'; return td; }
-    td.textContent = String(it.stock);
+    var input = document.createElement('input');
+    input.type = 'number';
+    input.step = '1';
+    input.min = '0';
+    var shown = it.stock === null || it.stock === undefined ? '' : it.stock;
+    input.value = shown;
+    input.dataset.orig = shown;
+    input.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); commitS(); }
+      else if (ev.key === 'Escape') { input.value = input.dataset.orig; input.blur(); }
+    });
+    function commitS() {
+      var v = input.value === '' ? null : parseInt(input.value, 10);
+      if (v !== null && (isNaN(v) || v < 0)) {
+        flash('Las existencias deben ser un número entero.', 'error');
+        input.value = input.dataset.orig;
+        return;
+      }
+      if (v === it.stock) return;
+      save(it, 'stock', v).then(null, function (e) {
+        flash('No se guardó: ' + e.message + '.', 'error');
+        if (e.code === 'version_conflict' || e.status === 409) reload();
+      });
+    }
+    td.appendChild(input);
     return td;
   }
 

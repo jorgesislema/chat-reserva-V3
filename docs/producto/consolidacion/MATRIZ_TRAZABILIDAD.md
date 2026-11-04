@@ -221,3 +221,24 @@ conversación en esperando_humano. Capturas en docs/producto/consolidacion/evide
 Mismo id en BD y /api/agenda verificado en el check 6 (resp ids 1,2). Fuera de horario rechazado en
 flujo normal, excepción exige admin/motivo/confirmación, sin solapamientos, horario general intacto y
 fechas bloqueadas respetadas → cubiertos por tests/test_c02_excepcion.py (10 passed).
+
+
+### Cierre de alcance del demo — 2026-11-04
+
+Esta pasada no cambia el estado de ninguna fila: declara qué queda **fuera del alcance del demo**
+del portafolio y se traslada a la siguiente versión. Ninguna fila se elimina ni se marca como
+resuelta por conveniencia.
+
+| ID | Estado real en V3 | Motivo por el que no cierra en el demo | Destino |
+|---|---|---|---|
+| RF-02-05 | Transporte real implementado y probado con dobles (fake Graph API); validación externa NO ejecutada | La app de Meta sigue sin publicar y la ventana de la VM Instabox venció el 2026-11-01 (~21:58Z) sin entrega del evento. No bloquea el demo local | V4 / producción |
+| RF-03-04 | Implementado con pruebas simuladas; sin calendario Google autorizado | Exige una cuenta y un calendario reales del cliente | V4 / producción |
+| RF-04 | Sin subrequisitos implementados | Los recordatorios configurables no forman parte de la edición base | V4 |
+| RF-05-02 | PARCIAL (detalle completo de campos de catálogo pendiente) | El demo ya muestra publicación y revisión con conflicto optimista; el detalle fino no cambia la percepción del producto | V4 |
+| RF-12-01 | PARCIAL (telemetría mínima de invocaciones) | La telemetría operativa completa es requisito de producción, no de demo | V4 |
+| RF-14-01 | Sólo inventario de entrada/archivo; retiro no ejecutado | Retirar duplicados exige decisión del propietario y no aporta al demo | V4 |
+| RF-13-04 | PENDIENTE de aceptación visual del propietario | Depende de la revisión humana de capturas y página, no de trabajo técnico | Propietario |
+
+Criterio: el demo se acepta con datos ficticios, en local y con el asistente en modo simulado
+declarado en pantalla. Todo lo que exige un tercero real (Meta, Google) o un volumen operativo
+mayor queda fuera, se documenta y no se declara terminado.

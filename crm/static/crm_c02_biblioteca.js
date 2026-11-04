@@ -79,7 +79,8 @@
     orden.forEach(function (it) {
       var tr = document.createElement('tr');
       tr.appendChild(cell(it.name));
-      tr.appendChild(cell(({ catalogo: 'Catálogo', lista_precios: 'Lista de precios' }[it.categoria]) || it.categoria));
+      tr.appendChild(cell(({ catalogo: 'Catálogo', lista_precios: 'Lista de precios', documento: 'Documento',
+                 publicidad: 'Publicidad', post_tratamiento: 'Post-tratamiento' }[it.categoria]) || it.categoria));
       tr.appendChild(cell('v' + it.version));
       var tdE = document.createElement('td');
       tdE.appendChild(it.estado === 'activo' ? chip('Activo', 'ok') : chip('Retirado'));
