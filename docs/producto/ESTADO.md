@@ -3598,3 +3598,22 @@ bases temporales ignoradas por git (`.pytest_cache/`): ninguna credencial ajena 
   propio CI excluye con `--deselect`.
 - Dos defectos aparecieron al escribir las pruebas (orden de parámetros en un INSERT y el
   nombre del día en inglés): corregidos en la prueba, no en el producto.
+
+## 2026-11-04 (cierre del día) — CONFIGURACIÓN DEL NEGOCIO, RECLAMOS Y URGENCIAS
+
+- **«Se borró el catálogo y los datos de la empresa»**: el catálogo estaba intacto (18 artículos).
+  Lo que estaba vacío era `crm_settings`, de donde lee «Negocio y horarios». Sembrados nombre,
+  zona, moneda, saludo, mensaje fuera de horario y horario semanal; `demo_presentacion.py` lo
+  repite en cada arranque, así que un `--reiniciar` ya no los deja en blanco.
+- **Migración 022 `crm_claims`**: tipo (emergencia / peligro / reclamo), detalle, paciente,
+  documento, profesional, producto y estado.
+- **Urgencias**: «me duele la muela, se me rompió un diente» → «Entiendo. Voy a poner tu caso en
+  conocimiento de un especialista; se comunicará contigo en los próximos minutos.» y queda el caso.
+- **Reclamos y garantías**: «el producto no sirve» → «Lamento lo ocurrido. Voy a poner tu caso en
+  conocimiento del doctor; se comunicará contigo en los próximos minutos. ¿Me ayudas con tu nombre
+  y el nombre del doctor que te atendió?». La respuesta se guarda como nombre + cédula (probado:
+  Carlos Vera · 0912345678).
+- **Análisis comercial**: bloque nuevo con reclamos por tipo y por profesional del periodo.
+- **Pendiente para mañana**: que la confirmación al paciente salga aunque la conversación esté en
+  control humano (hoy la pausa de egress la retiene); pruebas con el teléfono de prueba; caso de
+  emergencia real; fotos del portafolio.

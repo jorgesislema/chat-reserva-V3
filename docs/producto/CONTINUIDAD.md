@@ -50,6 +50,15 @@ porque el CI seguiría rojo por 5 pruebas preexistentes).
   Falta la clave: hoy `META_API_KEY` está vacía y se usa OpenRouter.
 - Los datos son ficticios; la instalación de presentación no muestra el aviso de demo.
 
+## Estado al cierre del 4 de noviembre
+
+- Catálogo: 18 artículos. Configuración del negocio: sembrada (antes vacía).
+- Reclamos y urgencias: se registran en `crm_claims` con nombre y cédula.
+- Suite: 442 pruebas en verde (sin `.env`, como el CI).
+- Mañana: pruebas con el teléfono de prueba (WhatsApp), caso de emergencia y fotos del portafolio.
+- La confirmación del reclamo no se envía mientras la conversación está en control humano: revisar
+  al probar la bandeja.
+
 ## Pendiente, por orden
 
 0. **Franja de almuerzo** en «Fechas cerradas y excepciones» (si se deja en blanco, no
