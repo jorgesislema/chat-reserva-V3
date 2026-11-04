@@ -327,7 +327,19 @@ class MotorSimulado(MotorCanal):
             r'(quiero|quisiera|querr[ií]a|necesito|podr[ií]a|puedo|me gustar[ií]a|'
             r'agendar|agéndame|reservar|resérvame|pedir|sacar|separar|'
             r'tomar)\s+(una\s+|mi\s+)?cita', t)
-        if re.search(r'\breservar\b|\bagendar\b', t) or pide_cita or any(
+        # «Quiero una limpieza» sin decir «cita»: deseo + servicio del catálogo
+        # y ninguna pregunta de precio/información. Si pregunta cuánto cuesta,
+        # es consulta, no reserva.
+        deseo = re.search(r'\b(quiero|quisiera|querr[ií]a|necesito|me gustar[ií]a|'
+                          r'podr[ií]a|puedo)\b', t)
+        servicio = re.search(r'\b(cita|limpieza|consulta|blanqueamiento|ortodoncia|'
+                             r'endodoncia|extracci[oó]n|control|evaluaci[oó]n|'
+                             r'radiograf[ií]a|corona|pr[oó]tesis|sellante)\b', t)
+        info = re.search(r'\b(cu[aá]nto|cuesta|precio|precios|informaci[oó]n|'
+                         r'horario|horarios|d[oó]nde|cobertura|seguro)\b', t)
+        otro = re.search(r'cancel|anul|reagend|reprogram|cambiar mi cita', t)
+        if re.search(r'\breservar\b|\bagendar\b', t) or pide_cita or \
+                (deseo and servicio and not info and not otro) or any(
                 k in t for k in ('cita para', 'reservar para', 'quiero cita',
                                  'horario para', 'reservar cita')):
             return 'reservar', {'profesional': _extract_professional(t, contexto)}
@@ -506,10 +518,32 @@ def _texto_lista_servicios(servicios) -> str:
     return '¿Qué servicio desea reservar?\n%s\nIndique el número.' % lineas
 
 
+def _profesional_libre(path, compatibles, fecha=None):
+    """El especialista con menos citas: el que tiene más hueco."""
+    if not compatibles:
+        return None
+    cargas = []
+    with store.connect(path) as conn:
+        for p in compatibles:
+            if fecha:
+                n = conn.execute(
+                    "SELECT COUNT(*) c FROM crm_appointments WHERE professional_id=? "
+                    "AND status='active' AND substr(start,1,10)=?",
+                    (p['id'], str(fecha)[:10])).fetchone()['c']
+            else:
+                n = conn.execute(
+                    "SELECT COUNT(*) c FROM crm_appointments WHERE professional_id=? "
+                    "AND status='active'", (p['id'],)).fetchone()['c']
+            cargas.append((n, p))
+    return min(cargas, key=lambda par: par[0])[1]
+
+
 def _texto_lista_profesionales(compatibles) -> str:
     lineas = '\n'.join('%d. %s' % (i, p['name'])
                        for i, p in enumerate(compatibles, 1))
-    return '¿Con qué profesional desea la cita?\n%s\nIndique el número.' % lineas
+    return ('¿Con qué profesional desea la cita? Si ya se ha atendido antes con alguno, '
+            'elíjalo; si es su primera vez, escriba «no» y le asigno uno disponible.\n%s\n'
+            'Indique el número.' % lineas)
 
 
 def _texto_lista_citas(path, citas, verbo='cancelar'):
@@ -810,7 +844,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
     # Turno de la ficha: el bot acaba de reservar y preguntó para quién es.
     if pending.get('intencion') == 'paciente' and pending.get('cita_id'):
         bajo = _normalizar(body or '')
-        if not any(k in bajo for k in ('cancelar', 'reagendar', 'reprogramar')):
+        if not any(k in bajo for k in ('cancel', 'reagend', 'reprogram', 'anul')):
             familia = any(k in bajo for k in ('hija', 'hijo', 'madre', 'padre',
                                               'esposa', 'esposo', 'herman', 'abuel',
                                               'familiar', 'otra persona', 'tercera persona'))
@@ -932,7 +966,14 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                 lista = pending['profesionales_en_espera']
                 if num and 1 <= num <= len(lista):
                     profesional_id = lista[int(num) - 1]
-                else:
+                elif (re.search(r'primera vez|nunca|no he (?:ido|venido|estado)|'
+                               r'no conozco|es mi primera', _normalizar(body or ''))
+                      or re.fullmatch(r'\s*no[\s.!,]*', _normalizar(body or ''))):
+                    libre = _profesional_libre(path, compatibles, fecha)
+                    if libre:
+                        profesional_id = libre['id']
+                        pend['profesional_nombre'] = libre['name']
+                if not profesional_id:
                     return _resp('reservar', _texto_lista_profesionales(compatibles),
                                  need_datos=True,
                                  pending={**pend, 'profesionales_en_espera': [p['id'] for p in compatibles]})
@@ -945,6 +986,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                         profesional_id = hit['id']
                 elif len(compatibles) == 1:
                     profesional_id = compatibles[0]['id']
+                    pend['profesional_nombre'] = compatibles[0]['name']
         if not profesional_id:
             if not compatibles:
                 return _resp('reservar', 'No hay un profesional disponible para ese servicio; elija otro.',
@@ -967,8 +1009,10 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             return _resp('reservar', '¿A qué hora prefiere (por ejemplo 10:30)?',
                          need_datos=True, pending=pend)
         if not fecha and not hora:
-            return _resp('reservar', '¿Para qué día y a qué hora? Puede decirme "mañana 10:30".',
-                         need_datos=True, pending=pend)
+            nombre = pend.get('profesional_nombre')
+            prefijo = ('Le atenderá %s. ' % nombre) if nombre else ''
+            return _resp('reservar', prefijo + '¿Para qué día y a qué hora? '
+                         'Puede decirme "mañana 10:30".', need_datos=True, pending=pend)
 
         # 4) Ejecución con revalidación de servicio/profesional/horario en la
         #    misma transacción de la guardia.
