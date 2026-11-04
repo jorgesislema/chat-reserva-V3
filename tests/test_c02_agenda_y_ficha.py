@@ -198,4 +198,4 @@ def test_hueco_ocupado_ofrece_alternativas(path):
         payload = conn.execute(
             "SELECT payload FROM crm_outbox WHERE recipient=? ORDER BY id DESC LIMIT 1",
             (otro,)).fetchone()['payload']
-    assert 'no tengo hueco' in payload or 'Tengo' in payload
+    assert 'ocupado' in payload or 'Te puedo ofrecer' in payload
