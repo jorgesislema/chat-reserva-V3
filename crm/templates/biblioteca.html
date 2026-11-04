@@ -17,7 +17,7 @@
         <div class="form-grid">
           <label>Archivo (PDF, .xlsx, .csv, .txt, .md; máx 10 MB)
             <input type="file" id="c02-lib-file" accept=".pdf,.xlsx,.csv,.txt,.md"></label>
-          <label>Nombre<input id="c02-lib-name" maxlength="200" required placeholder="Lista de precios 2026"></label>
+          <label>Nombre<input id="c02-lib-name" maxlength="200" required placeholder="Lista de precios 2026" spellcheck="true" lang="es"></label>
           <label>Categoría<select id="c02-lib-cat">
             <option value="documento">Documento</option>
             <option value="catalogo">Catálogo</option>
@@ -26,7 +26,7 @@
             <option value="post_tratamiento">Indicaciones post-tratamiento</option>
           </select></label>
         </div>
-        <label>Descripción<input id="c02-lib-desc" maxlength="1000" placeholder="Para qué sirve este recurso"></label>
+        <label>Descripción<input id="c02-lib-desc" maxlength="1000" placeholder="Para qué sirve este recurso" spellcheck="true" lang="es"></label>
         <div class="check-row">
           <label class="check"><input type="checkbox" id="c02-lib-send">Permitir <strong>enviar</strong> a pacientes</label>
           <label class="check"><input type="checkbox" id="c02-lib-rag" checked>Permitir uso en <strong>RAG</strong> (asistente)</label>

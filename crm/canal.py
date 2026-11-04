@@ -49,6 +49,8 @@ HUMAN_PEDIDO_EXPLICITO = (
     'ser atendido por una persona real', 'operador humano', 'asesor humano',
     'persona real', 'quiero atención humana', 'atención humana',
     'intervención humana', 'quiero un asesor humano', 'hablar con un asesor',
+    'poner un humano', 'ponme con', 'pásame con', 'pasame con',
+    'comunícame con', 'comunicame con', 'con una persona real',
     'pásame con recepción', 'pasarme con recepción', 'pasar con recepción',
     'hablar con recepción', 'pásame con el recepcionista', 'necesito un especialista',
     'quiero un especialista', 'hablar con un especialista', 'pásame con un especialista',
@@ -305,6 +307,31 @@ class MotorCanal:
         raise NotImplementedError
 
 
+_FALTAS = {
+    'sita': 'cita', 'sitas': 'citas', 'sitar': 'citar', 'sito': 'cito',
+    'reserba': 'reserva', 'reserbas': 'reservas', 'reserbar': 'reservar',
+    'orario': 'horario', 'orarios': 'horarios',
+    'kiero': 'quiero', 'keria': 'quería', 'nesesito': 'necesito',
+    'nesesita': 'necesita', 'presio': 'precio', 'presios': 'precios',
+    'servico': 'servicio', 'consurta': 'consulta', 'limpesa': 'limpieza',
+    'blanquiamiento': 'blanqueamiento', 'tratamineto': 'tratamiento',
+    'manana': 'mañana', 'miercoles': 'miércoles', 'sabado': 'sábado',
+    'jueve': 'jueves', 'domimgo': 'domingo', 'atencion': 'atención',
+}
+
+
+def _corregir_faltas(texto: str) -> str:
+    """Cambia faltas frecuentes por la palabra correcta (sin tocar el resto)."""
+    t = (texto or '')
+    for mal, bien in _FALTAS.items():
+        if mal != bien:
+            t = re.sub(r'\b%s\b' % re.escape(mal), bien, t, flags=re.IGNORECASE)
+    # «aun humano» / «aun asesor» → «un humano» / «un asesor»
+    t = re.sub(r'\baun\s+(humano|asesor|operador|agente)\b', r'un \1', t,
+               flags=re.IGNORECASE)
+    return t
+
+
 class MotorSimulado(MotorCanal):
     """Motor determinista de demo/pruebas: no usa modelo externo.
 
@@ -313,8 +340,8 @@ class MotorSimulado(MotorCanal):
     """
 
     def intencion(self, texto: str, contexto: dict) -> tuple[str, dict]:
-        t = (texto or '').lower()
-        peticiones = detectar_peticion_humana(texto, contexto)
+        t = _corregir_faltas(texto or '').lower()
+        peticiones = detectar_peticion_humana(t, contexto)
         if peticiones:
             return 'humano', {'razon': peticiones[0]['motivo']}
         if any(k in t for k in ('reagenda', 'reprogramar', 'cambiar mi cita',
