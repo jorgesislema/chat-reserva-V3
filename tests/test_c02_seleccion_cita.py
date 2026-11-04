@@ -128,7 +128,7 @@ def test_duracion_procede_del_servicio_seleccionado(crm):
 
     out = _paso(crm, 'quiero reservar %s a las 10:30' % f, 'e1')
     assert out['citas_creadas'] == 0
-    assert any('¿Qué servicio' in t for t in _textos(db))
+    assert any('¿Qué necesita' in t for t in _textos(db))
     _paso(crm, '2', 'e2')
     assert any('¿Con qué profesional' in t for t in _textos(db))
     out = _paso(crm, '1', 'e3')  # Dra. Ana
@@ -136,8 +136,8 @@ def test_duracion_procede_del_servicio_seleccionado(crm):
     c = _citas(crm)[0]
     s = datetime.fromisoformat(c['start']); e = datetime.fromisoformat(c['end'])
     assert (e - s).total_seconds() // 60 == 45
-    assert any('45 min' in t and 'Blanqueamiento' in t
-               for t in _textos(db) if 'Reservé' in t)
+    assert any('Blanqueamiento' in t
+               for t in _textos(db) if 'Su cita' in t)
 
 
 def test_profesional_seleccionado_por_numero_en_bd(crm):
@@ -198,10 +198,10 @@ def test_seleccion_ambigua_inexistente_o_ajena_no_muta(crm):
     # Ambigua: dos servicios sin elegir ninguno no crea nada y pide lista.
     o1 = _paso(crm, 'quiero reservar %s a las 10:30' % f, 'am1')
     assert o1['citas_creadas'] == 0
-    assert any('¿Qué servicio' in t for t in _textos(db))
+    assert any('¿Qué necesita' in t for t in _textos(db))
     # Inexistente: respuesta fuera de la lista.
     _paso(crm, '99', 'am2')
-    assert any('Indique el número' in t for t in _textos(db))
+    assert any('nombre o el número' in t for t in _textos(db))
     assert len(_citas(crm)) == 0
     # Completar la reserva (servicio 1, profesional 1).
     _paso(crm, '1', 'am3')
@@ -227,11 +227,11 @@ def test_selecciones_conservadas_entre_mensajes(crm):
     f = _dias_util().isoformat()
 
     o1 = _paso(crm, 'quiero reservar', 'm1')
-    assert o1['citas_creadas'] == 0 and any('¿Qué servicio' in t for t in _textos(db))
+    assert o1['citas_creadas'] == 0 and any('¿Qué necesita' in t for t in _textos(db))
     o2 = _paso(crm, '2', 'm2')
     assert o2['citas_creadas'] == 0 and any('¿Con qué profesional' in t for t in _textos(db))
     o3 = _paso(crm, '1', 'm3')
-    assert o3['citas_creadas'] == 0 and any('¿Para qué día y a qué hora' in t for t in _textos(db))
+    assert o3['citas_creadas'] == 0 and any('¿Qué día le viene bien' in t for t in _textos(db))
     o4 = _paso(crm, '%s 10:30' % f, 'm4')
     assert o4['citas_creadas'] == 1
     c = _citas(crm)[0]
@@ -388,7 +388,7 @@ def test_sel01_reasignacion_servicio_en_pre_escritura(crm):
         n = c.execute('SELECT COUNT(*) AS n FROM crm_appointments').fetchone()['n']
     assert n == 0
     textos = _textos(db)
-    assert not any('Reservé' in t for t in textos)
+    assert not any('Su cita es el' in t for t in textos)
 
     # 2) El cliente recibe una solicitud clara de elegir otra opción.
     assert any('profesional' in t.lower() and 'otra opción' in t.lower()

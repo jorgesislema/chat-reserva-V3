@@ -512,10 +512,54 @@ def _opcion_numerica(texto) -> Optional[int]:
     return None
 
 
+def _fecha_larga(fecha) -> str:
+    """'2026-11-05' -> 'jueves 5 de noviembre'."""
+    from datetime import datetime as _dt
+    try:
+        d = _dt.strptime(str(fecha)[:10], '%Y-%m-%d')
+    except (TypeError, ValueError):
+        return str(fecha)
+    dias = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo']
+    meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+             'septiembre', 'octubre', 'noviembre', 'diciembre']
+    return '%s %d de %s' % (dias[d.weekday()], d.day, meses[d.month - 1])
+
+
+def _alternativas(path, profesional_id, fecha, hora, limite=3):
+    """Horas libres cercanas al hueco pedido (mismo día, ±1/2/3 h)."""
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+    from zoneinfo import ZoneInfo as _Zone
+
+    zona = _Zone(effective_profile(path).zone)
+    try:
+        base = _dt.strptime('%s %s' % (str(fecha)[:10], str(hora)[:5]), '%Y-%m-%d %H:%M')
+    except (TypeError, ValueError):
+        return []
+    libres = []
+    with store.connect(path) as conn:
+        for delta in (1, -1, 2, -2, 3):
+            cand = base + _td(hours=delta)
+            if cand.hour < 8 or cand.hour > 17:
+                continue
+            ini = cand.replace(tzinfo=zona).astimezone(_tz.utc).isoformat()
+            fin = (cand + _td(minutes=60)).replace(tzinfo=zona).astimezone(_tz.utc).isoformat()
+            if conn.execute(
+                    "SELECT 1 FROM crm_appointments WHERE professional_id=? "
+                    "AND status='active' AND start<? AND end>?",
+                    (profesional_id, fin, ini)).fetchone():
+                continue
+            libres.append(cand.strftime('%H:%M'))
+            if len(libres) >= limite:
+                break
+    return libres
+
+
 def _texto_lista_servicios(servicios) -> str:
     lineas = '\n'.join('%d. %s (%d min)' % (i, s['name'], s['duration_min'])
                        for i, s in enumerate(servicios, 1))
-    return '¿Qué servicio desea reservar?\n%s\nIndique el número.' % lineas
+    return ('¿Qué necesita?\n%s\nPuede decirme el nombre o el número.' % lineas)
 
 
 def _profesional_libre(path, compatibles, fecha=None):
@@ -1011,8 +1055,9 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
         if not fecha and not hora:
             nombre = pend.get('profesional_nombre')
             prefijo = ('Le atenderá %s. ' % nombre) if nombre else ''
-            return _resp('reservar', prefijo + '¿Para qué día y a qué hora? '
-                         'Puede decirme "mañana 10:30".', need_datos=True, pending=pend)
+            return _resp('reservar', prefijo + '¿Qué día le viene bien? '
+                         'Puede decirme «el jueves a las 11» o «mañana 10:30».',
+                         need_datos=True, pending=pend)
 
         # 4) Ejecución con revalidación de servicio/profesional/horario en la
         #    misma transacción de la guardia.
@@ -1051,6 +1096,22 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                                       'profesionales_en_espera': [p['id'] for p in compatibles]})
             if res.get('code') in ('datos_incompletos', 'invalid'):
                 return _resp('reservar', res['message'], need_datos=True, pending=pend)
+            if res.get('code') == 'overlap':
+                opciones = _alternativas(path, profesional_id, fecha, hora)
+                if opciones:
+                    if len(opciones) == 1:
+                        lista = opciones[0]
+                    else:
+                        lista = ', '.join(opciones[:-1]) + ' o ' + opciones[-1]
+                    return _resp('reservar',
+                                 'A las %s no tengo hueco ese día. Tengo %s. '
+                                 '¿Cuál le sirve?' % (hora, lista),
+                                 need_datos=True,
+                                 pending={**pend, 'fecha': None, 'hora': None})
+                return _resp('reservar',
+                             'A las %s no tengo hueco ese día y no encuentro otro '
+                             'cercano. ¿Probamos otro día?' % hora,
+                             need_datos=True, pending={**pend, 'fecha': None, 'hora': None})
             return _resp('reservar', res['message'], need_datos=False, pending={})
         if conv_id:
             svc.conv_clear_pending(path, conv_id)
@@ -1326,8 +1387,10 @@ def _reservar_conn(conn, path, phone, lead, fecha, hora, profesionales, zonas, n
         nombre_prof = prof.get('name') or 'el profesional'
         return {'ok': True, 'appointment': result['appointment'],
                 'appointment_id': result['appointment']['id'],
-                'message': 'Reservé %s con %s para %s a las %s (%d min). ¿Le sirve o prefiere otro horario?'
-                           % (titulo, nombre_prof, fecha, hora, duracion)}
+                'message': 'Listo ✅ Su cita de %s es el %s a las %s con %s. '
+                           '¿Le va bien así?'
+                           % (str(titulo).replace('Reserva: ', ''), _fecha_larga(fecha),
+                              hora, nombre_prof)}
     return {'ok': False, 'code': result.get('code'),
             'message': result.get('message', 'Error inesperado')}
 

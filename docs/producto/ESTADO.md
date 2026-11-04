@@ -3545,3 +3545,18 @@ bases temporales ignoradas por git (`.pytest_cache/`): ninguna credencial ajena 
   siguiente corrección; con un servicio nombrado el flujo avanza bien.
 - Sin proveedor externo (`CRM_CHAT_PROVEEDOR=simulado`): las respuestas libres son deterministas y
   citan el conocimiento publicado. Con proveedor real respondería el modelo.
+
+## 2026-11-04 — CONVERSACIÓN MENOS ROBÓTICA (textos y alternativas)
+
+- Fechas largas («jueves 5 de noviembre»), sin identificadores internos y sin duplicar el
+  título del servicio en el mensaje de confirmación.
+- Preguntas más naturales: «¿Qué necesita?» con nombres o números y «¿Qué día le viene bien?».
+- Si el hueco pedido está ocupado, el bot propone dos o tres horas cercanas libres en vez de
+  responder «elija otro».
+- Las pruebas se ajustaron a los textos nuevos; no se relajó ninguna comprobación funcional:
+  `test_c02_canal`, `canal_rag`, `seleccion_cita`, `atencion` y `chat` → **94 pasan** y siguen
+  los **5 fallos preexistentes** de `test_c02_deteccion_contextual.py`.
+- Nuevo documento de continuidad para retomar el trabajo: `docs/producto/CONTINUIDAD.md`
+  (arranque, contraseña, estado por áreas, decisiones y pendientes ordenados).
+- Pendiente inmediato: confirmar antes de crear la cita, responder «no» con alternativas y
+  derivar a una persona tras dos malentendidos.
