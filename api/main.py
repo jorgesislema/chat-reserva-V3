@@ -38,6 +38,16 @@ env_path = BASE_DIR / ".env"
 load_dotenv(dotenv_path=env_path)
 
 # ---------------------------------------------------------------------------
+# ENTRADA ÚNICA: el recorrido activo de WhatsApp es el CRM (crm/app.py +
+# serve_wh_proxy.py + crm.worker sobre la misma base). Este FastAPI se conserva
+# como respaldo histórico (INVENTARIO_RETIRO: NO RETIRAR), pero su webhook y su
+# worker de cola quedan DESHABILITADOS por defecto. Para activarlos como
+# recorrido paralelo (NO recomendado: duplica entrada/cola/procesador), fijar
+# LEGACY_FASTAPI_WEBHOOK=1.
+# ---------------------------------------------------------------------------
+LEGACY_WHATSAPP_ENTRY = os.getenv('LEGACY_FASTAPI_WEBHOOK', '0') == '1'
+
+# ---------------------------------------------------------------------------
 # RATE LIMITING: 10 mensajes por minuto por IP
 # ---------------------------------------------------------------------------
 limiter = Limiter(key_func=get_remote_address)
@@ -204,6 +214,13 @@ async def recibir_mensaje(
     request: Request,
     background_tasks: BackgroundTasks,
 ) -> Dict[str, str]:
+    if not LEGACY_WHATSAPP_ENTRY:
+        raise HTTPException(
+            status_code=503,
+            detail='Webhook deshabilitado: el punto de entrada de WhatsApp es el CRM '
+                   '(crm/app.py + serve_wh_proxy.py). Fijar LEGACY_FASTAPI_WEBHOOK=1 '
+                   'solo para respaldo histórico paralelo.',
+        )
     secret = os.getenv('WHATSAPP_APP_SECRET', '')
     if not secret:
         raise HTTPException(status_code=503, detail='Configure WHATSAPP_APP_SECRET')
@@ -369,5 +386,10 @@ def iniciar_worker() -> None:
 
 @app.on_event("startup")
 async def iniciar_worker_startup() -> None:
-    """Inicia el worker de procesamiento al arrancar."""
+    """Arranque: el procesador activo de WhatsApp es el worker del CRM
+    (python -m crm.worker sobre la misma base). Este worker de cola del
+    FastAPI queda deshabilitado por defecto (una sola cola/procesador)."""
+    if not LEGACY_WHATSAPP_ENTRY:
+        print("[WORKER] Deshabilitado por defecto; usar el worker del CRM.")
+        return
     iniciar_worker()

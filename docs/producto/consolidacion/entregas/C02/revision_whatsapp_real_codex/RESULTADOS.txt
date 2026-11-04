@@ -1,0 +1,5 @@
+70 passed,8 warnings in 68.64s,exit0
+AUTO_RETRY http_requests_received=2,same_body_twice=true,result.ok=true
+WORKER_ENV database_matches_env_file=false,transport_configured_from_env_file=false
+EARLY_STATUS early_event_result=null,after_acceptance.provider_state=aceptado
+TEMPLATE_REPLACEMENT type=template,name=plantilla_generica; texto original y parametros ausentes

@@ -165,5 +165,3 @@ export function Conversations() {
     </div>
   )
 }
-
-export { Conversations }

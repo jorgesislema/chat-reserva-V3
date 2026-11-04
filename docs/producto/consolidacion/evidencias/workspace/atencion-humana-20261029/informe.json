@@ -1,0 +1,89 @@
+{
+  "checks": [
+    {
+      "check": "indicador presente en Resumen",
+      "ok": true,
+      "detail": "{\"count\": 4, \"aria\": \"4 conversaciones requieren atención\", \"texto\": \"4 conversaciones requieren atención\", \"prio\": \"Prioridad alta\", \"prioAlta\": true, \"prioNormal\": false, \"stale\": false}"
+    },
+    {
+      "check": "indicador presente en Conversaciones",
+      "ok": true,
+      "detail": "{\"count\": 4, \"aria\": \"4 conversaciones requieren atención\", \"texto\": \"4 conversaciones requieren atención\", \"prio\": \"Prioridad alta\", \"prioAlta\": true, \"prioNormal\": false, \"stale\": false}"
+    },
+    {
+      "check": "panel lista pendientes con enlace a conversacion",
+      "ok": true,
+      "detail": "filas=5"
+    },
+    {
+      "check": "deep-link abre la conversacion en la bandeja",
+      "ok": true,
+      "detail": "url=http://127.0.0.1:8931/?tab=inbox"
+    },
+    {
+      "check": "persistencia tras recargar (mismo contador)",
+      "ok": true,
+      "detail": "antes=4 despues=4"
+    },
+    {
+      "check": "campana visible en tema light",
+      "ok": true,
+      "detail": "{\"count\": 4, \"aria\": \"4 conversaciones requieren atención\", \"texto\": \"4 conversaciones requieren atención\", \"prio\": \"Prioridad alta\", \"prioAlta\": true, \"prioNormal\": false, \"stale\": false}"
+    },
+    {
+      "check": "campana visible en tema dark",
+      "ok": true,
+      "detail": "{\"count\": 4, \"aria\": \"4 conversaciones requieren atención\", \"texto\": \"4 conversaciones requieren atención\", \"prio\": \"Prioridad alta\", \"prioAlta\": true, \"prioNormal\": false, \"stale\": false}"
+    },
+    {
+      "check": "campana en movil 414px",
+      "ok": true,
+      "detail": "{\"count\": 4, \"aria\": \"4 conversaciones requieren atención\", \"texto\": \"4 conversaciones requieren atención\", \"prio\": \"Prioridad alta\", \"prioAlta\": true, \"prioNormal\": false, \"stale\": false}"
+    },
+    {
+      "check": "panel en movil con pendientes",
+      "ok": true,
+      "detail": "filas moviles=5"
+    },
+    {
+      "check": "panel HTTP inicial: 4 pendientes, 1 en atencion",
+      "ok": true,
+      "detail": "{\"en_atencion\": [{\"alerts\": [{\"alert_id\": 5, \"created_at\": \"2026-10-29T14:47:29.494360+00:00\", \"priority\": \"alta\", \"reason\": \"reclamo\", \"state\": \"activa\"}], \"client_key\": \"PAX-E-0005\", \"conv_state\": \"humano_asignado\", \"conversation_id\": 5, \"prioridad_max\": \"alta\", \"responsible_name\": \"Admin Demo\", \"tiempo_espera_seg\": 2417}], \"ok\": true, \"pendientes\": [{\"alerts\": [{\"alert_id\": 3, \"created_at\": \"2026-10-29T15:24:29.259629+00:00\", \"priority\": \"alta\", \"reason\": \"emergencia\", \"state\": \"activa\"}], \"client_key\": \"PAX-C-0003\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 3, \"prioridad_max\": \"alta\", \"responsible_name\": null, \"tiempo_espera_seg\": 197}, {\"alerts\": [{\"alert_id\": 2, \"created_at\": \"2026-10-29T15:12:29.157840+00:00\", \"priority\": \"alta\", \"reason\": \"reclamo\", \"state\": \"activa\"}], \"client_key\": \"PAX-B-0002\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 2, \"prioridad_max\": \"alta\", \"responsible_name\": null, \"tiempo_espera_seg\": 917}, {\"alerts\": [{\"alert_id\": 1, \"created_at\": \"2026-10-29T15:19:29.052282+00:00\", \"priority\": \"normal\", \"reason\": \"humano_explicito\", \"state\": \"activa\"}], \"client_key\": \"PAX-A-0001\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 1, \"prioridad_max\": \"normal\", \"responsible_name\": null, \"tiempo_espera_seg\": 497}, {\"alerts\": [{\"alert_id\": 4, \"created_at\": \"2026-10-29T14:55:29.369303+00:00\", \"priority\": \"normal\", \"reason\": \"sin_fuente\", \"state\": \"activa\"}], \"client_key\": \"PAX-D-0004\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 4, \"prioridad_max\": \"normal\", \"responsible_name\": null, \"tiempo_espera_seg\": 1937}], \"total_en_atencion\": 1, \"total_pendientes\": 4, \"total_pendientes_global\": 5}"
+    },
+    {
+      "check": "toma: pendientes 3 y en_atencion 2 con responsable",
+      "ok": true,
+      "detail": "{\"en_atencion\": [{\"alerts\": [{\"alert_id\": 5, \"created_at\": \"2026-10-29T14:47:29.494360+00:00\", \"priority\": \"alta\", \"reason\": \"reclamo\", \"state\": \"activa\"}], \"client_key\": \"PAX-E-0005\", \"conv_state\": \"humano_asignado\", \"conversation_id\": 5, \"prioridad_max\": \"alta\", \"responsible_name\": \"Admin Demo\", \"tiempo_espera_seg\": 2417}, {\"alerts\": [{\"alert_id\": 1, \"created_at\": \"2026-10-29T15:19:29.052282+00:00\", \"priority\": \"normal\", \"reason\": \"humano_explicito\", \"state\": \"activa\"}], \"client_key\": \"PAX-A-0001\", \"conv_state\": \"humano_asignado\", \"conversation_id\": 1, \"prioridad_max\": \"normal\", \"responsible_name\": \"Admin Demo\", \"tiempo_espera_seg\": 497}], \"ok\": true, \"pendientes\": [{\"alerts\": [{\"alert_id\": 3, \"created_at\": \"2026-10-29T15:24:29.259629+00:00\", \"priority\": \"alta\", \"reason\": \"emergencia\", \"state\": \"activa\"}], \"client_key\": \"PAX-C-0003\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 3, \"prioridad_max\": \"alta\", \"responsible_name\": null, \"tiempo_espera_seg\": 197}, {\"alerts\": [{\"alert_id\": 2, \"created_at\": \"2026-10-29T15:12:29.157840+00:00\", \"priority\": \"alta\", \"reason\": \"reclamo\", \"state\": \"activa\"}], \"client_key\": \"PAX-B-0002\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 2, \"prioridad_max\": \"alta\", \"responsible_name\": null, \"tiempo_espera_seg\": 917}, {\"alerts\": [{\"alert_id\": 4, \"created_at\": \"2026-10-29T14:55:29.369303+00:00\", \"priority\": \"normal\", \"reason\": \"sin_fuente\", \"state\": \"activa\"}], \"client_key\": \"PAX-D-0004\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 4, \"prioridad_max\": \"normal\", \"responsible_name\": null, \"tiempo_espera_seg\": 1937}], \"total_en_atencion\": 2, \"total_pendientes\": 3, \"total_pendientes_global\": 5}"
+    },
+    {
+      "check": "campana refleja la toma del otro proceso",
+      "ok": true,
+      "detail": "{\"count\": 3, \"aria\": \"3 conversaciones requieren atención\", \"texto\": \"3 conversaciones requieren atención\", \"prio\": \"Prioridad alta\", \"prioAlta\": true, \"prioNormal\": false, \"stale\": false}"
+    },
+    {
+      "check": "resolucion: pendientes 3 y en_atencion 1 (solo la tomada)",
+      "ok": true,
+      "detail": "{\"en_atencion\": [{\"alerts\": [{\"alert_id\": 5, \"created_at\": \"2026-10-29T14:47:29.494360+00:00\", \"priority\": \"alta\", \"reason\": \"reclamo\", \"state\": \"activa\"}], \"client_key\": \"PAX-E-0005\", \"conv_state\": \"humano_asignado\", \"conversation_id\": 5, \"prioridad_max\": \"alta\", \"responsible_name\": \"Admin Demo\", \"tiempo_espera_seg\": 2418}], \"ok\": true, \"pendientes\": [{\"alerts\": [{\"alert_id\": 3, \"created_at\": \"2026-10-29T15:24:29.259629+00:00\", \"priority\": \"alta\", \"reason\": \"emergencia\", \"state\": \"activa\"}], \"client_key\": \"PAX-C-0003\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 3, \"prioridad_max\": \"alta\", \"responsible_name\": null, \"tiempo_espera_seg\": 198}, {\"alerts\": [{\"alert_id\": 2, \"created_at\": \"2026-10-29T15:12:29.157840+00:00\", \"priority\": \"alta\", \"reason\": \"reclamo\", \"state\": \"activa\"}], \"client_key\": \"PAX-B-0002\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 2, \"prioridad_max\": \"alta\", \"responsible_name\": null, \"tiempo_espera_seg\": 918}, {\"alerts\": [{\"alert_id\": 4, \"created_at\": \"2026-10-29T14:55:29.369303+00:00\", \"priority\": \"normal\", \"reason\": \"sin_fuente\", \"state\": \"activa\"}], \"client_key\": \"PAX-D-0004\", \"conv_state\": \"esperando_humano\", \"conversation_id\": 4, \"prioridad_max\": \"normal\", \"responsible_name\": null, \"tiempo_espera_seg\": 1938}], \"total_en_atencion\": 1, \"total_pendientes\": 3, \"total_pendientes_global\": 4}"
+    },
+    {
+      "check": "campana apaga la atendida conservando contador",
+      "ok": true,
+      "detail": "{\"count\": 3, \"aria\": \"3 conversaciones requieren atención\", \"texto\": \"3 conversaciones requieren atención\", \"prio\": \"Prioridad alta\", \"prioAlta\": true, \"prioNormal\": false, \"stale\": false}"
+    },
+    {
+      "check": "abrir la campana no resuelve (contador intacto)",
+      "ok": true,
+      "detail": "abrir=3 cerrar=3"
+    },
+    {
+      "check": "sin errores JavaScript",
+      "ok": true,
+      "detail": "[]"
+    }
+  ],
+  "navegador": {
+    "motor": "chromium",
+    "version": "140.0.7339.16"
+  },
+  "errores_js": []
+}

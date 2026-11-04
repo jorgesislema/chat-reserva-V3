@@ -1,0 +1,252 @@
+{
+ "checks": [
+  {
+   "check": "comportamiento: claro->oscuro->claro",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "comportamiento: persiste en localStorage",
+   "ok": true,
+   "detail": "stored=light"
+  },
+  {
+   "check": "comportamiento: persiste tras recargar",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "comportamiento: persiste al navegar a catalog",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "claro: tema activo",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "claro: select Tipo texto/fondo legible",
+   "ok": true,
+   "detail": "ratio=12.74 bg=rgb(255, 255, 255) fg=rgb(24, 56, 49)"
+  },
+  {
+   "check": "claro: option seleccionada legible",
+   "ok": true,
+   "detail": "ratio=12.736090889775612"
+  },
+  {
+   "check": "claro: boton de tema contraste",
+   "ok": true,
+   "detail": "ratio=11.54 bg=rgb(237, 246, 239) fg=rgb(24, 56, 49)"
+  },
+  {
+   "check": "claro: nombre completo en la celda (scrollWidth)",
+   "ok": true,
+   "detail": "sw=378 w=378 len=58"
+  },
+  {
+   "check": "oscuro: tema activo",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "oscuro: select Tipo texto/fondo legible",
+   "ok": true,
+   "detail": "ratio=14.40 bg=rgb(20, 28, 24) fg=rgb(227, 236, 230)"
+  },
+  {
+   "check": "oscuro: option legible",
+   "ok": true,
+   "detail": "ratio=14.397420291749835"
+  },
+  {
+   "check": "oscuro: boton de tema contraste",
+   "ok": true,
+   "detail": "ratio=10.98 bg=rgb(36, 51, 44) fg=rgb(227, 236, 230)"
+  },
+  {
+   "check": "edicion: nombre guardado y persistente tras recargar",
+   "ok": true,
+   "detail": "v='Nombre editado en verificacion ronda D'"
+  },
+  {
+   "check": "movil claro: sin overflow horizontal global",
+   "ok": true,
+   "detail": "scrollWidth=414"
+  },
+  {
+   "check": "movil claro: cabecera marca/usuario/tema/salida sin solapamiento",
+   "ok": true,
+   "detail": "{\"boton\": {\"x\": 16, \"y\": 140.46875, \"w\": 108.484375, \"h\": 42, \"text\": \"Modo oscuro\"}, \"user\": {\"x\": 136.484375, \"y\": 151.390625, \"w\": 80.71875, \"h\": 20.140625, \"text\": \"Admin Demo\"}, \"form\": {\"x\": 305.5625, \"y\": 144.96875, \"w\": 91.4375, \"h\": 33, \"text\": \"Cerrar sesi\\u00f3n \\u2192\"}}"
+  },
+  {
+   "check": "movil oscuro: cabecera sin solapamiento",
+   "ok": true,
+   "detail": "{\"boton\": {\"x\": 16, \"y\": 140.46875, \"w\": 108.484375, \"h\": 42}, \"user\": {\"x\": 136.484375, \"y\": 151.390625, \"w\": 80.71875, \"h\": 20.140625}, \"form\": {\"x\": 305.5625, \"y\": 144.96875, \"w\": 91.4375, \"h\": 33}, \"overlap\": false}"
+  },
+  {
+   "check": "movil oscuro: sin overflow horizontal global",
+   "ok": true,
+   "detail": "scrollWidth=414"
+  }
+ ],
+ "mediciones": [
+  {
+   "control": "select-tipo",
+   "tema": "claro",
+   "bg": "rgb(255, 255, 255)",
+   "fg": "rgb(24, 56, 49)",
+   "ratio": 12.736090889775612,
+   "borde": "rgb(204, 216, 207)"
+  },
+  {
+   "control": "select-option",
+   "tema": "claro",
+   "bg": "rgb(255, 255, 255)",
+   "fg": "rgb(24, 56, 49)",
+   "ratio": 12.736090889775612
+  },
+  {
+   "control": "theme-toggle",
+   "tema": "claro",
+   "bg": "rgb(237, 246, 239)",
+   "fg": "rgb(24, 56, 49)",
+   "ratio": 11.541088267717807,
+   "borde": "rgb(225, 232, 227)"
+  },
+  {
+   "control": "nombre-catalogo",
+   "tema": "claro",
+   "w": 378,
+   "sw": 378,
+   "v": "Limpieza dental profunda con ultrasonido y pulido completo",
+   "title": "Limpieza dental profunda con ultrasonido y pulido completo",
+   "visible_total": true
+  },
+  {
+   "control": "select-tipo",
+   "tema": "oscuro",
+   "bg": "rgb(20, 28, 24)",
+   "fg": "rgb(227, 236, 230)",
+   "ratio": 14.397420291749835,
+   "borde": "rgb(59, 79, 69)"
+  },
+  {
+   "control": "select-option",
+   "tema": "oscuro",
+   "bg": "rgb(20, 28, 24)",
+   "fg": "rgb(227, 236, 230)",
+   "ratio": 14.397420291749835,
+   "borde": "rgb(227, 236, 230)"
+  },
+  {
+   "control": "theme-toggle",
+   "tema": "oscuro",
+   "bg": "rgb(36, 51, 44)",
+   "fg": "rgb(227, 236, 230)",
+   "ratio": 10.9829265202029,
+   "borde": "rgb(59, 79, 69)"
+  },
+  {
+   "control": "cabecera-movil",
+   "tema": "claro",
+   "boton": {
+    "x": 16,
+    "y": 140.46875,
+    "w": 108.484375,
+    "h": 42,
+    "text": "Modo oscuro"
+   },
+   "user": {
+    "x": 136.484375,
+    "y": 151.390625,
+    "w": 80.71875,
+    "h": 20.140625,
+    "text": "Admin Demo"
+   },
+   "form": {
+    "x": 305.5625,
+    "y": 144.96875,
+    "w": 91.4375,
+    "h": 33,
+    "text": "Cerrar sesión →"
+   },
+   "overlap": false
+  },
+  {
+   "control": "cabecera-movil",
+   "tema": "oscuro",
+   "boton": {
+    "x": 16,
+    "y": 140.46875,
+    "w": 108.484375,
+    "h": 42
+   },
+   "user": {
+    "x": 136.484375,
+    "y": 151.390625,
+    "w": 80.71875,
+    "h": 20.140625
+   },
+   "form": {
+    "x": 305.5625,
+    "y": 144.96875,
+    "w": 91.4375,
+    "h": 33
+   },
+   "overlap": false
+  }
+ ],
+ "capturas": [
+  {
+   "archivo": "01-login.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "02-catalogo-claro.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "04-select-tipo-claro.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "12-tema-boton-claro.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "14-nombres-editables-claro.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "03-catalogo-oscuro.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "05-select-tipo-oscuro.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "13-tema-boton-oscuro.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "10-catalogo-movil-claro.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "08-cabecera-movil-claro.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "09-cabecera-movil-oscuro.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "11-catalogo-movil-oscuro.png",
+   "tema_verificado": "dark"
+  }
+ ],
+ "errores_js": []
+}

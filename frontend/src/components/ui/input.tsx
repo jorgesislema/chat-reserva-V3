@@ -24,12 +24,11 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           className={cn(
             'input',
             error && 'border-red-500 focus:border-red-500 focus:ring-red-500/20',
-            props.className
+            className
           )}
           aria-invalid={error ? 'true' : 'false'}
           aria-describedby={error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined}
           {...props}
-          ref={ref}
         />
         {error && (
           <p id={`${inputId}-error`} className="mt-1.5 text-sm text-red-600 dark:text-red-400" role="alert">

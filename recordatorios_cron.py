@@ -144,12 +144,12 @@ def enviar_recordatorio(telefono: str, nombre: str, hora_cita: str) -> bool:
         f"Te esperamos! "
     )
 
-    headers = {
+    headers: dict[str, str] = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
         "Content-Type": "application/json",
     }
 
-    payload = {
+    payload: dict[str, Any] = {
         "messaging_product": "whatsapp",
         "to": telefono,
         "type": "text",

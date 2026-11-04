@@ -30,6 +30,14 @@ def crm(tmp_path):
                        (role + '@example.com', role, generate_password_hash('correct-password-123'), role))
         db.execute("INSERT INTO crm_accounts VALUES (1,'service@example.com','GOOGLE_TEST','Test')")
         db.execute("INSERT INTO crm_professionals(id,name,specialty,email,calendar_id,account_id) VALUES (1,'Ana','General','ana@example.com','ana-calendar',1)")
+        # check_window resuelve el horario efectivo desde crm_settings (no de
+        # app.config['PROFILE']): sembrar el mismo 24×7 del perfil mantiene la
+        # promesa G01 del fixture (pruebas de solapes independientes de la hora).
+        import json as _json
+        db.execute("INSERT INTO crm_settings(key,value,updated_at) VALUES ('negocio_horarios', ?, ?)",
+                   (_json.dumps({str(d): ['00:00', '24:00'] for d in range(7)}), now()))
+        db.execute("INSERT INTO crm_settings(key,value,updated_at) VALUES ('negocio_zona', 'America/Guayaquil', ?)",
+                   (now(),))
     return app
 
 

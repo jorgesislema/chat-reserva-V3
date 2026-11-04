@@ -1,0 +1,27 @@
+# CRM WhatsApp — servidor web (waitress). Expone /webhook, /health, /ready.
+# Se sirve SOLO en 127.0.0.1; Caddy es el único front HTTPS público.
+
+[Unit]
+Description=CRM WhatsApp - servidor web (serve_crm.py, waitress)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chatdental
+Group=chatdental
+WorkingDirectory=/opt/chatdental-crm
+EnvironmentFile=/etc/chatdental-crm/crm.env
+Environment=CRM_HOST=127.0.0.1
+Environment=CRM_PORT=8080
+Environment=CRM_THREADS=8
+ExecStart=/opt/chatdental-crm/.venv/bin/python serve_crm.py
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=crm-web
+
+[Install]
+WantedBy=multi-user.target

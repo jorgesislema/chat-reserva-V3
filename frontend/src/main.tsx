@@ -6,7 +6,6 @@ import { Toaster } from '@/components/ui/toaster'
 import { AuthProvider } from '@/lib/auth'
 import { QueryProvider } from '@/lib/query'
 import { ThemeProvider } from '@/lib/theme'
-import { AuthGuard } from '@/components/auth/AuthGuard'
 import { App } from './App'
 import './index.css'
 
@@ -36,10 +35,8 @@ createRoot(document.getElementById('root')!).render(
         <ThemeProvider>
           <AuthProvider>
             <QueryProvider client={queryClient}>
-              <AuthGuard>
-                <App />
-                <Toaster />
-              </AuthGuard>
+              <App />
+              <Toaster />
             </QueryProvider>
           </AuthProvider>
         </ThemeProvider>

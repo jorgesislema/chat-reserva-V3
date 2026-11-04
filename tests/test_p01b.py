@@ -117,7 +117,7 @@ def test_concurrent_initialize_serialized_without_duplicates(tmp_path):
         thread.join()
 
     assert errors == []
-    assert _versions(path) == [1, 2, 3, 4]
+    assert _versions(path) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     assert _table_exists(path, 'crm_appointments')
 
 
@@ -135,13 +135,13 @@ def test_legacy_user_version_and_adoption_preserved(tmp_path):
     with connect(legacy) as db:
         assert db.execute('PRAGMA user_version').fetchone()[0] == 7
         assert db.execute('SELECT COUNT(*) FROM crm_leads').fetchone()[0] == 1
-    assert _versions(legacy) == [1, 2, 3, 4]
+    assert _versions(legacy) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
     fresh = str(tmp_path / 'fresh.db')
     initialize(fresh)
     with connect(fresh) as db:
         assert db.execute('PRAGMA user_version').fetchone()[0] == 0
-    assert _versions(fresh) == [1, 2, 3, 4]
+    assert _versions(fresh) == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
 
 # --- R3: respaldo/restauración consistente --------------------------------

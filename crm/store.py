@@ -722,6 +722,37 @@ def _migration_018_c02_outbox_cancelar(db):
     db.execute('ALTER TABLE crm_audit ADD COLUMN detail TEXT')
 
 
+def _migration_019_c02_chat_memoria(db):
+    """v19 — memoria ACOTADA del chat interno multi-turno (punto 6 C02).
+
+    Guarda los últimos turnos de cada conversación del chat interno
+    (pregunta, búsqueda resuelta con referencias, respuesta y las fuentes
+    REALES citadas) para resolver referencias entre turnos («¿y ese cuánto
+    cuesta?») y VOLVER a recuperar las fuentes actuales en cada turno. La
+    memoria es por conversación (id propio del chat interno, no el de
+    crm_conversations del canal), por rol (un rol sin permiso jamás ve el
+    historial de un rol con acceso) y por negocio (la base es por negocio).
+    La poda de turnos viejos se aplica al guardar; nunca se envían
+    conversaciones completas al proveedor."""
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_c02_chat_memory (
+             id INTEGER PRIMARY KEY,
+             conversation_id TEXT NOT NULL,
+             turno INTEGER NOT NULL,
+             role TEXT NOT NULL,
+             user_id INTEGER,
+             question TEXT NOT NULL,
+             question_busqueda TEXT NOT NULL,
+             answer TEXT NOT NULL,
+             fuentes TEXT NOT NULL DEFAULT '[]',
+             abstencion INTEGER NOT NULL DEFAULT 0,
+             created_at TEXT NOT NULL,
+             UNIQUE(conversation_id, turno))""")
+    db.execute(
+        """CREATE INDEX IF NOT EXISTS crm_c02_chat_memory_conv
+           ON crm_c02_chat_memory(conversation_id, turno)""")
+
+
 def _migration_015_c02_biblioteca(db):
     """v15 — Biblioteca de recursos privados y plantillas WhatsApp (requisito
     del punto 5, 2026-10-29). NO sustituye al historial de envíos (outbox).
@@ -825,6 +856,7 @@ MIGRATIONS = [
     (16, _migration_016_c02_atencion_reclamos),
     (17, _migration_017_c02_peligro_evidencia),
     (18, _migration_018_c02_outbox_cancelar),
+    (19, _migration_019_c02_chat_memoria),
 ]
 
 _CRM_TABLES = ('crm_users', 'crm_professionals', 'crm_appointments', 'crm_leads')

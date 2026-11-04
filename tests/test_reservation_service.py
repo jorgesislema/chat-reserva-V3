@@ -371,7 +371,7 @@ def test_migrations_idempotent_preserve_and_equivalent(tmp_path):
     with connect(path) as conn:
         assert conn.execute('SELECT COUNT(*) FROM crm_leads').fetchone()[0] == 1
         versions = conn.execute('SELECT version FROM crm_migrations').fetchall()
-        assert [v[0] for v in versions] == [1, 2, 3, 4]
+        assert [v[0] for v in versions] == [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
 
     # Adopción de una base con esquema CRM previo pero sin crm_migrations
     legacy = str(tmp_path / 'legacy.db')
@@ -386,7 +386,7 @@ def test_migrations_idempotent_preserve_and_equivalent(tmp_path):
     initialize(legacy)
     with connect(legacy) as conn:
         assert conn.execute('SELECT COUNT(*) FROM crm_leads').fetchone()[0] == 1
-        assert conn.execute('SELECT COUNT(*) FROM crm_migrations').fetchone()[0] == 4
+        assert conn.execute('SELECT COUNT(*) FROM crm_migrations').fetchone()[0] == 11
         # No se pisó la versión legacy de otras tablas
         assert conn.execute('PRAGMA user_version').fetchone()[0] == 0
 

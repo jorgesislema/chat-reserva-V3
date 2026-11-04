@@ -10,14 +10,14 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../backend/static',
+    outDir: 'dist',
     emptyOutDir: true,
   },
   server: {
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://127.0.0.1:8090',
         changeOrigin: true,
       },
     },
