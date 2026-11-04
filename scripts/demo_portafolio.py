@@ -10,7 +10,7 @@ Reglas de esta demo:
 - NO cambia .env ni la base operativa; exporta CRM_DATABASE y CRM_PERFIL_NEGOCIO.
 - NO contacta Meta/WhatsApp ni ningún proveedor IA: CRM_CHAT_PROVEEDOR=simulado
   (selección EXPLÍCITA de desarrollo/demo; el modo operativo rechaza simular).
-- NO publica puertos: solo 127.0.0.1:8050 (loopback).
+- NO publica puertos: solo 127.0.0.1:8051 (loopback).
 
 Uso:
     python scripts/demo_portafolio.py
@@ -140,7 +140,8 @@ def main() -> int:
     _sembrar(str(DB))
 
     print('')
-    print('MiOrquestador (demo portafolio): http://127.0.0.1:8050')
+    print('DEMO ANTIGUA (marcas [DEMO]) — no es la instalación de presentación.')
+    print('MiOrquestador (demo portafolio): http://127.0.0.1:8051')
     print(f'  Usuario:  {EMAIL}')
     print('  Contraseña (única para este arranque, visible sólo en esta terminal):')
     print(f'  >>> {demo_password} <<<')
@@ -149,7 +150,7 @@ def main() -> int:
     print('  Asistente IA: MODO SIMULADO (sin llamadas al proveedor real).')
     print('  Aviso: demo antigua con marcas [DEMO]. Para la presentación use demo_presentacion.py.')
     app = create_app(cfg)
-    app.run(host='127.0.0.1', port=8050, debug=False)
+    app.run(host='127.0.0.1', port=8051, debug=False)
     return 0
 
 
