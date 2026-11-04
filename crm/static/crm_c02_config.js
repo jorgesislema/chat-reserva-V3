@@ -160,7 +160,7 @@
       });
       var txt = document.createElement('span');
       txt.textContent = esp.nombre + (esp.especialidad ? ' (' + esp.especialidad + ')' : '');
-      lab.appendChild(chk); lab.appendChild(txt);
+      lab.appendChild(txt); lab.appendChild(chk);
       espBox.appendChild(lab);
     });
   }

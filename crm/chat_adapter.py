@@ -461,8 +461,9 @@ class AdaptadorRemotoConfigurable(ChatAdapter):
         if agenda:
             nombres = ', '.join(p['name'] for p in (agenda.get('profesionales') or [])) \
                 or 'ninguno aún'
-            cita = (f'Estado de agenda: {agenda.get("citas_abiertas", 0)} cita(s) '
-                    f'abierta(s). Profesionales: {nombres}.')
+            cita = (agenda.get('texto') or
+                    (f'Estado de agenda: {agenda.get("citas_abiertas", 0)} cita(s) '
+                     f'abierta(s). Profesionales: {nombres}.'))
             if agenda.get('proxima'):
                 cita += (' Próxima cita confirmada: {prof} a las {start}.'
                          .format(**agenda['proxima']))

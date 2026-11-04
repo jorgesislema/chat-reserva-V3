@@ -130,6 +130,15 @@ PLANTILLAS = [
 ]
 
 
+def _puerto_libre(host='127.0.0.1', puerto=8050) -> bool:
+    import socket
+    with socket.socket() as s:
+        try:
+            s.bind((host, puerto))
+            return True
+        except OSError:
+            return False
+
 def _limpiar() -> None:
     for p in (DB, Path(str(DB) + '-wal'), Path(str(DB) + '-shm')):
         if p.exists():
@@ -415,6 +424,11 @@ def main() -> int:
     arena = Path(str(DB) + '.simulador.db')
     if arena.exists():
         arena.unlink()
+
+    if not _puerto_libre():
+        print('El puerto 8050 está ocupado por otra aplicación.')
+        print('Cierre scripts\\demo_frontend.py o la demo antigua y vuelva a intentarlo.')
+        return 1
 
     app = create_app(cfg)
     # Un demo no debe dejar fuera a quien prueba: cada arranque limpia los

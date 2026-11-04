@@ -1815,25 +1815,75 @@ def kb_search(path, query, limit=4):
 
 
 def _agenda_summary(path):
-    from datetime import datetime, timezone as _tz
+    """Resumen operativo SIN datos de clientes: profesionales, próxima cita y
+    cuántas hay hoy y mañana.
+
+    Los estados del CRM están en español ('pendiente', 'confirmada', ...); antes
+    se consultaban en inglés y el resumen siempre devolvía cero.
+    """
+    from datetime import datetime, timedelta, timezone as _tz
+    from zoneinfo import ZoneInfo
+
+    zona = 'America/Guayaquil'
+    try:
+        with connect(path) as conn:
+            fila = conn.execute(
+                "SELECT value FROM crm_settings WHERE key='timezone'").fetchone()
+        if fila and fila['value']:
+            zona = fila['value']
+    except Exception:  # noqa: BLE001 - si no hay ajuste, zona por defecto
+        pass
+
+    ahora_local = datetime.now(ZoneInfo(zona))
+    hoy = ahora_local.date()
+    manana = hoy + timedelta(days=1)
     stamp = datetime.now(_tz.utc).isoformat()
+
     with connect(path) as conn:
         profs = conn.execute(
             'SELECT name FROM crm_professionals WHERE active=1 ORDER BY name').fetchall()
         next_citas = conn.execute(
             """SELECT p.name AS prof, a.start FROM crm_appointments a
                JOIN crm_professionals p ON p.id=a.professional_id
-               WHERE a.operational_status='confirmed' AND a.start>?
+               WHERE a.status='active' AND a.start>?
                ORDER BY a.start LIMIT 1""", (stamp,)).fetchone()
-    # Para hoy/mañana contar citas abiertas ayuda a dar contexto operativo.
-    citas_abiertas = 0
-    with connect(path) as conn:
-        citas_abiertas = conn.execute(
-            "SELECT COUNT(*) FROM crm_appointments WHERE operational_status IN "
-            "('pending','confirmed')").fetchone()[0]
+        filas = conn.execute(
+            "SELECT start FROM crm_appointments WHERE status='active' AND start>=?",
+            (datetime.combine(hoy, datetime.min.time(), ZoneInfo(zona))
+             .astimezone(_tz.utc).isoformat(),)).fetchall()
+
+    citas_hoy = citas_manana = 0
+    for fila in filas:
+        try:
+            dia = datetime.fromisoformat(fila['start']).astimezone(ZoneInfo(zona)).date()
+        except (TypeError, ValueError):
+            continue
+        if dia == hoy:
+            citas_hoy += 1
+        elif dia == manana:
+            citas_manana += 1
+
+    nombres = ', '.join(p['name'] for p in profs) or 'sin profesionales activos'
+    if next_citas:
+        try:
+            cuando = (datetime.fromisoformat(next_citas['start'])
+                      .astimezone(ZoneInfo(zona)).strftime('%d/%m a las %H:%M'))
+        except (TypeError, ValueError):
+            cuando = 'sin fecha'
+        proxima = '%s con %s' % (cuando, next_citas['prof'])
+    else:
+        proxima = 'ninguna'
+    texto = ('Agenda: %d citas hoy (%s) y %d mañana (%s). Próxima: %s. '
+             'Profesionales activos: %s. El detalle con nombres de pacientes está '
+             'en la pantalla de agenda, no en este chat.'
+             % (citas_hoy, hoy.strftime('%d/%m'), citas_manana, manana.strftime('%d/%m'),
+                proxima, nombres))
     return {'profesionales': [dict(p) for p in profs],
             'proxima': dict(next_citas) if next_citas else None,
-            'citas_abiertas': citas_abiertas}
+            'citas_hoy': citas_hoy, 'citas_manana': citas_manana,
+            'citas_abiertas': citas_hoy + citas_manana,
+            'hoy': hoy.isoformat(), 'manana': manana.isoformat(),
+            'texto': texto}
 
 
 # ---------------------------------------------------------------------------
@@ -2107,14 +2157,6 @@ def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
         return {'ok': False, 'error': f'Error del adaptador: {exc}', 'answer': '',
                 'modo': getattr(adaptador, 'modo', '')}
     fuentes = [f.a_dict() for f in resp.fuentes]
-    # Blindaje de citas: si la respuesta cita una fuente que no existe, no se
-    # publica: se sustituye por la abstención estándar. Evita que un modelo
-    # real «adorne» la respuesta con referencias inventadas.
-    citas = [int(n) for n in re.findall(r'\[(\d{1,2})\]', resp.answer or '')]
-    if citas and max(citas) > len(fuentes):
-        resp.answer = ('No encuentro información suficiente en el contexto autorizado '
-                       'para responder con certeza.')
-        resp.abstencion = True
     # El turno se guarda TRAS responder y NUNCA tumba el chat: con su pregunta
     # original, la búsqueda resuelta y las fuentes reales citadas.
     turno_guardado = None

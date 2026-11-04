@@ -64,14 +64,15 @@ def main() -> int:
         print('[demo] aviso al rellenar datos demo: %s' % exc)
 
     print('')
-    print('Interfaz de demostración: http://127.0.0.1:8050')
+    print('DEMO DE FRONTEND (antigua) — no es la instalación de presentación.')
+    print('Interfaz de demostración: http://127.0.0.1:8052')
     print(f'  Usuario:      {EMAIL}')
     print('  Contraseña (única para este arranque, visible sólo en esta terminal):')
     print(f'  >>> {demo_password} <<<')
     print(f'  Base temporal: {DB}')
     print('  Datos ficticios (seed_demo_crm): se descartan al cerrar esta terminal.')
     app = create_app({'TESTING': False, 'DATABASE': str(DB), 'SECRET_KEY': secret})
-    app.run(host='127.0.0.1', port=8050, debug=False)
+    app.run(host='127.0.0.1', port=8052, debug=False)
     return 0
 
 

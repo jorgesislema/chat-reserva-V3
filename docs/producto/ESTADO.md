@@ -3560,3 +3560,27 @@ bases temporales ignoradas por git (`.pytest_cache/`): ninguna credencial ajena 
   (arranque, contraseña, estado por áreas, decisiones y pendientes ordenados).
 - Pendiente inmediato: confirmar antes de crear la cita, responder «no» con alternativas y
   derivar a una persona tras dos malentendidos.
+
+## 2026-11-04 — CHAT ARREGLADO, PANTALLAS ORDENADAS Y PLANTILLA DE CARGA
+
+- **Chat interno**: fallaba por dos motivos. (1) El resumen de agenda consultaba estados en
+  inglés (`confirmed`) y la base guarda `confirmada`, así que devolvía siempre 0 citas; ahora
+  usa los estados reales y añade citas de hoy y de mañana. (2) El blindaje de citas que se
+  añadió antes convertía respuestas válidas en abstención; **retirado**. Verificado:
+  «¿Qué horarios tienen?» → horario con fuente; «¿cuántas citas hay mañana?» → «Hay 20 citas
+  mañana (05/11)».
+- **Puerto 8050**: lo ocupaba `demo_frontend.py` y por eso la app buena no arrancaba y el login
+  fallaba. `demo_frontend.py` pasa al **8052** y `demo_presentacion.py` avisa si el puerto está
+  ocupado. (La demo antigua ya estaba en 8051.)
+- **Cuentas Google**: eliminada del menú, del Resumen y del panel; `/accounts` sigue
+  devolviendo 403 a quien no es administrador.
+- **Profesionales**: botón «Dar de baja» visible en cada ficha, con reasignación de citas futuras.
+- **Especialistas y disponibilidad**: fila legible (nombre a la izquierda, casilla a la derecha).
+- **Historial de envíos**: los envíos cancelados ya no se listan.
+- **Catálogo**: la tabla se desplaza en horizontal (ancho mínimo 940 px).
+- **Plantilla de carga**: `docs/entregables/PLANTILLA_CARGA.xlsx` con hojas de instrucciones y
+  columnas reales para catálogo (las 8 que importa el sistema), conocimiento, biblioteca y
+  plantillas de WhatsApp.
+- **Pendiente**: franja de almuerzo en horario y fechas cerradas; confirmar antes de crear la
+  cita; responder «no» tras reservar; programador de recordatorios.
+- Pruebas: `test_crm` y `test_c02_frontend` → **33 pasan**.

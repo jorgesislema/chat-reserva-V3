@@ -517,6 +517,22 @@ def create_app(test_config=None):
             movidas += 1
         return movidas, sin_hueco
 
+    @app.post('/professionals/<int:identifier>/baja')
+    @protected(admin=True)
+    def professional_baja(identifier):
+        """Da de baja al profesional y reparte sus citas futuras entre los demás."""
+        with db() as conn:
+            prof = conn.execute('SELECT id, name FROM crm_professionals WHERE id=?',
+                                (identifier,)).fetchone()
+            if not prof:
+                abort(404)
+            conn.execute('UPDATE crm_professionals SET active=0 WHERE id=?', (identifier,))
+            movidas, sin_hueco = _reasignar_citas_futuras(conn, identifier)
+            audit(conn, g.user['id'], 'Baja de profesional: %s' % prof['name'])
+        flash('%s queda inactivo. Citas futuras: %d reasignadas y %d sin hueco.'
+              % (prof['name'], movidas, sin_hueco), 'info')
+        return redirect(url_for('home', tab='team'))
+
     @app.post('/professionals')
     @protected(admin=True)
     def professional_save():

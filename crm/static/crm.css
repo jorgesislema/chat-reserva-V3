@@ -363,3 +363,10 @@ input:disabled,select:disabled,textarea:disabled{background:#eef2ef;color:#7a8e8
 /* Enlaces legales (privacidad, terminos, eliminacion de datos) */
 .legal-links{font-size:11.5px;color:#6b7d72;margin:10px 0 0;line-height:1.6}
 .legal-links a{color:inherit;text-decoration:underline}
+
+/* Especialistas: fila con nombre a la izquierda y casilla a la derecha */
+.c02-esp-item{justify-content:space-between;padding:10px 14px;border:1px solid var(--line);
+  border-radius:9px;margin:0 0 8px;background:#fff}
+.c02-esp-item input{width:18px;height:18px;margin:0;flex:0 0 auto}
+/* Catálogo: la tabla ancha se desplaza en horizontal */
+#c02-cat-table{min-width:940px}

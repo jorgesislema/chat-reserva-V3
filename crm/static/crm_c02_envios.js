@@ -96,6 +96,7 @@
 
   function pintar() {
     var items = itemsCache.filter(function (it) {
+      if (String(it.state || '') === 'cancelado') { return false; }
       return !filtro || filtro.value === 'todos' || it.channel === filtro.value;
     });
     table.hidden = items.length === 0;

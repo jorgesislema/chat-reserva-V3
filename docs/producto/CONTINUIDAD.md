@@ -52,6 +52,8 @@ porque el CI seguiría rojo por 5 pruebas preexistentes).
 
 ## Pendiente, por orden
 
+0. **Franja de almuerzo** en «Fechas cerradas y excepciones» (si se deja en blanco, no
+   cierra): pendiente de la última revisión del propietario.
 1. **Confirmar antes de crear la cita** (hoy crea y luego pregunta «¿le va bien?»). Cambia
    la máquina de estados del diálogo y ~29 aserciones de pruebas: hacerlo con tiempo.
 2. **Responder «no» tras reservar** con alternativas y reprogramación automática.
