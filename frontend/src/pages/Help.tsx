@@ -2,10 +2,8 @@
 
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Search, ExternalLink, ChevronDown, ChevronUp, HelpCircle, Shield, Lock, Users, Mail, Phone, Globe } from 'lucide-react'
+import { Search, ChevronDown, HelpCircle, Mail, Phone, Globe } from 'lucide-react'
 import { useState } from 'react'
-import { cn } from '@/utils'
 
 const faqs = [
   {
@@ -45,11 +43,13 @@ const faqs = [
 export function Help() {
   const [search, setSearch] = useState('')
 
-  const filteredFaqs = faqs.flatMap(category =>
-    category.items
-      .filter(item => item.q.toLowerCase().includes(search.toLowerCase()) || item.a.toLowerCase().includes(search.toLowerCase()))
-      .map(item => ({ ...item, category: category.category }))
-  )
+  const showCategory = (category: { items: { q: string; a: string }[] }): boolean => {
+    if (!search.trim()) return true
+    const needle = search.toLowerCase()
+    return category.items.some(
+      (item) => item.q.toLowerCase().includes(needle) || item.a.toLowerCase().includes(needle)
+    )
+  }
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -64,17 +64,17 @@ export function Help() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-text-muted" />
             <input
               type="text"
+              value={search}
               placeholder="Buscar en la ayuda..."
               className="w-full pl-10 pr-4 py-3 border border-border rounded-lg bg-surface focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
-              placeholder="Buscar en la ayuda..."
-              onChange={e => {}}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
         </CardContent>
       </Card>
 
       <div className="space-y-4">
-        {faqs.map(category => (
+        {faqs.filter(showCategory).map((category) => (
           <Card key={category.category} className="overflow-hidden">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2">
@@ -108,8 +108,8 @@ export function Help() {
             <Mail className="h-10 w-10 mx-auto text-primary-600 dark:text-primary-400 mb-3" />
             <h3 className="font-semibold text-text-primary mb-1">Email</h3>
             <p className="text-text-secondary text-sm mb-3">soporte@saas-reservas.com</p>
-            <Button variant="outline" className="w-full" asChild>
-              <a href="mailto:soporte@saas-reservas.com">Escribir email</a>
+            <Button variant="outline" className="w-full" onClick={() => window.location.href = 'mailto:soporte@saas-reservas.com'}>
+              Escribir email
             </Button>
           </Card>
           <Card className="p-6 text-center hover:shadow-card-hover transition-shadow">
@@ -122,8 +122,8 @@ export function Help() {
             <Globe className="h-10 w-10 mx-auto text-primary-600 dark:text-primary-400 mb-3" />
             <h3 className="font-semibold text-text-primary mb-1">Documentación</h3>
             <p className="text-text-secondary text-sm mb-3">Guías, API docs y tutoriales</p>
-            <Button variant="outline" className="w-full" asChild>
-              <a href="/docs" target="_blank" rel="noopener noreferrer">Ver docs</a>
+            <Button variant="outline" className="w-full" onClick={() => window.open('/docs', '_blank', 'noopener,noreferrer')}>
+              Ver docs
             </Button>
           </Card>
         </div>
@@ -131,5 +131,3 @@ export function Help() {
     </div>
   )
 }
-
-export { Help }

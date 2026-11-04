@@ -1,0 +1,8 @@
+# CRM WhatsApp — HTTPS automático (Let's Encrypt) hacia el backend local.
+# El script de despliegue sustituye WEBHOOK_DOMINIO_PLACEHOLDER por el dominio real.
+# Requisito previo: registro A de <dominio> apuntando a la IP pública del VPS.
+
+WEBHOOK_DOMINIO_PLACEHOLDER {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8080
+}

@@ -221,5 +221,3 @@ export function Alerts() {
     </div>
   )
 }
-
-export { Alerts }

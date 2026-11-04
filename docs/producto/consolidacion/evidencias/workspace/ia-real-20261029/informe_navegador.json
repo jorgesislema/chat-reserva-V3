@@ -1,0 +1,45 @@
+{
+ "checks": [
+  {
+   "check": "respuesta real fundamentada (08:00 y 18:00 en la respuesta)",
+   "ok": true,
+   "detail": "extiende su horario de atención hasta las 20:00 de lunes a viernes [2].\nDocumento/registro: Guia de la clinica Sonrisa Ficticia · versión 1\nConocimiento: Guia de la clinica Sonrisa Ficticia · ID 1 · v1\nConocimiento: Horario extendido diciembre 2026 · ID 4 · v1"
+  },
+  {
+   "check": "badge con fuente y proveedor conectado",
+   "ok": true,
+   "detail": "fuente: Conocimiento · proveedor de IA conectado"
+  },
+  {
+   "check": "recarga: el servidor sigue respondiendo con IA real",
+   "ok": true,
+   "detail": "badge post-recarga: conexión KB + agenda"
+  },
+  {
+   "check": "sin claves en el HTML",
+   "ok": true,
+   "detail": "scan OK"
+  },
+  {
+   "check": "sin claves en consola/errores JS",
+   "ok": true,
+   "detail": "scan OK"
+  },
+  {
+   "check": "cero errores JavaScript",
+   "ok": true,
+   "detail": "sin errores"
+  },
+  {
+   "check": "consulta de stock responde con datos de la BD",
+   "ok": true,
+   "detail": ".\nDocumento/registro: Cepillo dental electrico recargable · versión 1 · CEP-0002\nStock (BD): Cepillo dental electrico recargable · ID 2 · v1 · CEP-0002\nCatálogo: Cepillo dental electrico recargable · ID 2 · v1 · CEP-0002"
+  }
+ ],
+ "navegador": {
+  "tipo": "chromium",
+  "version": "140.0.7339.16"
+ },
+ "errores_js": [],
+ "resumen": "7/7 checks OK"
+}

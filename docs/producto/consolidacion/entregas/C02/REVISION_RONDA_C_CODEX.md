@@ -1,0 +1,6 @@
+## Revisión independiente ronda C — 2026-10-29 — REQUIERE AJUSTES VISUALES
+
+Se inspeccionó resultados_verificacion.json y capturas 11-catalogo-claro.png, 04-biblioteca-oscuro.png y 19-movil-agenda.png. Los 43 PASS son evidencia registrada del ejecutor, no repetición del revisor. Hay 22 PNG únicos; la lista de 24 capturas repite 01-login.png.
+Hallazgos visibles: 11-catalogo-claro.png muestra tema oscuro, por lo que no acredita tema claro. Selectores Tipo con fondo blanco y texto muy claro, ilegibles, contradicen la conclusión global de contraste; nombres de catálogo siguen cortados. En móvil el botón de tema tiene texto de poco contraste y el bloque de usuario/salida queda apretado. La comparación de muestras no acredita contraste de todos los controles/estados. La biblioteca sí es ahora una pantalla diferenciada del historial.
+PRÓXIMA ACCIÓN EXACTA: corregir contraste efectivo de selectores y botón de tema, legibilidad de nombres y cabecera móvil; capturar claro/oscuro verificando estilo computado de cada control y tema real antes de nombrar archivos. Mantener separado cierre visual de integración IA y cierre C02: no se aprueba C02 completo sólo con esta evidencia. Conservar resultados anteriores, documentar nuevos y no repetir WH/CH sin cambios afectados. Sin cambios funcionales del revisor.
+

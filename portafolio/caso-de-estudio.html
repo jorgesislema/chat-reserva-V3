@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Caso de estudio — MiOrquestador</title>
+<meta name="description" content="Plataforma de atención y reservas por negocio, desarrollada por Soluciones Digitales Ec. Demostración local con datos ficticios de una clínica dental de ejemplo.">
+<meta name="robots" content="noindex"><!-- quitar esta línea solo si se decide publicar -->
+<style>
+:root{
+  /* Caso de estudio editorial: una columna de lectura con galería navegable.
+     Paleta derivada de la marca interna de la app (verde tinta); acento único. */
+  --bg:#f4f7f3; --paper:#ffffff; --ink:#173229; --soft:#54695f;
+  --rule:#dde7df; --accent:#1b6f56; --accent-ink:#12503f; --wash:#e8f1e9;
+  --gold:#7c661f; --ok:#1b6f56; --warn:#8a6d1f; --risk:#a04437;
+  color-scheme:light;
+  --display:Georgia,'Times New Roman','Noto Serif',serif;
+  --body:'Segoe UI',system-ui,-apple-system,Arial,sans-serif;
+  --mono:ui-monospace,'Cascadia Mono',Consolas,'Courier New',monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#121d19; --paper:#1a2823; --ink:#e7efe9; --soft:#a4b8ad;
+    --rule:#2c3d36; --accent:#5cb595; --accent-ink:#8fd3b8; --wash:#223329;
+    --gold:#c2a45a; --ok:#5cb595; --warn:#c2a45a; --risk:#e08574;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#121d19; --paper:#1a2823; --ink:#e7efe9; --soft:#a4b8ad;
+  --rule:#2c3d36; --accent:#5cb595; --accent-ink:#8fd3b8; --wash:#223329;
+  --gold:#c2a45a; --ok:#5cb595; --warn:#c2a45a; --risk:#e08574;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:17px/1.62 var(--body);-webkit-font-smoothing:antialiased}
+.wrap{max-width:900px;margin:0 auto;padding:0 clamp(16px,4vw,36px) 72px}
+h1,h2,h3{font-family:var(--display);font-weight:650;text-wrap:balance;line-height:1.25}
+h1{font-size:clamp(31px,4.6vw,52px);letter-spacing:-.6px;margin:14px 0 18px}
+h2{font-size:clamp(23px,3vw,31px);margin:64px 0 18px}
+h3{font-size:19px;margin:26px 0 10px}
+p{margin:0 0 16px}
+a{color:var(--accent-ink)}
+:focus-visible{outline:3px solid var(--gold);outline-offset:3px;border-radius:4px}
+.muted{color:var(--soft)}
+.eyebrow{font:700 11.5px var(--mono);letter-spacing:2px;text-transform:uppercase;
+  color:var(--accent);margin:0}
+.topline{border-bottom:1px solid var(--rule)}
+footer .topline{border-top:1px solid var(--rule);border-bottom:none}
+.topline .wrap{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  padding-top:14px;padding-bottom:14px;max-width:1100px;padding-bottom:14px}
+.wordmark{font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-.2px}
+.wordmark .by{font:600 11px var(--mono);letter-spacing:1.6px;text-transform:uppercase;
+  color:var(--soft);display:block}
+.topline .rev{font:11.5px var(--mono);color:var(--soft)}
+.lede{font-size:19px;max-width:70ch}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;
+  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:20px 0;margin:34px 0 0}
+.strip div{min-width:0}
+.strip dt{font:700 10.5px var(--mono);letter-spacing:1.4px;text-transform:uppercase;color:var(--soft)}
+.strip dd{margin:5px 0 0;font-size:15px}
+.demo{background:var(--wash);border-left:4px solid var(--gold);border-radius:0 12px 12px 0;
+  padding:18px 22px;margin:34px 0 0;font-size:15px}
+.demo strong{font-family:var(--mono);font-size:12px;letter-spacing:1.2px;text-transform:uppercase}
+.rule{margin-top:64px}
+/* galería */
+.shotnav{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 10px}
+.chip{font:650 13px var(--mono);padding:7px 12px;border-radius:999px;border:1px solid var(--rule);
+  background:var(--paper);color:var(--soft);cursor:pointer}
+.chip.on,.chip[aria-current]{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip:hover{border-color:var(--accent)}
+.reader{background:var(--paper);border:1px solid var(--rule);border-radius:14px;padding:16px 18px;
+  margin:10px 0 26px}
+.reader-top{display:flex;align-items:center;gap:14px}
+.nav{width:42px;height:42px;flex:0 0 auto;border-radius:10px;border:1px solid var(--rule);
+  background:var(--paper);color:var(--accent-ink);font-size:19px;cursor:pointer}
+.nav:hover{background:var(--wash)}
+.cap{flex:1;min-width:0;margin:0;text-align:center;font-weight:650;font-size:15px}
+.cap .idx{display:block;font:600 11px var(--mono);color:var(--soft);letter-spacing:1px;
+  font-variant-numeric:tabular-nums}
+.frame{margin:14px 0 6px;border:1px solid var(--rule);border-radius:10px;background:var(--bg);
+  overflow-x:auto;max-height:66vh}
+.frame img{display:block;max-width:100%;height:auto;cursor:zoom-in}
+.meta{font-size:13.5px;color:var(--soft);margin:8px 4px 0}
+.hint{font-size:12px;color:var(--soft);margin:4px 4px 0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
+.cell{margin:0;background:var(--paper);border:1px solid var(--rule);border-radius:12px;
+  overflow:hidden;cursor:pointer}
+.cell.on{border-color:var(--accent);box-shadow:0 0 0 2px var(--wash)}
+.cell img{display:block;width:100%;height:150px;object-fit:cover;object-position:top left}
+.cell figcaption{padding:10px 12px 12px;font-size:12.5px;color:var(--soft);line-height:1.45}
+.cell figcaption b{font-family:var(--mono);font-size:11px;color:var(--accent)}
+.cell figcaption span{display:block;font:700 9.5px var(--mono);letter-spacing:1.2px;
+  text-transform:uppercase;color:var(--soft);margin:2px 0 6px}
+/* funciones / veredictos */
+.intro{max-width:66ch}
+.feature{display:grid;grid-template-columns:210px 1fr;gap:0 24px;padding:16px 0;
+  border-bottom:1px solid var(--rule)}
+.feature h3{margin:0}
+.feature p{margin:0}
+.feature .tag{font:600 11px var(--mono);color:var(--soft)}
+@media(max-width:640px){.feature{grid-template-columns:1fr;gap:4px}}
+.verdict{border-left:4px solid var(--rule);padding:6px 0 6px 20px;margin:26px 0}
+.verdict.ok{border-color:var(--ok)}
+.verdict.risk{border-color:var(--risk)}
+.verdict h3{display:flex;align-items:center;gap:10px;margin:0 0 10px}
+.verdict .dot{width:11px;height:11px;border-radius:50%;background:var(--ok);flex:0 0 auto}
+.verdict.risk .dot{background:var(--risk)}
+.verdict ul{margin:0;padding-left:20px}
+.verdict li{margin-bottom:8px}
+footer .wrap p{margin-bottom:6px}
+footer a{font-size:13.5px}
+</style>
+</head>
+<body>
+<div class="topline"><div class="wrap">
+  <div class="wordmark">MiOrquestador<span class="by">por Soluciones Digitales Ec.</span></div>
+  <p class="rev">Revisión local · sin publicar</p>
+</div></div>
+<main class="wrap">
+<section aria-labelledby="t1">
+  <p class="eyebrow">Caso de estudio · producto propio</p>
+  <h1 id="t1">Un solo panel para la agenda, la oferta y las conversaciones del negocio</h1>
+  <p class="lede"><strong>MiOrquestador</strong> reúne en un mismo espacio los datos que un negocio
+    necesita para atender: la agenda con sus profesionales, el catálogo de servicios y precios,
+    la base de conocimiento que consulta su asistente y la bandeja donde las conversaciones
+    pasan de la ayuda automática a una persona. Esta página muestra la <strong>demostración
+    local con datos ficticios</strong> y declara, por separado, qué está comprobado con un
+    proveedor de IA real y qué todavía no.</p>
+  <dl class="strip">
+    <div><dt>Plataforma</dt><dd>Web, autoalojada, un espacio por negocio</dd></div>
+    <div><dt>Adaptable a</dt><dd>Clínica de ejemplo; adaptación a otros rubros pendiente de validar</dd></div>
+    <div><dt>Negocio ejemplo</dt><dd>Clínica Dental Sonrisa (ficticio)</dd></div>
+    <div><dt>Desarrolla</dt><dd>Soluciones Digitales Ec.</dd></div>
+  </dl>
+  <div class="demo">
+    <strong>Datos de demostración</strong>
+    <p style="margin:8px 0 0">Las doce capturas provienen de una instalación local de la
+    aplicación con una base de datos temporal de prueba. La clínica, sus nombres, teléfonos y
+    precios son datos de prueba; la interfaz
+    muestra el aviso «Demostración — datos ficticios» en todas sus pantallas. Ninguna captura fue
+    retocada: son originales del navegador sobre la aplicación real.</p>
+  </div>
+</section>
+
+<section class="gallery" aria-labelledby="t2">
+  <h2 id="t2">Recorrido por la interfaz</h2>
+  <p>Doce capturas originales de la aplicación en ejecución: nueve de escritorio (1264 px)
+    y tres de teléfono (390 px). Use los chips numerados o las flechas para recorrerlas en el
+    visor; cada miniatura enlaza la misma captura a resolución completa.</p>
+  <div class="shotnav" role="group" aria-label="Selección de capturas"></div>
+  <div class="reader">
+    <div class="reader-top">
+      <button type="button" class="nav" id="prev" aria-label="Captura anterior">&#8592;</button>
+      <p class="cap"><span class="idx" id="cap-idx"></span><span id="cap-label"></span></p>
+      <button type="button" class="nav" id="next" aria-label="Captura siguiente">&#8594;</button>
+    </div>
+    <figure class="frame">
+      <a id="open-full" href="evidencias/01-login.png" target="_blank" rel="noopener"
+         aria-label="Abrir la captura actual en una pestaña a tamaño completo">
+        <img id="shot" src="evidencias/01-login.png" alt="">
+      </a>
+    </figure>
+    <p class="meta" id="cap-meta"></p>
+    <p class="hint">Teclado: ← y → recorren la galería. Haga clic en cualquier captura del visor o de la retícula para verla completa.</p>
+  </div>
+  <div class="grid" id="grid"></div>
+</section>
+
+<section aria-labelledby="t3">
+  <h2 id="t3">Funciones demostradas</h2>
+  <p class="intro">Cada función de esta lista aparece en al menos una captura original del recorrido.</p>
+  <div class="feature">
+    <h3>Panel del negocio</h3>
+    <p>Contactos registrados, conversión a cliente, valor estimado de las oportunidades y
+      seguimiento pendientes de atender, con el embudo por etapa y la alerta en vivo de
+      conversaciones que requieren a una persona. <span class="tag">Capturas 02, 10</span></p>
+  </div>
+  <div class="feature">
+    <h3>Base de conocimiento (RAG)</h3>
+    <p>Documentos del negocio con visibilidad pública o privada, versión e índice. La pantalla muestra documentos publicados y los controles de carga y previsualización.
+      La captura acredita la interfaz; los cambios de estado requieren comprobaciones funcionales.
+      <span class="tag">Captura 04</span></p>
+  </div>
+  <div class="feature">
+    <h3>Asistente con fuentes</h3>
+    <p>La captura muestra una consulta, una respuesta y su fuente declarada en modo simulado.
+      Las pruebas previas con un proveedor real se describen más abajo con su alcance. <span class="tag">Captura 09</span></p>
+  </div>
+  <div class="feature">
+    <h3>Bandeja humana</h3>
+    <p>Cuando la asistencia automática pausa por una persona, la derivación queda como alerta con
+      prioridad y espera: la conversación no se pierde y el control no se devuelve en automático.
+      <span class="tag">Capturas 03, 11</span></p>
+  </div>
+  <div class="feature">
+    <h3>Catálogo e inventario</h3>
+    <p>Servicios y productos con precio, detalle y duración; controles de edición en celda y revisiones visibles.
+      La captura no demuestra por sí sola el comportamiento ante ediciones simultáneas.
+      <span class="tag">Capturas 05, 12</span></p>
+  </div>
+  <div class="feature">
+    <h3>Agenda</h3>
+    <p>Semana con profesionales y citas en distintos estados, filtros y vista por día.
+      <span class="tag">Captura 06</span></p>
+  </div>
+  <div class="feature">
+    <h3>Configuración del negocio</h3>
+    <p>Nombre, rubro, zona horaria y moneda; saludo y fuera de horario del asistente; horario
+      semanal con la regla que aplican tanto el panel como el canal al aceptar una reserva, y
+      fechas cerradas o con horario especial. <span class="tag">Captura 07</span></p>
+  </div>
+  <div class="feature">
+    <h3>Accesos y privacidad</h3>
+    <p>Listado de usuarios con rol y estado, formulario de alta y control de restablecimiento.
+      La cuenta visible pertenece a la demo. Esta pantalla no acredita una política completa
+      de privacidad ni muestra por sí sola la invalidación de sesiones. <span class="tag">Captura 08</span></p>
+  </div>
+  <div class="feature">
+    <h3>Diseño adaptable</h3>
+    <p>La misma interfaz en escritorio y en teléfono (390 px), capturada en modo claro.
+      <span class="tag">Capturas 10, 11, 12</span></p>
+  </div>
+</section>
+
+<section aria-labelledby="t4">
+  <h2 id="t4">Qué está comprobado y qué no</h2>
+  <p>Distinguimos tres niveles con nombre y fecha. Ninguna parte de esta página se describe como
+    «producción» ni como «listo para clientes».</p>
+  <div class="verdict ok">
+    <h3><span class="dot" aria-hidden="true"></span>Comprobado en local, con componentes simulados</h3>
+    <p>Todo lo que se ve en las capturas: navegación completa de la interfaz, catálogo con
+      revisiones, documentos de conocimiento publicados, bandeja con derivación humana y agenda
+      sembrada. El asistente respondió en <strong>modo simulado</strong> (selección explícita de
+      desarrollo, indicada en su propio pie de mensaje). La conversación derivada es un escenario
+      generado localmente. Estas capturas evalúan producto y diseño, no la calidad de un modelo
+      real. Suite pertinente en la sesión de captura: 7 pruebas de interfaz pasadas, 4 omitidas
+      (requieren un recorrido extremo a extremo no aplicable aquí).</p>
+  </div>
+  <div class="verdict ok">
+    <h3><span class="dot" aria-hidden="true"></span>Comprobado antes con un proveedor de IA real (chat interno)</h3>
+    <p>El 31 de octubre de 2026 el chat interno de administración se ejercitó contra el proveedor
+      configurado: <strong>11 consultas reales</strong>, con recuperación efectiva de conocimiento,
+      catálogo, agenda y existencias. Nueve respuestas salieron con fuentes trazables y a dos
+      preguntas sin datos disponibles el sistema respondió que no las tenía, en lugar de inventar.
+      La memoria multi-turno del chat interno y su integración en el canal se comprobaron
+      después con pruebas locales y adaptadores simulados. <strong>Las 11 consultas reales
+      acreditan el chat interno; no acreditan la conversación multi-turno del canal con
+      un modelo real ni la entrega de mensajes por WhatsApp.</strong></p>
+  </div>
+  <div class="verdict risk">
+    <h3><span class="dot" aria-hidden="true"></span>No comprobado / pendiente</h3>
+    <ul>
+      <li><strong>WhatsApp de extremo a extremo con Meta</strong>: recepción real del evento del
+        mensaje, envío real y los estados «entregado» y «leído», que sólo confirma el proveedor.
+        <strong>No operativo</strong>; no se declara lo contrario.</li>
+      <li>Calidad y comportamiento del asistente con un modelo real fuera del chat interno
+        (referencias entre turnos de cliente final y rubros distintos al ejemplo odontológico).</li>
+      <li>Operación en producción multi-negocio con datos reales, respaldo y recuperación.</li>
+    </ul>
+  </div>
+</section>
+
+<section aria-labelledby="t5">
+  <h2 id="t5">Reproducir la demostración en local</h2>
+  <p>La instalación de prueba vive en el repositorio del proyecto y se levanta en el equipo,
+    escuchando únicamente en <span style="font-family:var(--mono);font-size:14px">127.0.0.1</span>.
+    La demo no necesita un proveedor de inteligencia artificial, no utiliza Meta ni WhatsApp y
+    usa una base de prueba local separada que permanece en la caché entre arranques.
+    Cerrar el servidor no elimina automáticamente esa base.</p>
+  <p>Cada arranque genera una <strong>contraseña nueva y efímera</strong> que sólo se muestra en
+    la terminal del que levanta la demo; no existe una contraseña fija de demostración en el
+    repositorio ni en este caso de estudio, y los accesos no se publican aquí. Las instrucciones
+    de ejecución pertenecen a la documentación interna del proyecto, no al material público de
+    este portafolio.</p>
+</section>
+
+<footer>
+  <div class="topline"><div class="wrap">
+    <div>
+      <p style="margin-bottom:2px"><strong>MiOrquestador</strong> · Soluciones Digitales Ec.</p>
+      <p class="muted">Página de revisión interna, preparada para el portafolio y aún no publicada.</p>
+    </div>
+    <div>
+      <a href="DESCRIPCION.md">Descripción breve</a> ·
+      <a href="evidencias/FICHAS.md">Fichas por pantalla</a>
+    </div>
+  </div></div>
+</footer>
+
+<script>
+(function(){
+  var SHOTS = [
+    {src:'evidencias/01-login.png', label:'Acceso al producto', device:'Escritorio 1264 px',
+     ficha:'Marca del producto y aviso de entorno de demostración con datos ficticios.'},
+    {src:'evidencias/02-panel-resumen.png', label:'Panel de resumen', device:'Escritorio 1264 px',
+     ficha:'Indicadores del negocio, embudo comercial y alerta viva de atención.'},
+    {src:'evidencias/03-bandeja-conversacion.png', label:'Bandeja con conversación derivada', device:'Escritorio 1264 px',
+     ficha:'Escenario local de derivación a una persona; lista con alerta y teléfono sembrado para la demo. El hilo no está abierto en esta captura.'},
+    {src:'evidencias/04-conocimiento-kb.png', label:'Conocimiento (RAG)', device:'Escritorio 1264 px',
+     ficha:'Documentos publicados con visibilidad, versión e índice; formulario de carga sin publicación automática.'},
+    {src:'evidencias/05-catalogo.png', label:'Catálogo e inventario', device:'Escritorio 1264 px',
+     ficha:'Seis artículos ficticios publicados con precio, tipo, duración y revisiones.'},
+    {src:'evidencias/06-agenda.png', label:'Agenda', device:'Escritorio 1264 px',
+     ficha:'Semana con profesionales y citas ficticias pendientes y sus filtros.'},
+    {src:'evidencias/07-negocio-config.png', label:'Configuración del negocio', device:'Escritorio 1264 px',
+     ficha:'Perfil, saludos, horario semanal operativo, excepciones y disponibilidad de profesionales.'},
+    {src:'evidencias/08-usuarios-privacidad.png', label:'Usuarios y privacidad', device:'Escritorio 1264 px',
+     ficha:'Listado de roles, cuenta de demostración y controles de alta y restablecimiento. La imagen no prueba la invalidación de sesiones.'},
+    {src:'evidencias/09-asistente-ia-rag.png', label:'Asistente con RAG', device:'Escritorio 1264 px',
+     ficha:'Consulta y respuesta con fuente declarada en pantalla y modo simulado indicado.'},
+    {src:'evidencias/10-movil-panel.png', label:'Panel (móvil)', device:'Teléfono 390 px · página completa',
+     ficha:'El mismo contenido del panel reordenado para teléfono.'},
+    {src:'evidencias/11-movil-bandeja.png', label:'Bandeja (móvil)', device:'Teléfono 390 px · página completa',
+     ficha:'Conversación derivada en la vista de teléfono.'},
+    {src:'evidencias/12-movil-catalogo.png', label:'Catálogo (móvil)', device:'Teléfono 390 px · página completa',
+     ficha:'Lista del catálogo apilada en teléfono, sin cortes de columnas.'}
+  ];
+  var n = SHOTS.length, cur = 1;
+  var navBox = document.querySelector('.shotnav');
+  var grid = document.getElementById('grid');
+  var img = document.getElementById('shot');
+  var capLabel = document.getElementById('cap-label');
+  var capIdx = document.getElementById('cap-idx');
+  var capMeta = document.getElementById('cap-meta');
+  var openFull = document.getElementById('open-full');
+
+  function build(){
+    SHOTS.forEach(function(s, i){
+      var idx = i + 1;
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'chip'; b.dataset.i = idx;
+      b.textContent = (idx < 10 ? '0' : '') + idx;
+      b.setAttribute('aria-label', 'Ver captura ' + idx + ': ' + s.label);
+      b.addEventListener('click', function(){ show(idx); });
+      navBox.appendChild(b);
+
+      var fig = document.createElement('figure');
+      fig.className = 'cell'; fig.dataset.i = idx;
+      var lnk = document.createElement('a');
+      lnk.href = s.src; lnk.target = '_blank'; lnk.rel = 'noopener';
+      var im = document.createElement('img');
+      im.loading = 'lazy'; im.decoding = 'async'; im.src = s.src;
+      im.alt = s.label + ' — captura ' + idx + ' de ' + n +
+        ' de la demostración local con datos ficticios de MiOrquestador.';
+      lnk.appendChild(im);
+      var cap = document.createElement('figcaption');
+      cap.innerHTML = '<b>' + (idx < 10 ? '0' : '') + idx + '</b> · ' + s.label +
+        '<span>' + s.device + '</span>' + s.ficha;
+      fig.appendChild(lnk); fig.appendChild(cap);
+      fig.addEventListener('click', function(e){
+        if (e.target.closest('a')) return;
+        e.preventDefault(); show(idx);
+      });
+      grid.appendChild(fig);
+    });
+  }
+  function show(i){
+    cur = i;
+    var s = SHOTS[i - 1];
+    img.src = s.src;
+    img.alt = s.label + ' — captura ' + i + ' de ' + n +
+      ' de la demostración local con datos ficticios de MiOrquestador.';
+    openFull.href = s.src;
+    capLabel.textContent = s.label;
+    capIdx.textContent = i + ' / ' + n;
+    capMeta.textContent = s.device + ' · ' + s.ficha;
+    var chips = navBox.querySelectorAll('.chip'), cells = grid.querySelectorAll('.cell');
+    Array.prototype.forEach.call(chips, function(c){ c.classList.toggle('on', +c.dataset.i === i); });
+    Array.prototype.forEach.call(cells, function(c){
+      var on = +c.dataset.i === i;
+      c.classList.toggle('on', on);
+      if (on) c.setAttribute('aria-current', 'true'); else c.removeAttribute('aria-current');
+    });
+    var doc = document.documentElement;
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.querySelector('.reader').scrollIntoView(reduce ? 'auto' : 'smooth');
+  }
+  document.getElementById('prev').addEventListener('click', function(){ show(cur === 1 ? n : cur - 1); });
+  document.getElementById('next').addEventListener('click', function(){ show(cur === n ? 1 : cur + 1); });
+  document.addEventListener('keydown', function(e){
+    if (e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)) return;
+    if (e.key === 'ArrowLeft') { show(cur === 1 ? n : cur - 1); }
+    if (e.key === 'ArrowRight') { show(cur === n ? 1 : cur + 1); }
+  });
+  build();
+  show(2);
+})();
+</script>
+</main>
+</body>
+</html>

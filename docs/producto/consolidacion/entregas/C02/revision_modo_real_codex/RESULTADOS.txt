@@ -1,0 +1,6 @@
+154 passed, 20 warnings in 108.53s, exit 0
+NO_PROVIDER AdaptadorRemotoConfigurable no_configurado; exit 0
+E2E cat PASS/VERIFY_OK; p3 8 checks documentos PASS; timeout esperando Nuevas: 1; exit 1
+MAPPING details=F para CSV con A..E
+PREVIEW_ERROR La columna F (campo details) no existe en la hoja seleccionada.
+Probe navegador del defecto exit 0 (reproduccion confirmada, no aprobacion del producto).

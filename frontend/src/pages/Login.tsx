@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '@/lib/auth'
+import { useAuth, useAuthStore } from '@/lib/auth'
 import { useToast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,8 +51,7 @@ export function Login() {
       // verificará la identidad al montar. Navegación programática (no reload).
       setApiKey(apiKey.trim())
       if (data.tenant) {
-        const { setTenant } = await import('@/lib/auth')
-        setTenant(data.tenant)
+        useAuthStore.getState().setTenant(data.tenant)
       }
       navigate('/dashboard')
     } catch (err: any) {
@@ -133,5 +132,3 @@ export function Login() {
     </div>
   )
 }
-
-export { Login }

@@ -225,5 +225,3 @@ export function Resources() {
     </div>
   )
 }
-
-export { Resources }

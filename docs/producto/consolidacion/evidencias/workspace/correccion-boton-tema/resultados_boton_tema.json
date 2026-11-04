@@ -1,0 +1,396 @@
+{
+ "checks": [
+  {
+   "check": "contraste >= 4.5 :: escritorio claro reposo",
+   "ok": true,
+   "detail": "ratio=11.54 bg=rgb(237, 246, 239) fg=rgb(24, 56, 49) texto=Modo oscuro"
+  },
+  {
+   "check": "contraste >= 4.5 :: escritorio claro hover",
+   "ok": true,
+   "detail": "ratio=10.15 bg=rgb(219, 233, 223) fg=rgb(24, 56, 49) texto=Modo oscuro"
+  },
+  {
+   "check": "foco por Tab en escritorio claro",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "contraste >= 4.5 :: escritorio claro foco",
+   "ok": true,
+   "detail": "ratio=11.54 bg=rgb(237, 246, 239) fg=rgb(24, 56, 49) texto=Modo oscuro"
+  },
+  {
+   "check": "foco: outline perceptible en escritorio claro",
+   "ok": true,
+   "detail": "outline=rgb(182, 165, 94) solid 3px"
+  },
+  {
+   "check": "contraste >= 4.5 :: escritorio claro pulsacion",
+   "ok": true,
+   "detail": "ratio=9.25 bg=rgb(207, 224, 211) fg=rgb(24, 56, 49) texto=Modo oscuro"
+  },
+  {
+   "check": "un clic cambia el tema una sola vez",
+   "ok": true,
+   "detail": "light -> dark"
+  },
+  {
+   "check": "texto del boton corresponde al cambio ofrecido",
+   "ok": true,
+   "detail": "'Modo oscuro' -> 'Modo claro'"
+  },
+  {
+   "check": "preferencia persiste tras recargar",
+   "ok": true,
+   "detail": "stored=dark"
+  },
+  {
+   "check": "contraste >= 4.5 :: escritorio oscuro reposo",
+   "ok": true,
+   "detail": "ratio=10.98 bg=rgb(36, 51, 44) fg=rgb(227, 236, 230) texto=Modo claro"
+  },
+  {
+   "check": "contraste >= 4.5 :: escritorio oscuro hover",
+   "ok": true,
+   "detail": "ratio=9.38 bg=rgb(46, 62, 53) fg=rgb(227, 236, 230) texto=Modo claro"
+  },
+  {
+   "check": "foco por Tab en escritorio oscuro",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "contraste >= 4.5 :: escritorio oscuro foco",
+   "ok": true,
+   "detail": "ratio=10.98 bg=rgb(36, 51, 44) fg=rgb(227, 236, 230) texto=Modo oscuro"
+  },
+  {
+   "check": "foco: outline perceptible en escritorio oscuro",
+   "ok": true,
+   "detail": "outline=rgb(182, 165, 94) solid 3px"
+  },
+  {
+   "check": "contraste >= 4.5 :: escritorio oscuro pulsacion",
+   "ok": true,
+   "detail": "ratio=8.22 bg=rgb(53, 71, 60) fg=rgb(227, 236, 230) texto=Modo oscuro"
+  },
+  {
+   "check": "contraste >= 4.5 :: movil light reposo",
+   "ok": true,
+   "detail": "ratio=11.54 bg=rgb(237, 246, 239) fg=rgb(24, 56, 49) texto=Modo oscuro"
+  },
+  {
+   "check": "contraste >= 4.5 :: movil light hover",
+   "ok": true,
+   "detail": "ratio=10.15 bg=rgb(219, 233, 223) fg=rgb(24, 56, 49) texto=Modo oscuro"
+  },
+  {
+   "check": "foco por Tab en movil light",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "contraste >= 4.5 :: movil light foco",
+   "ok": true,
+   "detail": "ratio=11.54 bg=rgb(237, 246, 239) fg=rgb(24, 56, 49) texto=Modo oscuro"
+  },
+  {
+   "check": "foco: outline perceptible en movil light",
+   "ok": true,
+   "detail": "outline=rgb(182, 165, 94) solid 3px"
+  },
+  {
+   "check": "contraste >= 4.5 :: movil light pulsacion",
+   "ok": true,
+   "detail": "ratio=9.25 bg=rgb(207, 224, 211) fg=rgb(24, 56, 49) texto=Modo oscuro"
+  },
+  {
+   "check": "movil light: sin desbordamiento global",
+   "ok": true,
+   "detail": "scrollWidth=414"
+  },
+  {
+   "check": "movil light: cabecera sin solapamiento",
+   "ok": true,
+   "detail": "{\"boton\": {\"x\": 16, \"y\": 140.46875, \"w\": 108.484375, \"h\": 42}, \"user\": {\"x\": 136.484375, \"y\": 151.390625, \"w\": 80.71875, \"h\": 20.140625}, \"form\": {\"x\": 305.5625, \"y\": 144.96875, \"w\": 91.4375, \"h\": 33}}"
+  },
+  {
+   "check": "contraste >= 4.5 :: movil dark reposo",
+   "ok": true,
+   "detail": "ratio=10.98 bg=rgb(36, 51, 44) fg=rgb(227, 236, 230) texto=Modo claro"
+  },
+  {
+   "check": "contraste >= 4.5 :: movil dark hover",
+   "ok": true,
+   "detail": "ratio=9.38 bg=rgb(46, 62, 53) fg=rgb(227, 236, 230) texto=Modo claro"
+  },
+  {
+   "check": "foco por Tab en movil dark",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "check": "contraste >= 4.5 :: movil dark foco",
+   "ok": true,
+   "detail": "ratio=10.98 bg=rgb(36, 51, 44) fg=rgb(227, 236, 230) texto=Modo oscuro"
+  },
+  {
+   "check": "foco: outline perceptible en movil dark",
+   "ok": true,
+   "detail": "outline=rgb(182, 165, 94) solid 3px"
+  },
+  {
+   "check": "contraste >= 4.5 :: movil dark pulsacion",
+   "ok": true,
+   "detail": "ratio=8.22 bg=rgb(53, 71, 60) fg=rgb(227, 236, 230) texto=Modo oscuro"
+  },
+  {
+   "check": "movil dark: sin desbordamiento global",
+   "ok": true,
+   "detail": "scrollWidth=414"
+  },
+  {
+   "check": "movil dark: cabecera sin solapamiento",
+   "ok": true,
+   "detail": "{\"boton\": {\"x\": 16, \"y\": 140.46875, \"w\": 108.484375, \"h\": 42}, \"user\": {\"x\": 136.484375, \"y\": 151.390625, \"w\": 80.71875, \"h\": 20.140625}, \"form\": {\"x\": 305.5625, \"y\": 144.96875, \"w\": 91.4375, \"h\": 33}}"
+  }
+ ],
+ "estados": [
+  {
+   "tema": "light",
+   "estado": "reposo",
+   "etiqueta": "escritorio claro reposo",
+   "bg": "rgb(237, 246, 239)",
+   "fg": "rgb(24, 56, 49)",
+   "border": "rgb(225, 232, 227)",
+   "ratio": 11.54,
+   "ok": true
+  },
+  {
+   "tema": "light",
+   "estado": "hover",
+   "etiqueta": "escritorio claro hover",
+   "bg": "rgb(219, 233, 223)",
+   "fg": "rgb(24, 56, 49)",
+   "border": "rgb(24, 118, 91)",
+   "ratio": 10.15,
+   "ok": true
+  },
+  {
+   "tema": "light",
+   "estado": "foco",
+   "etiqueta": "escritorio claro foco",
+   "bg": "rgb(237, 246, 239)",
+   "fg": "rgb(24, 56, 49)",
+   "border": "rgb(225, 232, 227)",
+   "ratio": 11.54,
+   "ok": true
+  },
+  {
+   "tema": "light",
+   "estado": "active",
+   "etiqueta": "escritorio claro pulsacion",
+   "bg": "rgb(207, 224, 211)",
+   "fg": "rgb(24, 56, 49)",
+   "border": "rgb(24, 118, 91)",
+   "ratio": 9.25,
+   "ok": true
+  },
+  {
+   "tema": "dark",
+   "estado": "reposo",
+   "etiqueta": "escritorio oscuro reposo",
+   "bg": "rgb(36, 51, 44)",
+   "fg": "rgb(227, 236, 230)",
+   "border": "rgb(59, 79, 69)",
+   "ratio": 10.98,
+   "ok": true
+  },
+  {
+   "tema": "dark",
+   "estado": "hover",
+   "etiqueta": "escritorio oscuro hover",
+   "bg": "rgb(46, 62, 53)",
+   "fg": "rgb(227, 236, 230)",
+   "border": "rgb(95, 191, 153)",
+   "ratio": 9.38,
+   "ok": true
+  },
+  {
+   "tema": "dark",
+   "estado": "foco",
+   "etiqueta": "escritorio oscuro foco",
+   "bg": "rgb(36, 51, 44)",
+   "fg": "rgb(227, 236, 230)",
+   "border": "rgb(59, 79, 69)",
+   "ratio": 10.98,
+   "ok": true
+  },
+  {
+   "tema": "dark",
+   "estado": "active",
+   "etiqueta": "escritorio oscuro pulsacion",
+   "bg": "rgb(53, 71, 60)",
+   "fg": "rgb(227, 236, 230)",
+   "border": "rgb(95, 191, 153)",
+   "ratio": 8.22,
+   "ok": true
+  },
+  {
+   "tema": "light",
+   "estado": "reposo",
+   "etiqueta": "movil light reposo",
+   "bg": "rgb(237, 246, 239)",
+   "fg": "rgb(24, 56, 49)",
+   "border": "rgb(225, 232, 227)",
+   "ratio": 11.54,
+   "ok": true
+  },
+  {
+   "tema": "light",
+   "estado": "hover",
+   "etiqueta": "movil light hover",
+   "bg": "rgb(219, 233, 223)",
+   "fg": "rgb(24, 56, 49)",
+   "border": "rgb(24, 118, 91)",
+   "ratio": 10.15,
+   "ok": true
+  },
+  {
+   "tema": "light",
+   "estado": "foco",
+   "etiqueta": "movil light foco",
+   "bg": "rgb(237, 246, 239)",
+   "fg": "rgb(24, 56, 49)",
+   "border": "rgb(225, 232, 227)",
+   "ratio": 11.54,
+   "ok": true
+  },
+  {
+   "tema": "light",
+   "estado": "active",
+   "etiqueta": "movil light pulsacion",
+   "bg": "rgb(207, 224, 211)",
+   "fg": "rgb(24, 56, 49)",
+   "border": "rgb(24, 118, 91)",
+   "ratio": 9.25,
+   "ok": true
+  },
+  {
+   "tema": "dark",
+   "estado": "reposo",
+   "etiqueta": "movil dark reposo",
+   "bg": "rgb(36, 51, 44)",
+   "fg": "rgb(227, 236, 230)",
+   "border": "rgb(59, 79, 69)",
+   "ratio": 10.98,
+   "ok": true
+  },
+  {
+   "tema": "dark",
+   "estado": "hover",
+   "etiqueta": "movil dark hover",
+   "bg": "rgb(46, 62, 53)",
+   "fg": "rgb(227, 236, 230)",
+   "border": "rgb(95, 191, 153)",
+   "ratio": 9.38,
+   "ok": true
+  },
+  {
+   "tema": "dark",
+   "estado": "foco",
+   "etiqueta": "movil dark foco",
+   "bg": "rgb(36, 51, 44)",
+   "fg": "rgb(227, 236, 230)",
+   "border": "rgb(59, 79, 69)",
+   "ratio": 10.98,
+   "ok": true
+  },
+  {
+   "tema": "dark",
+   "estado": "active",
+   "etiqueta": "movil dark pulsacion",
+   "bg": "rgb(53, 71, 60)",
+   "fg": "rgb(227, 236, 230)",
+   "border": "rgb(95, 191, 153)",
+   "ratio": 8.22,
+   "ok": true
+  }
+ ],
+ "capturas": [
+  {
+   "archivo": "light-d-reposo.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "light-d-hover.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "light-d-foco.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "light-d-active.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "dark-d-reposo.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "dark-d-hover.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "dark-d-foco.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "dark-d-active.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "light-m-reposo.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "light-m-hover.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "light-m-foco.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "light-m-active.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "cabecera-movil-light.png",
+   "tema_verificado": "light"
+  },
+  {
+   "archivo": "dark-m-reposo.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "dark-m-hover.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "dark-m-foco.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "dark-m-active.png",
+   "tema_verificado": "dark"
+  },
+  {
+   "archivo": "cabecera-movil-dark.png",
+   "tema_verificado": "dark"
+  }
+ ],
+ "errores_js": []
+}

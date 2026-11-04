@@ -1004,16 +1004,34 @@ def create_app(test_config=None):
     @app.post('/api/c02/chat')
     @protected()
     def c02_chat_internal():
-        body = (request.get_json(silent=True) or {}).get('question', '')
-        res = c02.responder_chat_internal(app.config['DATABASE'], body, role=g.user['role'])
-        return jsonify(answer=res.get('answer', ''), ok=res.get('ok', True),
-                       fuente=res.get('fuente'), documento=res.get('documento'),
-                       version=res.get('version'), procedencia=res.get('procedencia'),
-                       fuentes=res.get('fuentes', []), abstencion=res.get('abstencion', False),
-                       adaptador=res.get('adaptador'), modo=res.get('modo'),
-                       fallo_proveedor=res.get('fallo_proveedor', False),
-                       telemetria=res.get('telemetria'),
-                       resumen=res.get('resumen'))
+        body = request.get_json(silent=True) or {}
+        pregunta = body.get('question', '')
+        # Conversación del chat interno: id estable por sesión de navegador (o
+        # id explícito del cliente). La memoria es por conversación y rol; sin
+        # sesión (p.ej. API pública) el chat es stateless.
+        conv = body.get('conversation_id') or ''
+        if not isinstance(conv, str) or not conv.strip():
+            conv = session.get('c02_chat_conv') or ''
+        conv = conv.strip()[:64]
+        if not conv:
+            conv = secrets.token_hex(16)
+            session['c02_chat_conv'] = conv
+        res = c02.responder_chat_internal(
+            app.config['DATABASE'], pregunta, role=g.user['role'],
+            conversation_id=conv,
+            user_id=g.user['id'] if 'id' in g.user.keys() else None)
+        respuesta = jsonify(answer=res.get('answer', ''), ok=res.get('ok', True),
+                            fuente=res.get('fuente'), documento=res.get('documento'),
+                            version=res.get('version'), procedencia=res.get('procedencia'),
+                            fuentes=res.get('fuentes', []), abstencion=res.get('abstencion', False),
+                            adaptador=res.get('adaptador'), modo=res.get('modo'),
+                            fallo_proveedor=res.get('fallo_proveedor', False),
+                            telemetria=res.get('telemetria'),
+                            resumen=res.get('resumen'),
+                            turno=res.get('turno'), historial=res.get('historial'),
+                            conversacion=conv,
+                            pregunta_resuelta=res.get('pregunta_resuelta'))
+        return respuesta
 
     @app.get('/api/c02/config')
     @protected()

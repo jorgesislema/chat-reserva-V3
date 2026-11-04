@@ -1,0 +1,25 @@
+# CRM WhatsApp — worker (proceso aparte, único procesador del canal).
+# Procesa entradas persistidas por el webhook, ejecuta el flujo de reservas y
+# envía salidas por el transporte real. NO lo arranca el servidor web.
+
+[Unit]
+Description=CRM WhatsApp - worker del canal (crm.worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chatdental
+Group=chatdental
+WorkingDirectory=/opt/chatdental-crm
+EnvironmentFile=/etc/chatdental-crm/crm.env
+ExecStart=/opt/chatdental-crm/.venv/bin/python -m crm.worker
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=crm-worker
+
+[Install]
+WantedBy=multi-user.target

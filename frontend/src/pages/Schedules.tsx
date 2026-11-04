@@ -253,5 +253,3 @@ export function Schedules() {
     </div>
   )
 }
-
-export { Schedules }
