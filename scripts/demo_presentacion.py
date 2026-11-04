@@ -417,6 +417,13 @@ def main() -> int:
         arena.unlink()
 
     app = create_app(cfg)
+    # Un demo no debe dejar fuera a quien prueba: cada arranque limpia los
+    # contadores de intentos fallidos (5 fallos = 15 minutos de espera).
+    with connect(str(DB)) as conn:
+        try:
+            conn.execute('DELETE FROM crm_login_attempts')
+        except Exception:  # noqa: BLE001 - la tabla puede no existir aún
+            pass
     app.run(host='127.0.0.1', port=8050, debug=False)
     return 0
 
