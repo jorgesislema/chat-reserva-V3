@@ -634,10 +634,10 @@ def _saludo_hora(path) -> str:
     except Exception:  # noqa: BLE001
         hora = 9
     if hora < 12:
-        return 'Muy buenos días, ¿en qué te puedo ayudar?'
+        return 'Muy buenos días 👋 ¿En qué te ayudo?'
     if hora < 19:
-        return 'Muy buenas tardes, ¿en qué te puedo ayudar?'
-    return 'Muy buenas noches, ¿en qué te puedo ayudar?'
+        return 'Muy buenas tardes 👋 ¿En qué te ayudo?'
+    return 'Muy buenas noches 👋 ¿En qué te ayudo?'
 
 def _texto_lista_servicios(servicios) -> str:
     lineas = '\n'.join('%d. %s (%d min)' % (i, s['name'], s['duration_min'])
@@ -996,7 +996,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             if conv_id:
                 svc.conv_clear_pending(path, conv_id)
             return _resp('paciente',
-                         'Gracias, la ficha queda a nombre de %s. ¿Necesitas algo más?'
+                         'Gracias. La ficha queda a nombre de %s. ¿Necesitas algo más?'
                          % (paciente or cliente), pending={})
         # Cambió de tema (cancelar, reagendar...): se suelta la ficha pendiente
         # para no secuestrar la intención del mensaje.
@@ -1187,8 +1187,8 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                     else:
                         lista = ', '.join(opciones[:-1]) + ' o ' + opciones[-1]
                     return _resp('reservar',
-                                 'Lamentablemente a las %s no tengo hueco. Tengo %s. '
-                                 '¿Cuál te sirve?' % (hora, lista),
+                                 'Uy, a las %s ya está ocupado. Te puedo ofrecer %s, '
+                                 '¿cuál te viene mejor?' % (hora, lista),
                                  need_datos=True,
                                  pending={**pend, 'fecha': None, 'hora': None})
                 return _resp('reservar',
@@ -1470,7 +1470,7 @@ def _reservar_conn(conn, path, phone, lead, fecha, hora, profesionales, zonas, n
         nombre_prof = prof.get('name') or 'el profesional'
         return {'ok': True, 'appointment': result['appointment'],
                 'appointment_id': result['appointment']['id'],
-                'message': 'Listo ✅ Tu cita de %s es el %s a las %s con %s. '
+                'message': '¡Perfecto! Tu cita de %s es el %s a las %s con %s. '
                            '¿Te va bien así? Si puedes llegar 15 minutos antes, mejor: '
                            'así preparamos tu ficha.'
                            % (str(titulo).replace('Reserva: ', ''), _fecha_larga(fecha),

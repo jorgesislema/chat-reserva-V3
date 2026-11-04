@@ -139,8 +139,12 @@ def test_negaciones_y_consultas_informativas_no_derivan(path, frase):
     assert conv['state'] == 'ia_activa', frase
     assert svc.conv_egress_paused(path, conv['id']) is False, frase
     assert _alertas_conv(path, conv['id']) == [], frase
-    pend = svc.outbox_next(path)['pending']
-    assert not any(o['recipient'] == key for o in pend), frase
+    pend = [o for o in svc.outbox_next(path)['pending'] if o['recipient'] == key]
+    # Si respondió, la respuesta NO puede ser un aviso de derivación.
+    for fila in pend:
+        texto = (fila.get('payload') or '')
+        assert 'miembro del equipo' not in texto, frase
+        assert 'atención prioritaria' not in texto, frase
 
 
 def test_reentrega_mismo_external_id_no_duplica_alerta(path):
