@@ -370,3 +370,10 @@ input:disabled,select:disabled,textarea:disabled{background:#eef2ef;color:#7a8e8
 .c02-esp-item input{width:18px;height:18px;margin:0;flex:0 0 auto}
 /* Catálogo: la tabla ancha se desplaza en horizontal */
 #c02-cat-table{min-width:940px}
+
+/* Catálogo: barra horizontal visible y cabeceras sin cortar */
+.table-wrap::-webkit-scrollbar{height:12px}
+.table-wrap::-webkit-scrollbar-thumb{background:#c3d5c8;border-radius:6px}
+.table-wrap::-webkit-scrollbar-track{background:#eef2ed;border-radius:6px}
+#c02-cat-table th{white-space:nowrap}
+#c02-cat-table td{min-width:96px}

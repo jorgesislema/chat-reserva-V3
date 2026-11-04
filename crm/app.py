@@ -1470,8 +1470,16 @@ def create_app(test_config=None):
             except (ValueError, OSError):
                 pass
         contexto = {'professionals': profesionales, 'zonas': [zona], 'now_local': None}
-        _canal.WorkerCanal(arena, worker='w-simulador',
-                           motor=_canal.MotorSimulado()).paso(contexto=contexto)
+        # Dentro del simulador se usa el adaptador simulado: responde al
+        # instante y no gasta proveedor. El chat real sigue con el suyo.
+        from crm import chat_adapter as _chat_adapter
+        previo = _chat_adapter.ADAPTADOR_ACTIVO
+        _chat_adapter.configurar_adaptador(_chat_adapter.AdaptadorSimulado())
+        try:
+            _canal.WorkerCanal(arena, worker='w-simulador',
+                               motor=_canal.MotorSimulado()).paso(contexto=contexto)
+        finally:
+            _chat_adapter.configurar_adaptador(previo)
         sello = datetime.now(timezone.utc).isoformat()
         with _connect(arena) as conn:
             # En el simulador no hay transporte: lo que el bot dejó en la cola de

@@ -240,3 +240,11 @@
 .agenda .appt.lane-tight small{font-size:10px}
 .agenda .appt .pro-short{display:block;font-weight:600}
 @media(max-width:700px){.agenda .week-body{min-width:118px}}
+
+/* Columnas con ancho mínimo: «Dra. Ana Torres» no se corta en «Dra.» */
+.day-wrap{grid-template-columns:58px repeat(var(--lanes,1),minmax(165px,1fr))}
+.week-wrap{grid-template-columns:58px repeat(7,minmax(150px,1fr));
+  scrollbar-width:auto}
+.week-wrap::-webkit-scrollbar{height:12px}
+.week-wrap::-webkit-scrollbar-thumb{background:#c3d5c8;border-radius:6px}
+.week-wrap::-webkit-scrollbar-track{background:#eef2ed;border-radius:6px}

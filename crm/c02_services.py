@@ -1874,8 +1874,7 @@ def _agenda_summary(path):
     else:
         proxima = 'ninguna'
     texto = ('Agenda: %d citas hoy (%s) y %d mañana (%s). Próxima: %s. '
-             'Profesionales activos: %s. El detalle con nombres de pacientes está '
-             'en la pantalla de agenda, no en este chat.'
+             'Profesionales activos: %s.'
              % (citas_hoy, hoy.strftime('%d/%m'), citas_manana, manana.strftime('%d/%m'),
                 proxima, nombres))
     return {'profesionales': [dict(p) for p in profs],
@@ -2061,6 +2060,77 @@ def _resolver_referencia(pregunta: str, historial) -> str:
     return f'{pregunta} ({sujeto})'
 
 
+def agenda_dia(path, texto, role='user'):
+    """Citas de un día concreto, con nombre. SÓLO administración.
+
+    El chat nunca expone pacientes a un rol normal; el dueño del negocio sí
+    necesita ver su agenda del día desde el asistente.
+    """
+    if role != 'admin':
+        return None
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    bajo = (texto or '').lower()
+    zona = 'America/Guayaquil'
+    try:
+        with connect(path) as conn:
+            fila = conn.execute(
+                "SELECT value FROM crm_settings WHERE key='timezone'").fetchone()
+        if fila and fila['value']:
+            zona = fila['value']
+    except Exception:  # noqa: BLE001
+        pass
+    hoy = datetime.now(ZoneInfo(zona)).date()
+    dias = {'lunes': 0, 'martes': 1, 'miércoles': 2, 'miercoles': 2, 'jueves': 3,
+            'viernes': 4, 'sábado': 5, 'sabado': 5, 'domingo': 6}
+    objetivo = None
+    if 'pasado mañana' in bajo:
+        objetivo = hoy + timedelta(days=2)
+    elif 'mañana' in bajo or 'manana' in bajo:
+        objetivo = hoy + timedelta(days=1)
+    elif 'hoy' in bajo:
+        objetivo = hoy
+    else:
+        for nombre, indice in dias.items():
+            if nombre in bajo:
+                adelante = (indice - hoy.weekday()) % 7
+                objetivo = hoy + timedelta(days=adelante or 7)
+                break
+    if objetivo is None:
+        return None
+
+    desde = datetime.combine(objetivo, datetime.min.time(), ZoneInfo(zona))
+    hasta = desde + timedelta(days=1)
+    with connect(path) as conn:
+        filas = conn.execute(
+            """SELECT a.start, a.title, a.patient_name, a.operational_status,
+                      l.name AS lead_name, p.name AS profesional
+               FROM crm_appointments a
+               JOIN crm_professionals p ON p.id = a.professional_id
+               LEFT JOIN crm_leads l ON l.id = a.lead_id
+               WHERE a.status='active' AND a.start >= ? AND a.start < ?
+               ORDER BY a.start""",
+            (desde.astimezone().astimezone(ZoneInfo('UTC')).isoformat(),
+             hasta.astimezone().astimezone(ZoneInfo('UTC')).isoformat())).fetchall()
+    if not filas:
+        return {'fecha': objetivo.isoformat(), 'total': 0,
+                'texto': 'No hay citas el %s.' % objetivo.strftime('%d/%m')}
+    lineas = []
+    for fila in filas[:25]:
+        try:
+            hora = (datetime.fromisoformat(fila['start'])
+                    .astimezone(ZoneInfo(zona)).strftime('%H:%M'))
+        except (TypeError, ValueError):
+            hora = '--:--'
+        paciente = fila['patient_name'] or fila['lead_name'] or 'sin nombre'
+        servicio = (fila['title'] or '').replace('Reserva: ', '').split(' · ')[0]
+        lineas.append('%s %s · %s (%s)' % (hora, paciente, servicio, fila['profesional']))
+    texto_dia = ('Citas del %s %s (%d): %s' % (objetivo.strftime('%A'), objetivo.strftime('%d/%m'), len(filas),
+                                            '; '.join(lineas)))
+    return {'fecha': objetivo.isoformat(), 'total': len(filas), 'texto': texto_dia}
+
+
 def _herramientas_chat(path, role):
     """Funciones autorizadas que el adaptador IA puede consultar (sólo lectura).
 
@@ -2111,9 +2181,13 @@ def _herramientas_chat(path, role):
                 return None
         return row['stock']
 
+    def agenda_del_dia(pregunta):
+        return agenda_dia(path, pregunta, role)
+
     return {'kb_buscar': kb_buscar, 'catalogo_buscar': catalogo_buscar,
             'catalogo_buscar_stock': catalogo_buscar_stock,
-            'agenda_resumen': agenda_resumen, 'stock_consultar': stock_consultar}
+            'agenda_resumen': agenda_resumen, 'stock_consultar': stock_consultar,
+            'agenda_dia': agenda_del_dia}
 
 
 def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,

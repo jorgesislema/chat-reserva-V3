@@ -68,6 +68,8 @@ _PROMPT_SISTEMA = (
     '- Esta conversación es de CONSULTA únicamente: no propongas ni ejecutes '
     'cambios de citas, reservas, stock ni configuración.\n'
     '- Cita cada afirmación con la fuente correspondiente como [n].\n'
+    '- Si el CONTEXTO trae «Citas del día», puedes enumerarlas con nombre, hora, '
+    'servicio y profesional: es información de administración.\n'
     '- Responde en español, breve y directo.'
 )
 
@@ -139,6 +141,11 @@ def _mejor_contexto(herramientas: Dict[str, Callable], pregunta: str, q: str,
     ctx['kb'] = herramientas['kb_buscar'](pregunta) if 'kb_buscar' in herramientas else []
     ctx['catalogo'] = herramientas['catalogo_buscar'](q) if 'catalogo_buscar' in herramientas else []
     ctx['agenda'] = herramientas['agenda_resumen']() if 'agenda_resumen' in herramientas else None
+    if 'agenda_dia' in herramientas:
+        try:
+            ctx['agenda_dia'] = herramientas['agenda_dia'](pregunta)
+        except Exception:  # noqa: BLE001 - una herramienta no tumba el chat
+            ctx['agenda_dia'] = None
     return ctx
 
 
@@ -457,6 +464,14 @@ class AdaptadorRemotoConfigurable(ChatAdapter):
                                               procedencia=top.get('code') or '')})
             fuentes.append(contexto[-1]['fuente'])
             traza.append('catalogo')
+        dia = ctx.get('agenda_dia') or {}
+        if dia.get('texto'):
+            contexto.append({'nombre': 'Citas del día (sólo administración)',
+                             'cita': dia['texto'],
+                             'fuente': Fuente(tipo='agenda', id='', nombre='agenda del día',
+                                              procedencia='citas con nombre y hora')})
+            fuentes.append(contexto[-1]['fuente'])
+            traza.append('agenda_dia')
         agenda = ctx.get('agenda') or {}
         if agenda:
             nombres = ', '.join(p['name'] for p in (agenda.get('profesionales') or [])) \
@@ -499,7 +514,7 @@ class AdaptadorRemotoConfigurable(ChatAdapter):
         url = self._endpoint
         if not url.endswith('/chat/completions'):
             url = url.rstrip('/') + '/chat/completions'
-        cuerpo = {'messages': mensajes}
+        cuerpo = {'messages': mensajes, 'max_tokens': 3000}
         if self._modelo:
             cuerpo['model'] = self._modelo
         body = json.dumps(cuerpo, ensure_ascii=False).encode('utf-8')
