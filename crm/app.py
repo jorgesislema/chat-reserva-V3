@@ -378,6 +378,55 @@ def create_app(test_config=None):
         session.clear()
         return redirect(url_for('login'))
 
+    def _analitica(database, dias=30):
+        """Actividad del periodo: citas, atendidas, canceladas, inasistencias y reparto."""
+        from datetime import date as _date, timedelta as _td
+        from zoneinfo import ZoneInfo as _Zone
+
+        zona = _Zone(_eff_zone(database))
+        hoy = datetime.now(zona).date()
+        desde = hoy - _td(days=dias)
+        ini = datetime.combine(desde, datetime.min.time(), zona).astimezone(timezone.utc).isoformat()
+        fin = datetime.combine(hoy + _td(days=1), datetime.min.time(), zona).astimezone(timezone.utc).isoformat()
+        with db() as conn:
+            filas = conn.execute(
+                """SELECT a.start, a.operational_status, p.name AS profesional
+                   FROM crm_appointments a
+                   JOIN crm_professionals p ON p.id = a.professional_id
+                   WHERE a.status='active' AND a.start >= ? AND a.start < ?""",
+                (ini, fin)).fetchall()
+            nuevos = conn.execute(
+                'SELECT COUNT(*) c FROM crm_leads WHERE created_at >= ?', (ini,)).fetchone()['c']
+            ganados = conn.execute(
+                "SELECT COUNT(*) c FROM crm_leads WHERE stage='Ganado'").fetchone()['c']
+            total_leads = conn.execute('SELECT COUNT(*) c FROM crm_leads').fetchone()['c']
+
+        conteo = {'pendiente': 0, 'confirmada': 0, 'atendida': 0, 'cancelada': 0,
+                  'no_asistio': 0}
+        por_prof = {}
+        por_franja = {'mañana': 0, 'tarde': 0}
+        for fila in filas:
+            estado = (fila['operational_status'] or 'pendiente').lower()
+            conteo[estado] = conteo.get(estado, 0) + 1
+            por_prof[fila['profesional']] = por_prof.get(fila['profesional'], 0) + 1
+            try:
+                hora = datetime.fromisoformat(fila['start']).astimezone(zona).hour
+            except (TypeError, ValueError):
+                hora = 9
+            por_franja['mañana' if hora < 13 else 'tarde'] += 1
+
+        total = sum(conteo.values())
+        cerradas = conteo['atendida'] + conteo['cancelada'] + conteo['no_asistio']
+        return {
+            'dias': dias, 'desde': desde.isoformat(), 'hasta': hoy.isoformat(),
+            'total': total, 'conteo': conteo, 'por_profesional': por_prof,
+            'por_franja': por_franja, 'cerradas': cerradas,
+            'asistencia': round(100 * conteo['atendida'] / cerradas, 1) if cerradas else 0,
+            'cancelacion': round(100 * conteo['cancelada'] / cerradas, 1) if cerradas else 0,
+            'nuevos_leads': nuevos, 'ganados': ganados, 'total_leads': total_leads,
+            'conversion': round(100 * ganados / total_leads, 1) if total_leads else 0,
+        }
+
     @app.get('/')
     @protected()
     def home():
@@ -426,7 +475,8 @@ def create_app(test_config=None):
             sources=sources, total=total, pipeline=pipeline, overdue=overdue, pending=pending,
             sync_queue=sync_queue, sync_professionals=sync_professionals,
             conversion=round(100 * funnel.get('Ganado', 0) / total, 1) if total else 0,
-            q=search, stage=stage, professional_filter=doctor_filter, logs=logs, today=today)
+            q=search, stage=stage, professional_filter=doctor_filter, logs=logs, today=today,
+   analitica=_analitica(app.config['DATABASE']) if tab == 'analytics' else None)
 
     @app.post('/users')
     @protected(admin=True)
