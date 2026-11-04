@@ -366,6 +366,34 @@ def _clave() -> str:
     return valor
 
 
+def _sembrar_config(path: str) -> int:
+    """Nombre, zona, moneda, saludo y horario: lo que edita «Negocio y horarios»."""
+    import json
+    from crm.store import connect, now
+
+    valores = {
+        'negocio_nombre': NEGOCIO,
+        'negocio_zona': ZONE,
+        'negocio_moneda': 'USD',
+        'negocio_saludo': ('Hola 👋 Soy el asistente de %s. Te ayudo a reservar o a '
+                           'resolver cualquier duda.' % NEGOCIO),
+        'negocio_mensaje_fuera': ('Ahora estamos fuera de horario (lunes a viernes, '
+                                  '08:00 a 18:00). Déjame tu mensaje y te respondemos '
+                                  'en cuanto abramos.'),
+        'negocio_horarios': json.dumps({str(d): ['08:00', '18:00'] for d in range(5)}),
+        'negocio_excepciones': '{}',
+    }
+    nuevos = 0
+    with connect(path) as conn:
+        for clave, valor in valores.items():
+            if conn.execute('SELECT 1 FROM crm_settings WHERE key=?', (clave,)).fetchone():
+                continue
+            conn.execute('INSERT INTO crm_settings(key, value, updated_at) VALUES (?,?,?)',
+                         (clave, valor, now()))
+            nuevos += 1
+    return nuevos
+
+
 def main() -> int:
     from werkzeug.security import generate_password_hash
 
@@ -397,6 +425,7 @@ def main() -> int:
 
     _sembrar(str(DB))
     añadidos = _completar_catalogo(str(DB))
+    _sembrar_config(str(DB))
 
     with connect(str(DB)) as conn:
         citas = conn.execute("SELECT COUNT(*) c FROM crm_appointments WHERE status='active'").fetchone()['c']

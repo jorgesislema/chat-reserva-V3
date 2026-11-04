@@ -849,6 +849,28 @@ def _migration_021_cita_paciente(db):
         db.execute('ALTER TABLE crm_appointments ADD COLUMN %s TEXT' % columna)
 
 
+def _migration_022_reclamos(db):
+    """Reclamos, garantías y urgencias: qué pasó, con quién y en qué estado."""
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_claims (
+               id INTEGER PRIMARY KEY,
+               conversation_id INTEGER,
+               client_key TEXT,
+               kind TEXT NOT NULL,
+               detail TEXT,
+               patient_name TEXT,
+               document TEXT,
+               professional_id INTEGER,
+               professional_name TEXT,
+               product TEXT,
+               status TEXT NOT NULL DEFAULT 'abierto',
+               created_at TEXT,
+               updated_at TEXT
+           )""")
+    db.execute('CREATE INDEX IF NOT EXISTS idx_claims_fecha ON crm_claims(created_at)')
+    db.execute('CREATE INDEX IF NOT EXISTS idx_claims_estado ON crm_claims(status)')
+
+
 MIGRATIONS = [
     (1, _migration_001_initial),
     (2, _migration_002_agenda),
@@ -871,6 +893,7 @@ MIGRATIONS = [
     (19, _migration_019_c02_chat_memoria),
     (20, _migration_020_profesional_whatsapp),
     (21, _migration_021_cita_paciente),
+    (22, _migration_022_reclamos),
 ]
 
 _CRM_TABLES = ('crm_users', 'crm_professionals', 'crm_appointments', 'crm_leads')

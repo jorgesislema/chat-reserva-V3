@@ -38,6 +38,28 @@
 
   <div class="two-columns">
     <section>
+      <h3>Reclamos y urgencias del periodo</h3>
+      {% set recl = analitica.reclamos %}
+      {% if recl.total %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Tipo</th><th>Casos</th></tr></thead>
+        <tbody>
+          <tr><td>Reclamos y garantías</td><td>{{ recl.por_tipo.get('reclamo', 0) }}</td></tr>
+          <tr><td>Urgencias</td><td>{{ recl.por_tipo.get('emergencia', 0) }}</td></tr>
+          <tr><td>Peligro inmediato</td><td>{{ recl.por_tipo.get('peligro_inmediato', 0) }}</td></tr>
+          <tr><td>Sin cerrar</td><td>{{ recl.abiertos }}</td></tr>
+        </tbody>
+      </table></div>
+      {% if recl.por_profesional %}
+      <p class="muted" style="margin-top:10px">Por profesional:
+        {% for nombre, n in recl.por_profesional.items() %}{{ nombre }} ({{ n }}){% if not loop.last %} · {% endif %}{% endfor %}
+      </p>
+      {% endif %}
+      {% else %}
+      <p class="muted">Sin reclamos registrados en este periodo.</p>
+      {% endif %}
+    </section>
+    <section>
       <h3>Citas por profesional</h3>
       <div class="table-wrap"><table>
         <thead><tr><th>Profesional</th><th>Citas</th><th>% del total</th></tr></thead>

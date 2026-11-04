@@ -1295,6 +1295,63 @@ def _avisar_especialistas(path, conversation_id, reason):
     return len(filas)
 
 
+def claim_create(path, *, conversation_id=None, client_key=None, kind='reclamo',
+                 detail=None):
+    """Abre un reclamo/urgencia. No duplica uno abierto del mismo cliente y tipo."""
+    stamp = now()
+    with connect(path) as conn:
+        dup = conn.execute(
+            "SELECT id FROM crm_claims WHERE client_key IS ? AND kind=? "
+            "AND status='abierto' ORDER BY id DESC LIMIT 1",
+            (client_key, kind)).fetchone()
+        if dup:
+            return _ok(existing=True, claim_id=dup['id'])
+        cur = conn.execute(
+            """INSERT INTO crm_claims(conversation_id, client_key, kind, detail,
+                   status, created_at, updated_at)
+               VALUES (?,?,?,?,'abierto',?,?)""",
+            (conversation_id, client_key, kind, _clean(detail, 1000), stamp, stamp))
+        return _ok(existing=False, claim_id=cur.lastrowid)
+
+
+def claim_update(path, claim_id, **campos):
+    """Completa un reclamo (nombre, documento, profesional, producto, estado)."""
+    permitidos = ('patient_name', 'document', 'professional_id', 'professional_name',
+                  'product', 'status', 'detail')
+    sets, args = [], []
+    for clave, valor in campos.items():
+        if clave in permitidos and valor is not None:
+            sets.append('%s=?' % clave)
+            args.append(_clean(valor, 1000) if isinstance(valor, str) else valor)
+    if not sets:
+        return _err(INVALID, 'Nada que actualizar')
+    args.extend([now(), claim_id])
+    with connect(path) as conn:
+        conn.execute('UPDATE crm_claims SET %s, updated_at=? WHERE id=?'
+                     % ', '.join(sets), args)
+    return _ok(claim_id=claim_id)
+
+
+def claims_resumen(path, dias=30):
+    """Reclamos del periodo: por tipo y por profesional."""
+    from datetime import datetime, timedelta, timezone as _tz
+    desde = (datetime.now(_tz.utc) - timedelta(days=dias)).isoformat()
+    with connect(path) as conn:
+        filas = [dict(r) for r in conn.execute(
+            'SELECT kind, professional_name, status FROM crm_claims WHERE created_at >= ?',
+            (desde,))]
+    por_tipo, por_prof, abiertos = {}, {}, 0
+    for fila in filas:
+        por_tipo[fila['kind']] = por_tipo.get(fila['kind'], 0) + 1
+        if fila['professional_name']:
+            por_prof[fila['professional_name']] = por_prof.get(
+                fila['professional_name'], 0) + 1
+        if fila['status'] == 'abierto':
+            abiertos += 1
+    return {'total': len(filas), 'abiertos': abiertos, 'por_tipo': por_tipo,
+            'por_profesional': por_prof}
+
+
 def conv_raise_alert(path, *, conversation_id, reason, priority='alta', message=None,
                      evidence=None):
     """Crea una alerta humana persistente (antes de pedir todos los datos).

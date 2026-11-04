@@ -289,10 +289,11 @@ AVISO_POR_MOTIVO = {
         'llame a las emergencias locales. No podemos hacer diagnósticos por '
         'este medio.'
     ),
-    'emergencia': ('Hemos recibido su mensaje y vamos a solicitarle '
-                   'atención prioritaria. Un miembro del equipo le atenderá.'),
-    'reclamo': ('Hemos recibido su solicitud. Un miembro del equipo la '
-                'revisará y le dará una respuesta.'),
+    'emergencia': ('Entiendo. Voy a poner tu caso en conocimiento de un '
+                   'especialista; se comunicará contigo en los próximos minutos.'),
+    'reclamo': ('Lamento lo ocurrido. Voy a poner tu caso en conocimiento del '
+                'doctor; se comunicará contigo en los próximos minutos. ¿Me ayudas '
+                'con tu nombre y el nombre del doctor que te atendió?'),
     'humano_explicito': ('Entendido. Un momento, por favor: un miembro del '
                          'equipo le atenderá.'),
     'por_revision': ('Hemos registrado su caso. Un miembro del equipo lo '
@@ -954,10 +955,40 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                                              % (razon, p['evidencia']))
                 svc.conv_set_egress_paused(path, conv_id, True)
         top = peticiones[0]  # ya en orden de severidad decreciente
+        # Reclamo, garantía o urgencia: queda registrado con su motivo.
+        claim_id = None
+        if top['motivo'] in ('reclamo', 'emergencia', 'peligro_inmediato'):
+            creado = svc.claim_create(
+                path, conversation_id=conv_id,
+                client_key=(conv or {}).get('client_key'),
+                kind=top['motivo'], detail=top['evidencia'])
+            claim_id = creado.get('claim_id')
         return {'intencion': 'humano', 'texto': AVISO_POR_MOTIVO[top['motivo']],
                 'paused': True, 'aviso_sistema': True,
-                'extra': {'motivos': motivos, 'razon': top['motivo']},
-                'pending': None}
+                'extra': {'motivos': motivos, 'razon': top['motivo'],
+                          'claim_id': claim_id},
+                'pending': ({'intencion': 'datos_reclamo', 'claim_id': claim_id}
+                            if claim_id else None)}
+
+    # Datos del reclamo: se guarda el nombre (y la cédula si la da).
+    previo = svc.conv_pending(path, conv_id) if conv_id else {}
+    if previo.get('intencion') == 'datos_reclamo' and previo.get('claim_id'):
+        texto = (body or '').strip()[:300]
+        if texto:
+            cedula = re.search(r'\b(\d{10})\b', texto)
+            nombre = texto.replace(cedula.group(1), '').strip(' .,-') if cedula else texto
+            nombre = re.sub(r'(?i)^(me llamo|soy|mi nombre es)\s+', '', nombre)
+            nombre = re.sub(r'(?i)[,\s]*(c[eé]dula|documento|ci|dni)\s*$', '', nombre)
+            nombre = nombre.strip(' .,-')
+            svc.claim_update(path, previo['claim_id'],
+                             patient_name=nombre[:120] or None,
+                             document=cedula.group(1) if cedula else None)
+            if conv_id:
+                svc.conv_clear_pending(path, conv_id)
+        return {'intencion': 'datos_reclamo',
+                'texto': ('Gracias, dejo tu caso registrado. Un miembro del equipo '
+                          'se comunicará contigo en los próximos minutos.'),
+                'paused': False, 'extra': {}, 'pending': None}
 
     if _paused(path, conv_id):
         return {'intencion': 'pausa', 'texto': None, 'paused': True,

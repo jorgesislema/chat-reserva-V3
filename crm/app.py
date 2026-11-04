@@ -425,6 +425,7 @@ def create_app(test_config=None):
             'cancelacion': round(100 * conteo['cancelada'] / cerradas, 1) if cerradas else 0,
             'nuevos_leads': nuevos, 'ganados': ganados, 'total_leads': total_leads,
             'conversion': round(100 * ganados / total_leads, 1) if total_leads else 0,
+            'reclamos': c02.claims_resumen(database, dias),
         }
 
     @app.get('/')
