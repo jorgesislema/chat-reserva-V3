@@ -31,7 +31,7 @@
         <thead>
           <tr>
             <th>Código</th><th>Nombre</th><th>Tipo</th><th>Detalle</th>
-            <th>Observaciones</th><th>Precio</th><th>Inventario</th>
+            <th>Observaciones</th><th>Precio</th><th>Unidades</th>
             <th>Estado</th><th>Acciones</th>
           </tr>
         </thead>
@@ -71,14 +71,14 @@
         <label>Precio<small>Moneda de contado opcional</small>
           <input type="number" step="0.01" name="price" id="c02-f-price"></label>
         <label>Moneda<input name="currency" id="c02-f-currency" maxlength="3" placeholder="USD"></label>
-        <label>Stock<input type="number" name="stock" id="c02-f-stock"></label>
+        <label>Unidades disponibles<small>Lo que queda; vacío o «sin stock» = no aplica</small><input type="number" name="stock" id="c02-f-stock"></label>
         <label>Duración<small>Minutos, para la agenda</small>
           <input type="number" name="duration" id="c02-f-duration"></label>
         <label>Vigencia desde<input type="date" name="valid_from" id="c02-f-valid-from"></label>
         <label>Vigencia hasta<input type="date" name="valid_until" id="c02-f-valid-until"></label>
       </div>
       <label>Detalle (visible para el paciente)<textarea name="details" id="c02-f-details" rows="3"></textarea></label>
-      <label>Observaciones públicas (para el bot de concierge)<textarea name="public_notes" id="c02-f-public-notes" rows="3"></textarea></label>
+      <label>Observaciones para el cliente<small>Promociones, condiciones, «solo clientes nuevos»…</small><textarea name="public_notes" id="c02-f-public-notes" rows="3" placeholder="Promoción blanqueamiento + limpieza · válida diciembre · solo clientes nuevos hasta agotar"></textarea></label>
       {% if user.role=='admin' %}
       <label>Observaciones internas<small>Sólo el equipo ve estas notas; nunca las envía el bot.</small>
         <textarea name="internal_notes" id="c02-f-internal-notes" rows="2"></textarea></label>

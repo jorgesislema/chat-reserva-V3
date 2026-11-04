@@ -108,6 +108,11 @@
       var tr = document.createElement('tr');
       var td = function (txt) { var c = document.createElement('td'); c.textContent = txt === null || txt === undefined ? '—' : txt; return c; };
       tr.appendChild(td(it.created_at));
+      var tipo = (String(it.correlation || '').indexOf('recordatorio') === 0)
+        ? 'Recordatorio'
+        : (String(it.correlation || '') === 'aviso-especialista'
+           ? 'Aviso urgente' : 'Mensaje');
+      tr.appendChild(td(tipo));
       tr.appendChild(td(it.channel || '—'));
       tr.appendChild(td(it.recipient || '—'));
       var st = document.createElement('td'); st.appendChild(stateChip(it.state || '')); tr.appendChild(st);

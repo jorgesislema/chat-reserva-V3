@@ -70,6 +70,7 @@ _PROMPT_SISTEMA = (
     '- Cita cada afirmación con la fuente correspondiente como [n].\n'
     '- Si el CONTEXTO trae «Citas del día», puedes enumerarlas con nombre, hora, '
     'servicio y profesional: es información de administración.\n'
+    '- Si falta el dato, dilo en lenguaje natural («Lo siento, no tengo esa información»), sin frases técnicas ni de sistema.\n'
     '- Responde en español, breve y directo.'
 )
 

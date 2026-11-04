@@ -1873,14 +1873,56 @@ def _agenda_summary(path):
         proxima = '%s con %s' % (cuando, next_citas['prof'])
     else:
         proxima = 'ninguna'
-    texto = ('Agenda: %d citas hoy (%s) y %d mañana (%s). Próxima: %s. '
-             'Profesionales activos: %s.'
-             % (citas_hoy, hoy.strftime('%d/%m'), citas_manana, manana.strftime('%d/%m'),
-                proxima, nombres))
+    # Métricas comerciales del día, de la semana anterior y del mes.
+    ini_hoy = datetime.combine(hoy, datetime.min.time(), ZoneInfo(zona)).astimezone(_tz.utc)
+    fin_hoy = ini_hoy + timedelta(days=1)
+    canceladas_hoy = atendidas_hoy = semana_pasada = recurrentes_mes = 0
+    with connect(path) as conn:
+        def _contar(desde, hasta, estado=None):
+            sql = ("SELECT COUNT(*) c FROM crm_appointments WHERE status='active' "
+                   "AND start>=? AND start<?")
+            args = [desde.isoformat(), hasta.isoformat()]
+            if estado:
+                sql += ' AND operational_status=?'
+                args.append(estado)
+            return conn.execute(sql, args).fetchone()['c']
+
+        canceladas_hoy = _contar(ini_hoy, fin_hoy, 'cancelada')
+        atendidas_hoy = _contar(ini_hoy, fin_hoy, 'atendida')
+        semana_pasada = _contar(ini_hoy - timedelta(days=7), ini_hoy, 'atendida')
+        ini_mes = datetime.combine(hoy.replace(day=1), datetime.min.time(),
+                                   ZoneInfo(zona)).astimezone(_tz.utc)
+        recurrentes_mes = conn.execute(
+            """SELECT COUNT(*) c FROM (
+                   SELECT lead_id FROM crm_appointments
+                   WHERE status='active' AND lead_id IS NOT NULL
+                     AND start>=? AND start<?
+                   GROUP BY lead_id HAVING COUNT(*) >= 2)""",
+            (ini_mes.isoformat(), fin_hoy.isoformat())).fetchone()['c']
+
+    negocio = 'la clínica'
+    moneda = 'USD'
+    try:
+        from crm import business_profile as _bp
+        perfil = _bp.resolve_profile()
+        negocio = (getattr(perfil, 'name', '') or negocio).strip()
+        moneda = (getattr(perfil, 'currency', '') or moneda).strip()
+    except Exception:  # noqa: BLE001 - sin perfil se usa el genérico
+        pass
+
+    texto = ('Negocio: %s (zona %s, moneda %s). Agenda: %d citas hoy (%s), de ellas %d '
+             'atendidas y %d canceladas; %d mañana (%s). La semana anterior se atendieron '
+             '%d. Clientes que han vuelto este mes: %d. Próxima: %s. Profesionales activos: %s.'
+             % (negocio, zona, moneda, citas_hoy, hoy.strftime('%d/%m'), atendidas_hoy,
+                canceladas_hoy, citas_manana, manana.strftime('%d/%m'), semana_pasada,
+                recurrentes_mes, proxima, nombres))
     return {'profesionales': [dict(p) for p in profs],
             'proxima': dict(next_citas) if next_citas else None,
             'citas_hoy': citas_hoy, 'citas_manana': citas_manana,
             'citas_abiertas': citas_hoy + citas_manana,
+            'atendidas_hoy': atendidas_hoy, 'canceladas_hoy': canceladas_hoy,
+            'semana_pasada': semana_pasada, 'recurrentes_mes': recurrentes_mes,
+            'negocio': negocio,
             'hoy': hoy.isoformat(), 'manana': manana.isoformat(),
             'texto': texto}
 

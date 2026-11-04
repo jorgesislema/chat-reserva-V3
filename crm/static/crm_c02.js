@@ -263,7 +263,7 @@
       }));
       tr.appendChild(kindCell(it));
       tr.appendChild(textCell(it.details, 80));
-      tr.appendChild(textCell(it.public_notes, 70));
+      tr.appendChild(editableTextCell(it, 'public_notes'));
       tr.appendChild(priceCell(it));
       tr.appendChild(stockCell(it));
       tr.appendChild(stateChip(it));
