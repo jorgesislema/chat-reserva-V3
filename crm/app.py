@@ -176,6 +176,23 @@ def password_hash(password):
     return generate_password_hash(password, method='scrypt')
 
 
+def _arena_simulador(origen: str, user_id=None):
+    """Copia y teléfono de prueba AISLADOS por operador (punto 7 del informe).
+
+    Antes todos compartían ``<base>.simulador.db`` y el mismo número: dos
+    operadores veían el historial del otro y podían reiniciarle la prueba (el
+    botón de reiniciar borra la copia entera). Ahora cada usuario tiene la suya.
+    Sigue siendo una copia de la base: no hay envío real en ningún caso.
+    """
+    try:
+        uid = int(user_id) if user_id is not None else 0
+    except (TypeError, ValueError):
+        uid = 0
+    sufijo = ('u%d' % uid) if uid else 'compartido'
+    return ('%s.simulador-%s.db' % (origen, sufijo),
+            '593999%06d' % (uid % 1000000))
+
+
 def create_app(test_config=None):
     load_dotenv(ROOT / '.env')
     app = Flask(__name__)
@@ -1501,12 +1518,12 @@ def create_app(test_config=None):
 
         cuerpo = request.get_json(silent=True) or {}
         origen = app.config['DATABASE']
-        arena = origen + '.simulador.db'
+        operador = getattr(getattr(g, 'user', None), 'id', None)
+        arena, telefono = _arena_simulador(origen, operador)
         if cuerpo.get('reiniciar') or not Path(arena).exists():
             with sqlite3.connect(origen) as src, sqlite3.connect(arena) as dst:
                 src.backup(dst)
         texto = (cuerpo.get('texto') or '').strip()[:400]
-        telefono = '593999000777'
         if texto:
             _c02.wa_ingest(arena, external_id='sim-' + uuid4().hex,
                            phone=telefono, body=texto)

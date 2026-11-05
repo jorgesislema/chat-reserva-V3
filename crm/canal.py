@@ -626,6 +626,42 @@ def _alternativas(path, profesional_id, fecha, hora, limite=3):
     return libres
 
 
+def _motivo_no_reservable(path, profesional_id, fecha, hora, duracion):
+    """Por qué ese hueco no se puede ofrecer, o ``None`` si está libre.
+
+    Sólo consulta: horario y excepciones del negocio primero, después
+    solapamiento con citas activas. Se usa para PROPONER una hora que existe de
+    verdad antes de pedir confirmación; la comprobación definitiva la repite
+    ``save_appointment`` dentro de su transacción al crear la cita, porque entre
+    la propuesta y el «sí» alguien puede ocupar el hueco.
+    """
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    from datetime import timezone as _tz
+    from zoneinfo import ZoneInfo as _Zone
+
+    zona = _Zone(effective_profile(path).zone)
+    try:
+        ini_local = _dt.strptime('%s %s' % (str(fecha)[:10], str(hora)[:5]),
+                                 '%Y-%m-%d %H:%M')
+    except (TypeError, ValueError):
+        return {'tipo': 'horario', 'motivo': 'No entendí esa hora.'}
+    ini = ini_local.replace(tzinfo=zona).astimezone(_tz.utc)
+    fin = (ini_local + _td(minutes=max(1, int(duracion or 30)))).replace(
+        tzinfo=zona).astimezone(_tz.utc)
+    motivo = _cfg_check_window(path, ini, fin)
+    if motivo:
+        return {'tipo': 'horario', 'motivo': motivo}
+    with store.connect(path) as conn:
+        ocupado = conn.execute(
+            "SELECT 1 FROM crm_appointments WHERE professional_id=? "
+            "AND status='active' AND start<? AND end>?",
+            (profesional_id, fin.isoformat(), ini.isoformat())).fetchone()
+    if ocupado:
+        return {'tipo': 'ocupado', 'motivo': 'Ese horario ya está ocupado.'}
+    return None
+
+
 def _saludo_hora(path) -> str:
     """Saludo según la hora del negocio (buenos días / tardes / noches)."""
     from datetime import datetime
@@ -994,7 +1030,12 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                 svc.conv_clear_pending(path, conv_id)
         if conv_id:
             svc.conv_clear_pending(path, conv_id)
-        return {'intencion': 'datos_reclamo', 'texto': None, 'paused': True,
+        # Acuse EXPLÍCITO y LIMITADO (informe del 5-11, punto 4): no promete
+        # plazo, no es salida de IA y no abre una captura nueva de datos.
+        return {'intencion': 'datos_reclamo',
+                'texto': ('Gracias, ya queda anotado. He dejado tu caso al '
+                          'equipo para que lo revise.'),
+                'paused': True, 'aviso_sistema': True,
                 'extra': {}, 'pending': None}
 
     if _paused(path, conv_id):
@@ -1169,6 +1210,9 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                          need_datos=True,
                          pending={**pend, 'profesionales_en_espera': [p['id'] for p in compatibles]})
         pend['profesional_id'] = profesional_id
+        pend['profesional_nombre'] = pend.get('profesional_nombre') or next(
+            (p['name'] for p in compatibles if p['id'] == profesional_id),
+            'el profesional')
 
         # 3) Fecha y hora.
         if hora and not fecha:
@@ -1183,6 +1227,65 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             return _resp('reservar', prefijo + '¿Qué día te viene bien? '
                          'Puedes decirme «el jueves a las 11» o «mañana 10:30».',
                          need_datos=True, pending=pend)
+
+        # 3b) CONFIRMACIÓN EXPLÍCITA antes de crear nada (informe del 5-11,
+        #     punto 2). Antes se creaba la cita y luego se preguntaba «¿te va
+        #     bien así?»: un «no» dejaba una cita que el cliente no aceptó.
+        #     Ahora se propone el hueco (comprobando que está libre) y sólo se
+        #     crea cuando el cliente dice que sí; save_appointment revalida la
+        #     disponibilidad al insertar.
+        nueva_fecha, nueva_hora = _extract_datetime(body or '')
+        propuesta = bool(pending.get('confirmar_reserva'))
+        if propuesta and not (nueva_fecha or nueva_hora):
+            if _rechaza(body or ''):
+                sin_hora = {k: v for k, v in pend.items()
+                            if k not in ('fecha', 'hora', 'confirmar_reserva')}
+                return _resp('reservar',
+                             'Sin problema, no he reservado nada. ¿Qué otro día '
+                             'u hora te viene bien?',
+                             need_datos=True, pending=sin_hora)
+            if not _confirma_si(body or ''):
+                nombre_prof = pend.get('profesional_nombre') or 'el profesional'
+                return _resp('reservar',
+                             'Antes de reservarlo: ¿te dejo el %s a las %s '
+                             'con %s?'
+                             % (_fecha_larga(fecha), hora, nombre_prof),
+                             need_datos=True, pending=pend)
+            # Dijo que sí: se sigue al alta real.
+        else:
+            motivo = _motivo_no_reservable(path, profesional_id, fecha, hora,
+                                            serv['duration_min'])
+            if motivo and motivo['tipo'] == 'horario':
+                # Día cerrado, fuera de horario o excepción: se dice tal cual y
+                # se pide otra fecha, sin proponer algo que no existe.
+                return _resp('reservar',
+                             '%s ¿Probamos otro día u hora?' % motivo['motivo'],
+                             need_datos=True,
+                             pending={**pend, 'fecha': None, 'hora': None})
+            if motivo:
+                opciones = _alternativas(path, profesional_id, fecha, hora)
+                if opciones:
+                    if len(opciones) == 1:
+                        lista = opciones[0]
+                    else:
+                        lista = ', '.join(opciones[:-1]) + ' o ' + opciones[-1]
+                    return _resp('reservar',
+                                 'Uy, a las %s ya está ocupado. Te puedo ofrecer %s, '
+                                 '¿cuál te viene mejor?' % (hora, lista),
+                                 need_datos=True,
+                                 pending={**pend, 'fecha': None, 'hora': None})
+                return _resp('reservar',
+                             'A las %s no tengo disponibilidad y no encuentro otro '
+                             'espacio cerca. ¿Probamos otro día?' % hora,
+                             need_datos=True, pending={**pend, 'fecha': None, 'hora': None})
+            nombre_prof = pend.get('profesional_nombre') or 'el profesional'
+            return _resp('reservar',
+                         'Tengo libre el %s a las %s para %s con %s. ¿Te lo reservo?'
+                         % (_fecha_larga(fecha), hora, serv['name'], nombre_prof),
+                         need_datos=True,
+                         pending={**pend, 'fecha': fecha, 'hora': hora,
+                                  'confirmar_reserva': True,
+                                  'profesional_nombre': nombre_prof})
 
         # 4) Ejecución con revalidación de servicio/profesional/horario en la
         #    misma transacción de la guardia.
@@ -1437,6 +1540,19 @@ def _confirma_si(t: str) -> bool:
                      'cancelar', 'anular', 'si')
 
 
+def _rechaza(t: str) -> bool:
+    """¿El cliente dijo que no a la propuesta? Sólo negativas explícitas."""
+    texto = (t or '').strip().lower()
+    if not texto:
+        return False
+    limpio = re.sub(r'[^a-záéíóúñ ]', '', texto)
+    if re.match(r'^no\b', limpio):
+        return True
+    return any(frase in limpio for frase in (
+        'mejor no', 'no gracias', 'no me sirve', 'otra hora', 'otro dia',
+        'otro día', 'otra fecha', 'prefiero no'))
+
+
 def _reservar_conn(conn, path, phone, lead, fecha, hora, profesionales, zonas, now_local,
                    *, servicio=None, profesional_id=None) -> dict:
     """Crea una reserva real con el dominio común (R2) compartiendo la
@@ -1512,9 +1628,9 @@ def _reservar_conn(conn, path, phone, lead, fecha, hora, profesionales, zonas, n
         nombre_prof = prof.get('name') or 'el profesional'
         return {'ok': True, 'appointment': result['appointment'],
                 'appointment_id': result['appointment']['id'],
-                'message': '¡Perfecto! Tu cita de %s es el %s a las %s con %s. '
-                           '¿Te va bien así? Si puedes llegar 15 minutos antes, mejor: '
-                           'así preparamos tu ficha.'
+                'message': '¡Listo! Tu cita de %s es el %s a las %s con %s. '
+                           'Si puedes llegar 15 minutos antes, mejor: así '
+                           'preparamos tu ficha.'
                            % (str(titulo).replace('Reserva: ', ''), _fecha_larga(fecha),
                               hora, nombre_prof)}
     return {'ok': False, 'code': result.get('code'),
@@ -1656,6 +1772,7 @@ class WorkerCanal:
         self.motor = motor or MotorSimulado()
         self.hooks = hooks or {}
 
-    def paso(self, contexto=None, intervalo=90) -> dict:
-        return procesar_lote(self.path, self.worker, self.motor, contexto, intervalo,
-                             self.hooks)
+    def paso(self, contexto=None, intervalo=90, adaptador_rag=None) -> dict:
+        return procesar_lote(self.path, self.worker, self.motor, contexto,
+                             intervalo, self.hooks,
+                             adaptador_rag=adaptador_rag)

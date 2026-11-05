@@ -179,8 +179,15 @@ def test_hum04_toma_entre_generacion_y_escritura_cerrada_por_guardia(path):
         svc.conv_take(path, conversation_id=conv['id'], user_id=1, role='admin')
         lanzado.set()
 
-    worker = canal.WorkerCanal(path, worker='w-test',
-                               motor=canal.MotorSimulado(),
+    # Primer turno: el canal PROPONE el hueco (aún no escribe, no hay hook).
+    worker = canal.WorkerCanal(path, worker='w-test', motor=canal.MotorSimulado())
+    out = worker.paso(contexto=_ctx(path))
+    assert out.get('citas_creadas', 0) == 0
+    assert not lanzado.is_set()
+
+    # El cliente confirma: el punto de mutación se alcanza en ESE turno.
+    svc.wa_ingest(path, external_id='t3', phone='59170000111', body='sí')
+    worker = canal.WorkerCanal(path, worker='w-test2', motor=canal.MotorSimulado(),
                                hooks={'pre_escritura': hook_pre_escritura})
     out = worker.paso(contexto=_ctx(path))
     assert lanzado.is_set()

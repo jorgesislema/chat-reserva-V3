@@ -127,6 +127,7 @@ def test_pregunta_para_quien_es_y_guarda_el_paciente(path):
 
     _paso(path, 'quiero reservar una limpieza dental', 'm1', ctx)
     _paso(path, '%s 10:30' % dia.isoformat(), 'm2', ctx)
+    _paso(path, 'sí', 'm2b', ctx)          # confirma el hueco propuesto
     _paso(path, 'es para mi hija Lucía Andrade', 'm3', ctx)
 
     with connect(path) as conn:
@@ -143,6 +144,7 @@ def test_respuesta_para_mi_usa_el_titular(path):
 
     _paso(path, 'quiero reservar una limpieza dental', 'p1', ctx)
     _paso(path, '%s 11:00' % dia.isoformat(), 'p2', ctx)
+    _paso(path, 'sí', 'p2b', ctx)
     _paso(path, 'para mí', 'p3', ctx)
 
     with connect(path) as conn:
@@ -188,6 +190,7 @@ def test_hueco_ocupado_ofrece_alternativas(path):
     _paso(path, 'quiero una limpieza dental', 'h1', ctx)
     _paso(path, '1', 'h2', ctx)
     _paso(path, '%s 10:30' % dia.isoformat(), 'h3', ctx)
+    _paso(path, 'sí', 'h3b', ctx)          # la primera cita se crea al confirmar
 
     otro = '59170000222'
     _paso(path, 'quiero una limpieza dental', 'h4', ctx, phone=otro)

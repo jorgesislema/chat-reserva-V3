@@ -77,7 +77,7 @@ def _ctx():
 
 
 def _textos(db):
-    rows = (outbox_next(db).get('pending') or [])
+    rows = (outbox_next(db, limit=50).get('pending') or [])
     textos = []
     for x in rows:
         payload = x['payload']
@@ -95,6 +95,11 @@ def _paso(crm, body, ex_id, contexto=None):
     wa_ingest(db, external_id=ex_id, phone='59170000111', body=body)
     return canal.WorkerCanal(db, worker='w-%s' % ex_id).paso(
         contexto=contexto or _ctx())
+
+
+def _si(crm, ex_id):
+    """El cliente acepta la propuesta: aquí se crea de verdad la cita."""
+    return _paso(crm, 'sí', ex_id)
 
 
 def _citas(crm, lead_id=None):
@@ -132,6 +137,9 @@ def test_duracion_procede_del_servicio_seleccionado(crm):
     _paso(crm, '2', 'e2')
     assert any('¿Con qué profesional' in t for t in _textos(db))
     out = _paso(crm, '1', 'e3')  # Dra. Ana
+    assert out['citas_creadas'] == 0            # primero se propone el hueco
+    assert any('¿Te lo reservo?' in t for t in _textos(db))
+    out = _si(crm, 'e4')
     assert out['citas_creadas'] == 1
     c = _citas(crm)[0]
     s = datetime.fromisoformat(c['start']); e = datetime.fromisoformat(c['end'])
@@ -148,6 +156,8 @@ def test_profesional_seleccionado_por_numero_en_bd(crm):
     _paso(crm, 'quiero reservar %s a las 10:30' % f, 'p1')
     assert any('¿Con qué profesional' in t for t in _textos(db))
     out = _paso(crm, '2', 'p2')  # Dr. Luis
+    assert out['citas_creadas'] == 0
+    out = _si(crm, 'p3')
     assert out['citas_creadas'] == 1
     assert _citas(crm)[0]['professional_id'] == 2
 
@@ -207,6 +217,8 @@ def test_seleccion_ambigua_inexistente_o_ajena_no_muta(crm):
     _paso(crm, '1', 'am3')
     assert any('¿Con qué profesional' in t for t in _textos(db))
     _paso(crm, '1', 'am4')
+    assert len(_citas(crm)) == 0                # nada se crea antes del «sí»
+    _si(crm, 'am4b')
     assert len(_citas(crm)) == 1
 
     # Ajena: otro teléfono no ve ni modifica la cita del primer cliente.
@@ -233,6 +245,8 @@ def test_selecciones_conservadas_entre_mensajes(crm):
     o3 = _paso(crm, '1', 'm3')
     assert o3['citas_creadas'] == 0 and any('¿Qué día te viene bien' in t for t in _textos(db))
     o4 = _paso(crm, '%s 10:30' % f, 'm4')
+    assert o4['citas_creadas'] == 0
+    o4 = _si(crm, 'm5')
     assert o4['citas_creadas'] == 1
     c = _citas(crm)[0]
     assert c['professional_id'] == 1
@@ -291,6 +305,7 @@ def test_horario_cerrado_y_conflicto_respetan_dominio(crm):
     # Conflicto: segunda reserva al mismo profesional y horario.
     _paso(crm, 'quiero reservar %s a las 10:30' % f, 'hc3')
     _paso(crm, '1', 'hc4')
+    _si(crm, 'hc4b')
     assert len(_citas(crm)) == 1
     _paso(crm, 'quiero reservar %s a las 10:30' % f, 'hc5')
     out = _paso(crm, '1', 'hc6')
@@ -326,8 +341,13 @@ def test_recorrido_http_canal_y_misma_cita_desde_panel(crm):
     post_msg('quiero reservar %s a las 10:30' % f)
     post_msg('1')  # elige profesional 1 (servicio único + Dra. Ana)
     o1 = canal.WorkerCanal(db, worker='w-http').paso(contexto=_ctx())
-    o2 = canal.WorkerCanal(db, worker='w-http2').paso(contexto=_ctx())
-    assert o1['citas_creadas'] + o2['citas_creadas'] == 1
+    assert o1['citas_creadas'] == 0              # propuesta, sin cita todavía
+    post_msg('sí')  # el cliente confirma el hueco propuesto
+    creadas = 0
+    for i in range(2):
+        creadas += canal.WorkerCanal(db, worker='w-http-%d' % i).paso(
+            contexto=_ctx())['citas_creadas']
+    assert creadas == 1
     citas = _citas(crm)
     assert len(citas) == 1
     expected = citas[0]
@@ -371,15 +391,20 @@ def test_sel01_reasignacion_servicio_en_pre_escritura(crm):
     _paso(crm, 'quiero reservar %s a las 10:30' % f, 'sel1')
     assert any('¿Con qué profesional' in t for t in _textos(db))
 
-    # Cambio de asociación justo antes de la escritura del turno que elige el
-    # profesional 1 (igual que la reproducción del revisor).
+    # Elección del profesional: el canal PROPONE el hueco (aún no escribe).
+    _paso(crm, '1', 'sel2')
+    assert any('¿Te lo reservo?' in t for t in _textos(db))
+    assert len(_citas(crm)) == 0
+
+    # Cambio de asociación justo antes de la escritura del turno que confirma
+    # (igual que la reproducción del revisor).
     def reassign():
         with connect(db) as c:
             c.execute('UPDATE crm_catalog_items SET professional_id=2 WHERE id=?',
                       (sid,))
 
-    wa_ingest(db, external_id='sel2', phone='59170000111', body='1')
-    out = canal.WorkerCanal(db, worker='w-sel2',
+    wa_ingest(db, external_id='sel2b', phone='59170000111', body='sí')
+    out = canal.WorkerCanal(db, worker='w-sel2b',
                             hooks={'pre_escritura': reassign}).paso(contexto=_ctx())
 
     # 1) Sin cita incompatible ni confirmación.
@@ -397,6 +422,8 @@ def test_sel01_reasignacion_servicio_en_pre_escritura(crm):
     # 3)-4) Responder con la nueva opción válida completa la reserva sin
     # reiniciar la conversación, conservando servicio/fecha/hora/duración.
     out = _paso(crm, '1', 'sel3')  # Dr. Luis, posición 1 en la lista refrescada
+    assert out['citas_creadas'] == 0            # se propone y se pide confirmar
+    out = _paso(crm, 'sí', 'sel4')
     assert out['citas_creadas'] == 1
     citas = _citas(crm)
     assert len(citas) == 1
@@ -419,5 +446,7 @@ def test_sel01_servicio_sin_restriccion_conserva_flujo(crm):
     _paso(crm, 'quiero reservar %s a las 10:30' % f, 'ns1')
     assert any('¿Con qué profesional' in t for t in _textos(db))
     out = _paso(crm, '2', 'ns2')  # Dr. Luis
+    assert out['citas_creadas'] == 0
+    out = _si(crm, 'ns3')
     assert out['citas_creadas'] == 1
     assert _citas(crm)[0]['professional_id'] == 2

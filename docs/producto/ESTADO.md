@@ -3645,3 +3645,22 @@ Documentación e infraestructura:
 Pendiente de esa revisión (no hecho): **confirmar antes de crear la cita** (punto 2, cambia la
 máquina de estados), **recordatorios como flujo completo** (punto 6) y **aislar el simulador por
 sesión** (punto 7). También corregidas dos pruebas que dependían del día de la semana.
+
+## 2026-11-05 — CONFIRMAR ANTES DE RESERVAR Y SIMULADOR POR OPERADOR (puntos 2 y 7)
+
+2. **La cita se crea sólo cuando el cliente confirma**. Antes se guardaba la reserva y después se
+   preguntaba «¿te va bien así?»: un «no» dejaba una cita que el cliente no aceptó. Ahora el canal
+   comprueba el hueco (horario, excepciones del negocio y solapamientos), **propone** («Tengo libre
+   el jueves 12 de noviembre a las 11:00 para Limpieza dental con Dra. Ana. ¿Te lo reservo?») y crea
+   la cita únicamente con un «sí». Un «no» explícito borra fecha y hora y pide otra. Si el cliente
+   cambia de día u hora, se propone otra vez. La disponibilidad se **revalida al insertar** dentro de
+   la transacción de la guardia (`save_appointment`), así que si alguien ocupa el hueco entre la
+   propuesta y el «sí» se responden alternativas sin crear nada.
+7. **Simulador aislado por operador**. Cada usuario tiene su copia (`<base>.simulador-u<id>.db`) y su
+   teléfono de prueba (`593999……` derivado del id), así que dos operadores ya no comparten historial
+   ni pueden reiniciarse la prueba. Sin sesión se usa la copia `compartido` (sólo escenarios de
+   sistema). Sigue siendo una copia de la base: no envía nada por WhatsApp.
+
+Pruebas: nueva `tests/test_c02_simulador_aislado.py` (9 casos: adaptador por parámetro, global
+intacto, abstención segura, captura del reclamo, acuse de sistema sin plazo, copia por operador).
+Las pruebas del canal, WhatsApp real, agenda/ficha y selección se ajustaron al turno de confirmación.

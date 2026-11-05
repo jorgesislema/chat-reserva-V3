@@ -201,6 +201,9 @@ def test_horario_semanal_misma_regla_panel_y_canal(crm):
     wa_ingest(db, external_id='h2', phone='59170000112',
               body='quiero reservar %s a las 10:30' % f)
     out = canal.WorkerCanal(db, worker='w-h2').paso(contexto={'professionals': [{'id': 1, 'name': 'Dra. Ana'}]})
+    assert out['citas_creadas'] == 0        # propone el hueco dentro de la ventana
+    wa_ingest(db, external_id='h2b', phone='59170000112', body='sí')
+    out = canal.WorkerCanal(db, worker='w-h2b').paso(contexto={'professionals': [{'id': 1, 'name': 'Dra. Ana'}]})
     assert out['citas_creadas'] == 1
     r = client.post('/api/appointments', headers={'X-CSRF-Token': csrf},
                     json={'professional_id': 2,

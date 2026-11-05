@@ -63,8 +63,10 @@ porque el CI seguiría rojo por 5 pruebas preexistentes).
 
 - Hecho: adaptador del simulador aislado, avisos sin promesas de plazo, captura del reclamo
   limitada, abstención con texto seguro, MAPA y CI al día.
-- Pendiente de esa revisión: confirmar antes de crear la cita (punto 2), recordatorios como flujo
-  completo (punto 6) y simulador aislado por sesión (punto 7).
+- Hechos también: confirmar antes de crear la cita (punto 2, con revalidación al insertar) y
+  simulador aislado por operador (punto 7).
+- Pendiente de esa revisión: recordatorios como flujo completo (punto 6: enlazar recordatorio y
+  cita, plantilla de transporte, manejo de SÍ/NO antes de programar envíos automáticos).
 
 ## Pendiente, por orden
 

@@ -220,14 +220,14 @@ def test_webhook_flujo_completo_y_repeticion_no_duplica(crm, fake):
         assert conn.execute("SELECT COUNT(*) n FROM crm_operations WHERE state='pendiente'"
                             ).fetchone()['n'] == 1
 
-    # 1b) Worker: flujo existente de reservas crea la cita en el mismo dominio.
+    # 1b) Worker: el canal PROPONE el hueco; todavía no hay cita.
     res = canal.procesar_lote(db, 'w-t1', canal.MotorSimulado(), contexto=_ctx(),
                               intervalo=90)
-    assert res['citas_creadas'] == 1
-    cita = _citas(crm)[0]
-    assert cita['professional_id'] == 1
+    assert res['citas_creadas'] == 0
+    assert _citas(crm) == []
     pend = outbox_next(db).get('pending', [])
     assert pend and 'Blanqueamiento' not in pend[0]['payload']
+    assert '¿Te lo reservo?' in pend[0]['payload']
 
     # 1c) Respuesta por el transporte REAL (fake): Meta acepta y guarda el wamid.
     outbox_id = pend[0]['id']
@@ -241,6 +241,18 @@ def test_webhook_flujo_completo_y_repeticion_no_duplica(crm, fake):
     assert estado['state'] == 'enviado'
     assert estado['provider_state'] == 'aceptado'
     assert estado['provider_message_id'] == 'wamid.001'
+
+    # 1d) El cliente confirma por el mismo webhook: ahora se crea la cita del
+    #     dominio y su confirmación sale por el transporte real.
+    r = _post_firmado(crm, _payload_entrante('sí', 'wamid-in-1b'))
+    assert r.status_code == 200
+    res = canal.procesar_lote(db, 'w-t1b', canal.MotorSimulado(), contexto=_ctx(),
+                              intervalo=90)
+    assert res['citas_creadas'] == 1
+    cita = _citas(crm)[0]
+    assert cita['professional_id'] == 1
+    eg = egress.egress_drain(db, _transporte(db, fake), worker='eg-t1b')
+    assert eg['entregadas'] == 1
 
     # 2) Repetición del webhook: ni doble cita ni doble respuesta.
     r = _post_firmado(crm, _payload_entrante(
@@ -850,6 +862,13 @@ def test_recorrido_positivo_motor_ia(crm, fake, tmp_path):
             'quiero reservar %s a las 10:30' % f, 'wamid-mia-1'))
         assert r.status_code == 200
         res = canal.procesar_lote(db, 'w-mia', motor, contexto=_ctx(), intervalo=90)
+        assert res['procesadas'] >= 1
+        assert len(_citas(crm)) == 0   # se propone el hueco, sin escribir aún
+
+        # El cliente confirma el hueco propuesto: aquí nace la cita.
+        r = _post_firmado(crm, _payload_entrante('sí', 'wamid-mia-1b'))
+        assert r.status_code == 200
+        res = canal.procesar_lote(db, 'w-mia2', motor, contexto=_ctx(), intervalo=90)
         assert res['procesadas'] >= 1
         assert len(_citas(crm)) == 1  # la cita se creó en el dominio
         cita = _citas(crm)[0]

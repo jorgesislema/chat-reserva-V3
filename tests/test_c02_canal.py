@@ -118,6 +118,12 @@ def test_worker_reserva_crea_cita_real(path):
               body='quiero reservar mañana a las 10:30')
     worker = canal.WorkerCanal(path, worker='w-test')
     out = worker.paso(contexto=_seed_ctx(path))
+    # Primero se propone el hueco: la cita no existe hasta el «sí» del cliente.
+    assert out['citas_creadas'] == 0
+    with connect(path) as conn:
+        assert conn.execute('SELECT COUNT(*) FROM crm_appointments').fetchone()[0] == 0
+    wa_ingest(path, external_id='r2', phone='59170000111', body='sí')
+    out = worker.paso(contexto=_seed_ctx(path))
     assert out['citas_creadas'] == 1
     with connect(path) as conn:
         apps = conn.execute('SELECT * FROM crm_appointments').fetchall()
@@ -144,9 +150,15 @@ def test_worker_dialogo_multiturno_reserva(path):
     out1 = worker.paso(contexto=_seed_ctx(path))
     assert out1['citas_creadas'] == 0  # aún sin datos
     # El clic del turno 1 ha pedido datos: contexto guardado en la conversación.
+    # El turno con día y hora PROPONE el hueco; la cita se crea al confirmar.
     wa_ingest(path, external_id='t2', phone='59170000111', body='mañana 10:30')
     out2 = worker.paso(contexto=_seed_ctx(path))
-    assert out2['citas_creadas'] == 1
+    assert out2['citas_creadas'] == 0
+    assert any('¿Te lo reservo?' in (x['payload'] or '')
+               for x in svc.outbox_next(path)['pending'])
+    wa_ingest(path, external_id='t3', phone='59170000111', body='sí')
+    out3 = worker.paso(contexto=_seed_ctx(path))
+    assert out3['citas_creadas'] == 1
     with connect(path) as conn:
         apps = conn.execute('SELECT * FROM crm_appointments').fetchall()
     assert len(apps) == 1
@@ -216,6 +228,9 @@ def test_worker_cancelacion_confirmada(path):
     _seed(path)
     wa_ingest(path, external_id='c1', phone='59170000111', body='quiero reservar mañana 10:30')
     worker = canal.WorkerCanal(path, worker='w-test')
+    worker.paso(contexto=_seed_ctx(path))
+    # La cita nace al confirmar el hueco propuesto.
+    wa_ingest(path, external_id='c1b', phone='59170000111', body='sí')
     worker.paso(contexto=_seed_ctx(path))
     wa_ingest(path, external_id='c2', phone='59170000111', body='cancelar mi cita')
     worker.paso(contexto=_seed_ctx(path))

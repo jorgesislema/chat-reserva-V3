@@ -2333,7 +2333,8 @@ def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
     # Si el modelo se abstiene, NO se publica su texto: una etiqueta de
     # abstención no impide que una afirmación sin respaldo llegue al usuario.
     if (getattr(resp, 'abstencion', False)
-            and getattr(resp, 'modo', '') == 'remoto'):
+            and getattr(adaptador, 'modo', '') not in ('simulado', 'falso',
+                                                      'no_configurado')):
         resp.answer = ('No tengo esa información en el material del negocio. '
                        '¿Quieres que lo consulte una persona del equipo?')
     # El turno se guarda TRAS responder y NUNCA tumba el chat: con su pregunta
