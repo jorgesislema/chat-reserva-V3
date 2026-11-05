@@ -3617,3 +3617,31 @@ bases temporales ignoradas por git (`.pytest_cache/`): ninguna credencial ajena 
 - **Pendiente para mañana**: que la confirmación al paciente salga aunque la conversación esté en
   control humano (hoy la pausa de egress la retiene); pruebas con el teléfono de prueba; caso de
   emergencia real; fotos del portafolio.
+
+## 2026-11-05 — CORRECCIONES DEL INFORME EXTERNO (1, 3, 4, 5 y documentación)
+
+Revisión independiente del 5 de noviembre. Atendido lo de prioridad alta que no era un cambio de
+máquina de estados:
+
+1. **Adaptador del simulador aislado**. Ya no se sustituye `ADAPTADOR_ACTIVO` (variable global):
+   el adaptador simulado viaja como parámetro de esa ejecución (`procesar_lote → _run_dialog →
+   _consulta_rag → responder_chat_internal`). Con peticiones simultáneas, el chat real conserva su
+   proveedor.
+3. **Avisos sin promesas**. Se eliminó «en los próximos minutos». Ahora dicen lo que ocurre: el
+   caso queda registrado y se avisa al equipo; la urgencia añade la indicación de acudir a
+   urgencias si el dolor es fuerte o hay sangrado.
+4. **Captura del reclamo**. Solo se guarda como dato si parece un dato (sin «?» ni verbos de
+   petición); se admite omitirlo. No se envía acuse mientras el control es humano: el dato queda
+   en la bandeja para el equipo.
+5. **Abstención con texto seguro**. Si el proveedor real se abstiene, no se publica su texto: se
+   sustituye por «No tengo esa información en el material del negocio. ¿Quieres que lo consulte una
+   persona del equipo?». Se respeta el «IA no configurada» del adaptador sin proveedor.
+
+Documentación e infraestructura:
+- `MAPA.md` ya describe la arquitectura real (Flask + SQLite, sin Streamlit/Qdrant como núcleo) y
+  marca `api/`, `ui/`, `database/` como legado.
+- El CI valida también la rama `aucla` además de `main`.
+
+Pendiente de esa revisión (no hecho): **confirmar antes de crear la cita** (punto 2, cambia la
+máquina de estados), **recordatorios como flujo completo** (punto 6) y **aislar el simulador por
+sesión** (punto 7). También corregidas dos pruebas que dependían del día de la semana.

@@ -25,20 +25,27 @@ Consulte `README.md`, `docs/ARQUITECTURA_CRM.md`, `docs/AUDITORIA.md` y
 ## Regla Principal
 Lee este documento antes de escribir cualquier codigo en una nueva sesion para mantener el contexto de la arquitectura. Nunca modifiques la arquitectura base sin confirmacion explicita.
 
-## Infraestructura
+## Infraestructura (estado real, 5 de noviembre de 2026)
 
-- **Backend**: FastAPI (Asincrono). Ubicado en `/api`.
-- **UI Cliente**: Streamlit. Ubicado en `/ui`.
-- **Base de Datos Relacional**: SQLite (Estado local, catalogo, reglas). Ubicado en `/database`.
-- **Base de Datos Vectorial**: Qdrant Cloud (RAG SaaS).
-- **Motor de IA**: OpenRouter.
-- **Orquestador**: LangGraph (Patron ReAct multi-agente).
-- **Reservas**: Google Calendar API (Service Accounts).
+- **Aplicación**: Flask + Jinja + JS en `crm/` (servidor de desarrollo `run_crm.py`;
+  producción local con waitress en `serve_crm.py`). Un negocio por instalación.
+- **Base de datos**: SQLite en `crm/store.py` con migraciones versionadas (`crm_migrations`).
+  Tablas del producto con prefijo `crm_`.
+- **Conocimiento (RAG)**: recuperación por palabras sobre `crm_kb_documents` /
+  `crm_kb_fragments` publicados; sin base vectorial en uso.
+- **Motor de IA**: proveedor compatible OpenAI configurable en `.env`
+  (`CRM_CHAT_*` o `META_*` para Meta Model API). Si falla o se abstiene, se deriva a humano.
+- **Canal**: WhatsApp Cloud API (transporte en `crm/transporte_whatsapp.py`, cola en
+  `crm_outbox`); sin validación extremo a extremo todavía.
+- **Legado sin uso en el producto**: `api/` (FastAPI del webhook V1/V2), `ui/` (Streamlit),
+  `database/`, Qdrant y LangGraph. No describen la arquitectura actual: no construir sobre ellos.
+- **Google Calendar**: integración implementada con pruebas simuladas; sin validación real.
 
 ## Estructura de Directorios
 
-- **/api**: Contiene el webhook de WhatsApp y la inicializacion de FastAPI.
-- **/tools**: Contiene los scripts de conexion a Google Calendar, Qdrant y herramientas para LangGraph.
-- **/ui**: Contiene el dashboard de Streamlit para la gestion administrativa del cliente.
-- **/database**: Contiene las funciones de lectura/escritura hacia SQLite, esquemas y gestion de sesiones.
-- **/tests**: Contiene las pruebas unitarias usando pytest.
+- **/crm**: aplicación actual (Flask, plantillas, estáticos, servicios de dominio, canal).
+- **/scripts**: arranques de demo, sembradores, recordatorios y utilidades de verificación.
+- **/docs/producto**: estado, plan, matriz de trazabilidad, registro de ejecuciones y continuidad.
+- **/tests**: pruebas con pytest (canal, chat, reservas, frontend); el CI ejecuta la batería completa.
+- **/despliegue/vps-crm**: paquete preparado para desplegar en servidor propio (sin usar aún).
+- **/api**, **/ui**, **/database**: legado de V1/V2; se conservan para referencia, no son la app.

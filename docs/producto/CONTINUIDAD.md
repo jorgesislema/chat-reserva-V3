@@ -59,6 +59,13 @@ porque el CI seguiría rojo por 5 pruebas preexistentes).
 - La confirmación del reclamo no se envía mientras la conversación está en control humano: revisar
   al probar la bandeja.
 
+## Revisión externa del 5 de noviembre
+
+- Hecho: adaptador del simulador aislado, avisos sin promesas de plazo, captura del reclamo
+  limitada, abstención con texto seguro, MAPA y CI al día.
+- Pendiente de esa revisión: confirmar antes de crear la cita (punto 2), recordatorios como flujo
+  completo (punto 6) y simulador aislado por sesión (punto 7).
+
 ## Pendiente, por orden
 
 0. **Franja de almuerzo** en «Fechas cerradas y excepciones» (si se deja en blanco, no

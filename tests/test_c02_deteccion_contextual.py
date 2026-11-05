@@ -107,9 +107,9 @@ def test_aviso_al_cliente_por_prioridad_maxima(path, frase, top):
     # La prioridad más alta rige el AVISO breve y respetuoso.
     avisos = {
         'peligro_inmediato': 'asistencia médica urgente',
-        'emergencia': 'atención prioritaria',
-        'reclamo': 'revisará',
-        'humano_explicito': 'un miembro del equipo',
+        'emergencia': 'avisado al equipo',
+        'reclamo': 'avisado al equipo',
+        'humano_explicito': 'avisado al equipo',
     }
     _enviar(path, key, frase, external_id='av-' + key)
     pend = svc.outbox_next(path)['pending']

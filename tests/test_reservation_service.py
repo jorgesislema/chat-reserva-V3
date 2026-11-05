@@ -26,7 +26,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # --- utilidades -----------------------------------------------------------
 
 def _future_date(days=30):
-    return (datetime.now(timezone.utc) + timedelta(days=days)).date()
+    dia = (datetime.now(timezone.utc) + timedelta(days=days)).date()
+    while dia.weekday() >= 5:  # el negocio no abre sábado ni domingo
+        dia += timedelta(days=1)
+    return dia
 
 
 def slot(hour=10, minute=0, days=30):

@@ -289,13 +289,14 @@ AVISO_POR_MOTIVO = {
         'llame a las emergencias locales. No podemos hacer diagnósticos por '
         'este medio.'
     ),
-    'emergencia': ('Entiendo. Voy a poner tu caso en conocimiento de un '
-                   'especialista; se comunicará contigo en los próximos minutos.'),
-    'reclamo': ('Lamento lo ocurrido. Voy a poner tu caso en conocimiento del '
-                'doctor; se comunicará contigo en los próximos minutos. ¿Me ayudas '
-                'con tu nombre y el nombre del doctor que te atendió?'),
-    'humano_explicito': ('Entendido. Un momento, por favor: un miembro del '
-                         'equipo le atenderá.'),
+    'emergencia': ('Tu caso queda registrado y he avisado al equipo. Si el dolor es '
+                   'muy fuerte, hay sangrado que no para o te has golpeado la cara, '
+                   'acude a urgencias.'),
+    'reclamo': ('Lamento lo ocurrido. Tu caso queda registrado y he avisado al '
+                'equipo. ¿Me dejas tu nombre y el del doctor que te atendió para '
+                'completarlo?'),
+    'humano_explicito': ('He avisado al equipo. Te responderemos por aquí en '
+                         'cuanto alguien quede libre.'),
     'por_revision': ('Hemos registrado su caso. Un miembro del equipo lo '
                      'revisará con usted.'),
 }
@@ -894,7 +895,7 @@ def _es_saludo(texto: str) -> bool:
     return False
 
 
-def _consulta_rag(path, texto, conv) -> Optional[dict]:
+def _consulta_rag(path, texto, conv, adaptador=None) -> Optional[dict]:
     """Recupera en la base del negocio (RAG existente del chat interno) el
     contexto pertinente al mensaje y responde con memoria multi-turno de la
     conversación.
@@ -914,7 +915,8 @@ def _consulta_rag(path, texto, conv) -> Optional[dict]:
         return None
     try:
         res = svc.responder_chat_internal(
-            path, (texto or ''), role='user', conversation_id='wa-%d' % int(conv_id))
+            path, (texto or ''), role='user', conversation_id='wa-%d' % int(conv_id),
+            adaptador=adaptador)
     except Exception:
         return None
     if not res.get('ok'):
@@ -923,7 +925,8 @@ def _consulta_rag(path, texto, conv) -> Optional[dict]:
 
 
 def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
-                wa_message_id=None, hook_pre_escritura=None) -> dict:
+                wa_message_id=None, hook_pre_escritura=None,
+                adaptador_rag=None) -> dict:
     """Procesa un mensaje dentro de la conversación y devuelve resultado de salida.
 
     Orden de precedencia (corrección N1/N2/N4):
@@ -973,8 +976,12 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
     # Datos del reclamo: se guarda el nombre (y la cédula si la da).
     previo = svc.conv_pending(path, conv_id) if conv_id else {}
     if previo.get('intencion') == 'datos_reclamo' and previo.get('claim_id'):
-        texto = (body or '').strip()[:300]
-        if texto:
+        texto = (body or '').strip()[:120]
+        # Solo se toma como dato si parece un dato: ni preguntas ni peticiones.
+        parece_dato = bool(texto) and '?' not in texto and not re.match(
+            r'(?i)\b(quiero|necesito|cita|reservar|cancelar|anular|horario|'
+            r'precio|cuanto|donde)\b', texto)
+        if parece_dato:
             cedula = re.search(r'\b(\d{10})\b', texto)
             nombre = texto.replace(cedula.group(1), '').strip(' .,-') if cedula else texto
             nombre = re.sub(r'(?i)^(me llamo|soy|mi nombre es)\s+', '', nombre)
@@ -985,10 +992,10 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                              document=cedula.group(1) if cedula else None)
             if conv_id:
                 svc.conv_clear_pending(path, conv_id)
-        return {'intencion': 'datos_reclamo',
-                'texto': ('Gracias, dejo tu caso registrado. Un miembro del equipo '
-                          'se comunicará contigo en los próximos minutos.'),
-                'paused': False, 'extra': {}, 'pending': None}
+        if conv_id:
+            svc.conv_clear_pending(path, conv_id)
+        return {'intencion': 'datos_reclamo', 'texto': None, 'paused': True,
+                'extra': {}, 'pending': None}
 
     if _paused(path, conv_id):
         return {'intencion': 'pausa', 'texto': None, 'paused': True,
@@ -1393,7 +1400,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
     if _es_saludo(body or ''):
         return _resp('consulta', saludo or _saludo_hora(path),
                      pending={})
-    res_rag = _consulta_rag(path, body or '', conv)
+    res_rag = _consulta_rag(path, body or '', conv, adaptador=adaptador_rag)
     if res_rag is None:
         # El RAG o su proveedor no está disponible: NUNCA se fabrica una
         # respuesta; se deriva a humano con alerta y pausa de egress (la
@@ -1523,7 +1530,8 @@ def _resp(intencion, texto, *, need_datos=False, pending=None, ok=None,
 
 def procesar_lote(path, worker: str, motor: MotorCanal,
                   contexto: Optional[dict] = None, intervalo=90,
-                  hooks: Optional[Dict[str, Callable]] = None) -> dict:
+                  hooks: Optional[Dict[str, Callable]] = None,
+                  adaptador_rag=None) -> dict:
     """Reclama operaciones de la cola y produce salidas en outbox (loop de worker).
 
     No arranca servicios externos: es un lazo acotado que un Planificador/Task
@@ -1552,7 +1560,8 @@ def procesar_lote(path, worker: str, motor: MotorCanal,
         es_nueva = not svc.conv_messages(path, conv['id'])
         resultado = _run_dialog(path, phone, body, conv, motor, contexto, op['id'],
                                 wa_message_id=payload.get('message_id'),
-                                hook_pre_escritura=hooks.get('pre_escritura'))
+                                hook_pre_escritura=hooks.get('pre_escritura'),
+   adaptador_rag=adaptador_rag)
 
         # N3: el saludo configurado se usa en la conversación nueva (primera
         # interacción del cliente), antes del cuerpo propio de la intención.

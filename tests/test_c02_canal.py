@@ -182,7 +182,7 @@ def test_worker_peticion_explicita_humano(path):
     tarea = pending['pending'][0]
     assert tarea['origin'] == 'sistema'          # el humano responde, no el bot
     assert 'IA' not in (tarea['payload'] or '')
-    assert 'un miembro del equipo' in (tarea['payload'] or '')
+    assert 'avisado al equipo' in (tarea['payload'] or '')
 
 
 def test_worker_pausa_humana_tras_ingesta_dialogo(path):

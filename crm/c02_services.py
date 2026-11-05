@@ -2330,6 +2330,12 @@ def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
         return {'ok': False, 'error': f'Error del adaptador: {exc}', 'answer': '',
                 'modo': getattr(adaptador, 'modo', '')}
     fuentes = [f.a_dict() for f in resp.fuentes]
+    # Si el modelo se abstiene, NO se publica su texto: una etiqueta de
+    # abstención no impide que una afirmación sin respaldo llegue al usuario.
+    if (getattr(resp, 'abstencion', False)
+            and getattr(resp, 'modo', '') == 'remoto'):
+        resp.answer = ('No tengo esa información en el material del negocio. '
+                       '¿Quieres que lo consulte una persona del equipo?')
     # El turno se guarda TRAS responder y NUNCA tumba el chat: con su pregunta
     # original, la búsqueda resuelta y las fuentes reales citadas.
     turno_guardado = None

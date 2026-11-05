@@ -6,7 +6,7 @@ name: CI
 # la suite usa bases SQLite temporales y servicios simulados.
 on:
   push:
-    branches: [main]
+    branches: [main, aucla]
   pull_request:
     branches: [main]
 
