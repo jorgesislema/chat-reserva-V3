@@ -90,7 +90,8 @@ def test_worker_consulta_en_conversacion_existente_genera_outbox(path):
     assert fila.get('correlation') == 'op-2', fila.get('correlation')
     texto = (fila.get('payload') or '').strip()
     assert texto, pendiente
-    assert '¡Hola!' in texto
+    # Recepción: saluda según la hora y pregunta si ya se atendió antes.
+    assert 'atendido antes' in texto
 
 
 def test_worker_emergencia_eleva_alerta(path):
@@ -138,7 +139,8 @@ def _seed_ctx(path):
     with connect(path) as conn:
         p = conn.execute('SELECT id,name FROM crm_professionals LIMIT 1').fetchone()
     return {'professionals': [{'id': p['id'], 'name': p['name']}],
-            'zonas': ['America/Guayaquil'], 'now_local': None}
+            'zonas': ['America/Guayaquil'], 'now_local': None,
+            'hoy': '2030-01-07'}
 
 
 def test_worker_dialogo_multiturno_reserva(path):
@@ -154,7 +156,7 @@ def test_worker_dialogo_multiturno_reserva(path):
     wa_ingest(path, external_id='t2', phone='59170000111', body='mañana 10:30')
     out2 = worker.paso(contexto=_seed_ctx(path))
     assert out2['citas_creadas'] == 0
-    assert any('¿Te lo reservo?' in (x['payload'] or '')
+    assert any('¿Se lo reservo?' in (x['payload'] or '')
                for x in svc.outbox_next(path)['pending'])
     wa_ingest(path, external_id='t3', phone='59170000111', body='sí')
     out3 = worker.paso(contexto=_seed_ctx(path))
@@ -176,7 +178,11 @@ def test_worker_pausa_humana_bloquea_salida(path):
     out = worker.paso(contexto=_seed_ctx(path))
     assert out['citas_creadas'] == 0   # la IA no ejecuta bajo control humano
     pending = svc.outbox_next(path)
-    assert pending['pending'] == []   # nada se encoló para el cliente
+    # Sin salida IA: como mucho UN aviso breve de sistema (sostén, una vez),
+    # nunca una respuesta fabricada por el bot.
+    assert not any(o['origin'] == 'ia' for o in pending['pending'])
+    assert len(pending['pending']) <= 1
+    assert all(o['origin'] == 'sistema' for o in pending['pending'])
 
 
 def test_worker_peticion_explicita_humano(path):
@@ -194,7 +200,9 @@ def test_worker_peticion_explicita_humano(path):
     tarea = pending['pending'][0]
     assert tarea['origin'] == 'sistema'          # el humano responde, no el bot
     assert 'IA' not in (tarea['payload'] or '')
-    assert 'avisado al equipo' in (tarea['payload'] or '')
+    # BOT-EVAL-01: aviso natural y sin prometer disponibilidad inmediata; lo
+    # que importa es que la derivación quedó registrada y el origen es sistema.
+    assert 'He dejado su solicitud al equipo' in (tarea['payload'] or '')
 
 
 def test_worker_pausa_humana_tras_ingesta_dialogo(path):

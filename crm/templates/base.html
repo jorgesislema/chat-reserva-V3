@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='crm.css') }}">
 <link rel="stylesheet" href="{{ url_for('theme_css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='agenda.css') }}">
-<script src="{{ url_for('static', filename='theme.js') }}"></script>
+<script src="{{ url_for('static', filename='theme.js') }}?v={{ asset_v }}"></script>
 </head>
 <body>
 <a class="skip-link" href="#main">Saltar al contenido</a>
@@ -14,8 +14,8 @@
 {% if user %}
 {% if demo %}<div class="demo-banner" role="note">Demostración — datos ficticios</div>{% endif %}
 <aside class="sidebar"><a class="brand" href="/"><span class="brand-text">MiOrquestador<small class="brand-sub">por Soluciones Digitales Ec · {{ business }}</small></span></a><p class="nav-label">ESPACIO DE TRABAJO</p>
-<nav>{% for key,label,icon in [('overview','Resumen','◈'),('leads','Leads y clientes','◎'),('agenda','Agenda','▦'),('catalog','Catálogo e inventario','❋'),('docs','Conocimiento','▤'),('chat','Asistente IA','⌬'),('biblioteca','Biblioteca de recursos','▤'),('envios','Historial de envíos','▣'),('inbox','Conversaciones de WhatsApp','✉'),('simulador','Simulador de chat','◧'),('analytics','Análisis comercial','↗')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endfor %}{% if user.role=='admin' %}<a class="{{ 'selected' if tab=='negocio' }}" href="{{ url_for('home',tab='negocio') }}"><span>⚙</span>Negocio y horarios</a>{% endif %}
-{% if user.role=='admin' %}<p class="nav-label">ADMINISTRACIÓN</p>{% for key,label,icon in [('team','Profesionales','♧'),('sync','Sincronización','⟳'),('users','Usuarios y acceso','◇'),('audit','Actividad','≡')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endfor %}{% endif %}
+<nav>{% for key,label,icon in [('overview','Resumen','◈'),('leads','Leads y clientes','◎'),('agenda','Agenda','▦'),('catalog','Catálogo e inventario','❋'),('docs','Información del negocio','▤'),('chat','Asistente IA','⌬'),('biblioteca','Archivos para enviar','▤'),('envios','Mensajes enviados','▣'),('inbox','Conversaciones de WhatsApp','✉'),('simulador','Simulador de chat','◧'),('analytics','Ventas y reportes','↗')] %}{% if key != 'analytics' or user.role == 'admin' %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endif %}{% endfor %}{% if user.role=='admin' %}<a class="{{ 'selected' if tab=='negocio' }}" href="{{ url_for('home',tab='negocio') }}"><span>⚙</span>Negocio y horarios</a>{% endif %}
+{% if user.role=='admin' %}<p class="nav-label">ADMINISTRACIÓN</p>{% for key,label,icon in [('team','Equipo','♧'),('sync','Sincronización','⟳'),('users','Usuarios y acceso','◇'),('audit','Auditoría','≡')] %}<a class="{{ 'selected' if tab==key }}" href="{{ url_for('home',tab=key) }}"><span>{{ icon }}</span>{{ label }}</a>{% endfor %}{% endif %}
 <a class="{{ 'selected' if tab=='profile' }}" href="{{ url_for('home',tab='profile') }}">Mi contraseña</a></nav>
 <div class="sidebar-bottom"><p class="legal-links"><a href="/privacidad">Privacidad</a> · <a href="/terminos">Términos</a> · <a href="/eliminacion-de-datos">Eliminación de datos</a></p><button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">Modo oscuro</button><strong>{{ user.name }}</strong><small>{{ 'Administrador' if user.role=='admin' else 'Usuario' }}</small><form action="/logout" method="post">{{ token() }}<button class="ghost">Cerrar sesión →</button></form></div></aside>
 {% endif %}

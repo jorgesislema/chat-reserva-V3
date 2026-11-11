@@ -1,4 +1,13 @@
-# Entorno mínimo para ejecutar las pruebas del CRM.
-# Uso: python -m pytest tests/test_crm.py tests/test_reservation_service.py tests/test_demo_seed.py -q
+# Entorno de PRUEBAS del CRM: runtime mínimo + pytest FIJADO.
+#
+# Antes este archivo incluía requirements-crm.txt (que exigía pytest>=9.1.1)
+# y añadía pytest==8.1.1: ninguna versión satisface ambas restricciones y la
+# instalación limpia era imposible (R4). Ahora las pruebas no forman parte del
+# runtime y la versión fijada es la misma del cierre reproducible
+# (requirements-crm.lock.txt, Python 3.13).
+#
+# Uso:
+#   python -m venv .venv-verify
+#   .venv-verify/Scripts/python.exe -m pip install -r requirements-crm-test.txt
 -r requirements-crm.txt
-pytest==8.1.1
+pytest==9.2.0

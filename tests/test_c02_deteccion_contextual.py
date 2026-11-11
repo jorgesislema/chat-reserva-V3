@@ -38,7 +38,8 @@ def path(tmp_path):
 
 def _ctx():
     return {'professionals': [{'id': 1, 'name': 'Dra. Ana'}],
-            'zonas': ['America/Guayaquil'], 'now_local': None}
+            'zonas': ['America/Guayaquil'], 'now_local': None,
+            'hoy': '2030-01-07'}
 
 
 def _enviar(path, key, body, external_id):
@@ -106,10 +107,10 @@ def test_aviso_al_cliente_por_prioridad_maxima(path, frase, top):
     key = _key(frase) + '1'
     # La prioridad más alta rige el AVISO breve y respetuoso.
     avisos = {
-        'peligro_inmediato': 'asistencia médica urgente',
-        'emergencia': 'avisado al equipo',
-        'reclamo': 'avisado al equipo',
-        'humano_explicito': 'avisado al equipo',
+        'peligro_inmediato': 'atención médica urgente',
+        'emergencia': 'me comunico en unos minutos',
+        'reclamo': 'He dejado su caso al equipo',
+        'humano_explicito': 'He dejado su solicitud al equipo',
     }
     _enviar(path, key, frase, external_id='av-' + key)
     pend = svc.outbox_next(path)['pending']
@@ -201,7 +202,7 @@ def test_proveedor_ia_caido_y_senales_claras(path):
 
     # Sin señales claras: el proveedor caído se deriva como fallo_servicio.
     key2 = '59171004444'
-    svc.wa_ingest(path, external_id='falla-2', phone=key2, body='hola, gracias')
+    svc.wa_ingest(path, external_id='falla-2', phone=key2, body='hola, quiero información')
     canal.WorkerCanal(path, worker='w-test', motor=MotorCaido()).paso(contexto=_ctx())
     conv2 = svc.conv_by_key(path, key2)
     assert [a['reason'] for a in _alertas_conv(path, conv2['id'])] == ['fallo_servicio']

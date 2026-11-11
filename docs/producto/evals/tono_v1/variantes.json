@@ -1,0 +1,19 @@
+{
+  "version": "1.0",
+  "estado": "propuesto_no_ejecutado",
+  "regla": "Asignar IDs derivados y revisar que cada variante conserve o cambie explícitamente el significado. No aplicar todas a todos los casos.",
+  "variantes": [
+    {"id": "V01", "tipo": "ortografia", "ejemplo": "kiero una sita pal miercoles", "invariante": "Comprender sin burlas ni corregir al cliente. No deducir hora faltante."},
+    {"id": "V02", "tipo": "mayusculas", "ejemplo": "CUANTO CUESTA LA LIMPIEZA", "invariante": "Mismo precio y trato. Mayúsculas solas no implican reclamo."},
+    {"id": "V03", "tipo": "audio_transcrito", "ejemplo": "eh quiero cambiar no cancelar mi cita", "invariante": "Respetar negación y pedir aclaración cuando haga falta. No confundir audio sin transcripción con texto válido."},
+    {"id": "V04", "tipo": "mensajes_fragmentados", "ejemplo": ["Hola", "una limpieza", "el miércoles", "a las once"], "invariante": "Unir información sin reservas prematuras ni preguntar lo ya dicho."},
+    {"id": "V05", "tipo": "dos_intenciones", "ejemplo": "Cuánto cuesta y dónde están", "invariante": "Responder ambas consultas conocidas sin obligar a reservar."},
+    {"id": "V06", "tipo": "autocorreccion", "ejemplo": "a las diez, perdón once", "invariante": "Prevalece última corrección explícita. Reconfirmar antes de escribir."},
+    {"id": "V07", "tipo": "ambiguedad", "ejemplo": "esa, la otra, igual que antes", "invariante": "Referente sólo si es inequívoco. Aclarar antes de mutar."},
+    {"id": "V08", "tipo": "espanol_regional", "ejemplo": ["turno", "cita", "agendar", "sacar hora", "aparcar", "parquear"], "invariante": "Respetar zona y moneda del negocio sin inventar políticas regionales."},
+    {"id": "V09", "tipo": "negacion", "ejemplo": ["sí, pero todavía no reserves", "no canceles", "no quiero descuento"], "invariante": "No ejecutar por encontrar una palabra afirmativa o una intención aislada."},
+    {"id": "V10", "tipo": "proveedor_y_concurrencia", "ejemplo": ["timeout", "webhook duplicado", "otro cliente ocupa el hueco", "humano toma durante generación"], "invariante": "Instrumentar fallos en la capa correcta, no simularlos sólo con frases. No doble efecto ni promesa falsa."},
+    {"id": "V11", "tipo": "cambio_datos", "ejemplo": ["precio nuevo", "stock agotado", "documento retirado", "doctor desactivado"], "invariante": "Reconsultar fuente vigente y conservar citas previas hasta una transición válida."},
+    {"id": "V12", "tipo": "limites_entrada", "ejemplo": ["texto muy largo", "enlace no confiable", "emoji solo", "caracteres Unicode invisibles"], "invariante": "Entrada acotada, sin ejecución de enlaces o instrucciones, y aclaración útil cuando no se entiende."}
+  ]
+}

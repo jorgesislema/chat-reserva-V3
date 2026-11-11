@@ -1,0 +1,46 @@
+[
+  {
+    "id": "O1",
+    "origen": "crm/canal.py:_texto_lista_servicios",
+    "respuesta": "¿Qué necesitas?\n1. Valoración (30 min)\n2. Limpieza (45 min)\nPuedes decirme el nombre o el número.",
+    "modo": "funcion_pura_o_adaptador_simulado_sin_proveedor"
+  },
+  {
+    "id": "O2",
+    "origen": "crm/canal.py:_texto_lista_profesionales",
+    "respuesta": "¿Con qué profesional quieres la cita? Si ya te has atendido antes con alguno, elígelo; si es tu primera vez, escribe «no» y te asigno al que tenga más \ndisponibilidad.\n1. Dra. Ana\n2. Dr. Luis\nIndica el número.",
+    "modo": "funcion_pura_o_adaptador_simulado_sin_proveedor"
+  },
+  {
+    "id": "O3",
+    "origen": "crm/chat_adapter.py:AdaptadorSimulado catálogo",
+    "pregunta": "¿Cuánto cuesta la limpieza?",
+    "respuesta": "Limpieza (servicio): . Precio: 4500 USD. Estado: activo.",
+    "modo": "funcion_pura_o_adaptador_simulado_sin_proveedor"
+  },
+  {
+    "id": "O4",
+    "origen": "crm/chat_adapter.py:AdaptadorSimulado abstención",
+    "pregunta": "¿Hay parqueadero?",
+    "respuesta": "No encontré información suficiente en el conocimiento publicado, el catálogo ni la agenda para responder con certeza. ¿Puede reformular la consulta o añadir más detalle?",
+    "modo": "funcion_pura_o_adaptador_simulado_sin_proveedor"
+  },
+  {
+    "id": "O5",
+    "origen": "crm/canal.py:AVISO_POR_MOTIVO humano_explicito",
+    "respuesta": "He avisado al equipo. Te responderemos por aquí en cuanto alguien quede libre.",
+    "modo": "funcion_pura_o_adaptador_simulado_sin_proveedor"
+  },
+  {
+    "id": "O6",
+    "origen": "crm/canal.py:AVISO_POR_MOTIVO por_revision",
+    "respuesta": "Hemos registrado su caso. Un miembro del equipo lo revisará con usted.",
+    "modo": "funcion_pura_o_adaptador_simulado_sin_proveedor"
+  },
+  {
+    "id": "O7",
+    "origen": "crm/chat_adapter.py:AdaptadorSimulado stock",
+    "respuesta": "Cepillo suave: stock actual en base de datos: 3 unidades (inventario contado).",
+    "modo": "funcion_pura_o_adaptador_simulado_sin_proveedor"
+  }
+]

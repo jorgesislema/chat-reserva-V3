@@ -60,6 +60,47 @@ def test_catalog_tab_render_con_csp_estricta(crm):
     assert b'/static/crm_c02.js' in r.data
 
 
+def test_catalogo_botones_guardar_y_tipo_nuevo(crm):
+    """El panel ofrece Guardar por fila, Guardar-y-publicar en el diálogo y
+    el selector de tipo para artículos nuevos (reclamo del negocio)."""
+    c = crm.test_client()
+    assert login(c).status_code == 200
+    r = c.get('/?tab=catalog')
+    assert r.status_code == 200
+    assert b'c02-detail-save-publish' in r.data
+    assert b'Guardar y publicar' in r.data
+    assert b'c02-new-kind' in r.data
+    js = c.get('/static/crm_c02.js')
+    assert js.status_code == 200
+    cuerpo = js.data.decode('utf-8', 'replace')
+    assert 'c02-new-kind' in cuerpo  # el diálogo respeta el tipo elegido
+    assert '__crmCommit' in cuerpo  # Guardar por fila confirma celdas
+    assert 'beforeunload' in cuerpo  # aviso antes de perder ediciones
+
+
+def test_catalogo_campos_de_detalle_editables(crm):
+    """Cada dato del artículo se edita desde el formulario: marca,
+    presentación, atributos, alérgenos, advertencias, sinónimos y los campos de
+    tratamiento, con secciones separadas por tipo."""
+    c = crm.test_client()
+    assert login(c).status_code == 200
+    r = c.get('/?tab=catalog')
+    assert r.status_code == 200
+    for campo in (b'c02-f-brand', b'c02-f-presentation', b'c02-f-attributes',
+                  b'c02-f-allergens', b'c02-f-warnings', b'c02-f-aliases',
+                  b'c02-f-sessions', b'c02-f-prep-notes', b'c02-f-aftercare-notes',
+                  b'c02-f-requires-evaluation', b'c02-bloque-producto',
+                  b'c02-bloque-tratamiento'):
+        assert campo in r.data, campo
+    cuerpo = c.get('/static/crm_c02.js').data.decode('utf-8', 'replace')
+    assert 'textoAAttrs' in cuerpo and 'attrsATexto' in cuerpo
+    assert 'aplicarTipo' in cuerpo
+    for campo in ('brand', 'presentation', 'attributes_json', 'allergens',
+                  'warnings', 'aliases', 'sessions', 'prep_notes',
+                  'aftercare_notes', 'requires_evaluation'):
+        assert "field: '%s'" % campo in cuerpo, campo
+
+
 def test_catalog_api_crud_autenticado(crm):
     c = crm.test_client()
     assert login(c).status_code == 200
@@ -299,3 +340,88 @@ def test_config_ai_admin_guarda_y_usuario_no_ve(crm):
     r = uc.post('/api/c02/config', json={'key': 'saludo', 'value': 'hack'},
                 headers={'X-CSRF-Token': ucsrf})
     assert r.status_code == 403
+
+
+def test_roles_doctor_solo_sus_datos_y_admin_todo(crm):
+    """Modelo de acceso: el doctor vinculado (mismo correo) sólo ve sus citas;
+    ventas/reportes globales y edición de catálogo son de administrador."""
+    from crm.store import connect as _connect
+    c = crm.test_client()
+    assert login(c).status_code == 200
+    with c.session_transaction() as sess:
+        csrf = sess.get('csrf')
+
+    def _json(path, method='get', body=None):
+        return getattr(c, method)(path, json=body, headers={'X-CSRF-Token': csrf})
+
+    with _connect(crm.config['DATABASE']) as conn:
+        conn.execute("""INSERT INTO crm_professionals(name,specialty,email,active)
+                        VALUES ('Dra. Ana','General','doctora@demo.local',1),
+                               ('Dr. Luis','General','luis@demo.local',1)""")
+        conn.execute("""INSERT INTO crm_users(email,name,password_hash,role)
+                        VALUES ('doctora@demo.local','Dra',?,'user')""",
+                     (generate_password_hash('correct-password-123'),))
+    # Doctora vinculada por correo.
+    u = crm.test_client()
+    u.get('/login')
+    with u.session_transaction() as sess:
+        ucsrf = sess.get('csrf')
+    u.post('/login', data={'csrf': ucsrf, 'email': 'doctora@demo.local',
+                           'password': 'correct-password-123'}, follow_redirects=True)
+    with u.session_transaction() as sess:
+        ucsrf = sess.get('csrf')
+
+    def _ujson(path, method='get', body=None):
+        return getattr(u, method)(path, json=body, headers={'X-CSRF-Token': ucsrf})
+
+    # Catálogo: ver sí, crear/editar/publicar no.
+    assert _ujson('/api/c02/catalog').status_code == 200
+    assert _ujson('/api/c02/catalog', 'post', {'name': 'X', 'kind': 'servicio'}).status_code == 403
+    r = _json('/api/c02/catalog', 'post', {'name': 'Y', 'kind': 'servicio'})
+    item_id = r.get_json()['item_id']
+    assert _ujson('/api/c02/catalog/%d' % item_id, 'post',
+                  {'field': 'price_cents', 'value': 100, 'revision': 1}).status_code == 403
+    assert _ujson('/api/c02/catalog/%d/publish' % item_id, 'post').status_code == 403
+    # Reportes globales: sólo admin.
+    assert u.get('/?tab=analytics').status_code == 403
+    assert c.get('/?tab=analytics').status_code == 200
+    html = u.get('/?tab=overview').data.decode('utf-8', errors='replace')
+    assert 'Ventas y reportes' not in html
+
+
+def test_guardar_deja_borrador_y_publicar_activa_bot_y_simulador(crm):
+    """Guardar (borrador) NO lo ve el bot; publicar sí, y el simulador deja
+    de usar su copia vieja: la próxima prueba corre sobre lo publicado."""
+    import json as _json
+    from pathlib import Path as _P
+    c = crm.test_client()
+    assert login(c).status_code == 200
+    with c.session_transaction() as sess:
+        csrf = sess.get('csrf')
+
+    def _api(path, method='get', body=None):
+        return getattr(c, method)(path, json=body, headers={'X-CSRF-Token': csrf})
+
+    r = _api('/api/c02/catalog', 'post', {'name': 'Enjuague demo', 'kind': 'producto'})
+    assert r.status_code == 201
+    item_id = r.get_json()['item_id']
+    r = _api('/api/c02/catalog/%d' % item_id, 'post',
+             {'field': 'details', 'value': 'Sabor menta fresca.', 'revision': 1})
+    assert r.status_code == 200 and r.get_json()['ok']
+    r = _api('/api/c02/catalog/%d' % item_id, 'post',
+             {'field': 'price_cents', 'value': 1100, 'revision': 2})
+    assert r.status_code == 200 and r.get_json()['ok']
+
+    # Simula una arena vieja del simulador (copia anterior a la edición).
+    db = crm.config['DATABASE']
+    vieja = _P(str(db) + '.simulador-u1.db')
+    vieja.write_bytes(b'vieja')
+    (db_wal := _P(str(db) + '.simulador-u1.db-wal')).write_bytes(b'x')
+
+    # Publicar: el bot ya lo ve en el chat interno y la arena vieja se borra.
+    r = _api('/api/c02/catalog/%d/publish' % item_id, 'post')
+    assert r.status_code == 200 and r.get_json()['ok']
+    assert not vieja.exists() and not db_wal.exists()
+    r = _api('/api/c02/chat', 'post', {'question': 'de que sabor es el enjuague demo'})
+    assert r.status_code == 200
+    assert 'menta' in (r.get_json().get('answer') or '').lower()

@@ -23,7 +23,7 @@ permanecen en el adaptador del bot hasta la fase de configuración de horarios.
 Los resultados son diccionarios estructurados con las claves ``ok``, ``code``,
 ``message`` y ``appointment`` (o ``idempotent`` en la cancelación).
 """
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import json
 import uuid
@@ -267,8 +267,54 @@ def _allowed_actions(row, role, clock=None):
     return actions
 
 
+def _minutos_hhmm(valor):
+    """'HH:MM' a minutos del día; None si no es una hora válida."""
+    try:
+        texto = str(valor or '').strip()
+        if not texto:
+            return None
+        horas, minutos = texto.split(':')
+        hora, minuto = int(horas), int(minutos)
+    except (ValueError, AttributeError):
+        return None
+    if not 0 <= hora <= 23 or not 0 <= minuto <= 59:
+        return None
+    return hora * 60 + minuto
+
+
+def _pausa_almuerzo(professional_id, start_norm, end_norm, zone, conn):
+    """Motivo si el intervalo pisa la pausa de almuerzo del profesional."""
+    fila = conn.execute(
+        'SELECT name, almuerzo_inicio, almuerzo_fin FROM crm_professionals WHERE id=?',
+        (professional_id,)).fetchone()
+    if not fila:
+        return None
+    ai = _minutos_hhmm(fila['almuerzo_inicio'])
+    af = _minutos_hhmm(fila['almuerzo_fin'])
+    if ai is None or af is None or not ai < af:
+        return None
+    try:
+        zona = ZoneInfo(zone)
+        inicio = datetime.fromisoformat(start_norm).astimezone(zona)
+        fin = datetime.fromisoformat(end_norm).astimezone(zona)
+    except (ValueError, TypeError):
+        return None
+    dia = inicio.date()
+    while dia <= fin.date():
+        if dia == inicio.date() and dia == fin.date():
+            s_min = inicio.hour * 60 + inicio.minute
+            e_min = fin.hour * 60 + fin.minute
+            if s_min < af and ai < e_min:
+                return ('Ese horario pisa la pausa de almuerzo de %s (%s–%s).'
+                        % (fila['name'] or 'el profesional',
+                           '%02d:%02d' % (ai // 60, ai % 60),
+                           '%02d:%02d' % (af // 60, af % 60)))
+        dia += timedelta(days=1)
+    return None
+
+
 def _conflict(conn, professional_id, start_utc, end_utc, exclude_id):
-    """Devuelve la cita activa que se superpone en [start_utc, end_utc)."""
+    """Hay solape con otra cita activa del profesional (intervalos [inicio, fin))."""    """Devuelve la cita activa que se superpone en [start_utc, end_utc)."""
     return conn.execute(
         """SELECT id FROM crm_appointments
            WHERE professional_id=? AND status='active'
@@ -364,6 +410,28 @@ def save_appointment(path, *, professional_id, start, end, title, zone,
             return _result(MISSING_PROFESSIONAL, 'Profesional no encontrado')
         if not professional['active']:
             return _result(INACTIVE_PROFESSIONAL, 'Seleccione un profesional activo')
+        pausa = _pausa_almuerzo(professional_id, start_norm, end_norm, zone, conn)
+        if pausa:
+            return _result(OUTSIDE_BUSINESS_HOURS, pausa)
+        # Horario semanal propio del profesional (días/horas por comisión):
+        # verificación definitiva también para el panel y la API.
+        try:
+            from crm import business_config as _bc
+            _ini_dt = datetime.fromisoformat(start_norm)
+            _fin_dt = datetime.fromisoformat(end_norm)
+            _turno = _bc.turno_profesional(path, professional_id,
+                                           _ini_dt, _fin_dt, zone)
+        except Exception:
+            _turno = None
+        if isinstance(_turno, dict):
+            _art = _turno.get('art') or 'El'
+            if _turno.get('motivo') == 'off':
+                return _result(OUTSIDE_BUSINESS_HOURS,
+                               '%s %s no atiende ese día' % (_art, _turno.get('nombre') or 'profesional'))
+            return _result(OUTSIDE_BUSINESS_HOURS,
+                           '%s %s atiende ese día de %s a %s'
+                           % (_art, _turno.get('nombre') or 'profesional',
+                              _turno.get('a'), _turno.get('c')))
 
         old = None
         if appointment_id is not None:

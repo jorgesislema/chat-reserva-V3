@@ -38,6 +38,108 @@
   }
 
   aplicar(actual(), false);
+  // Barra horizontal superior sincronizada para tablas anchas
+  // (Catálogo, inventario): evita bajar hasta el final para desplazarse.
+  window.CRMTopScroll = function (wrap) {
+    if (!wrap) return;
+    function anchoExistente() {
+      try {
+        var b = wrap.previousElementSibling;
+        if (b && b.classList && b.classList.contains('table-scroll-top')) {
+          var sp = b.firstChild;
+          if (sp) sp.style.width = Math.max(wrap.scrollWidth, wrap.clientWidth) + 'px';
+          b.scrollLeft = wrap.scrollLeft;
+        }
+      } catch (e) {}
+    }
+    if (wrap.dataset.topscroll) { anchoExistente(); return; }
+    try { wrap.dataset.topscroll = '1'; } catch (e) { return; }
+    var bar = document.createElement('div');
+    bar.className = 'table-scroll-top';
+    bar.setAttribute('aria-hidden', 'true');
+    bar.title = 'Arrastre para moverse a la derecha/izquierda sin bajar';
+    var spacer = document.createElement('div');
+    spacer.className = 'table-scroll-spacer';
+    spacer.innerHTML = '&nbsp;';
+    bar.appendChild(spacer);
+    wrap.parentNode.insertBefore(bar, wrap);
+    var syncing = false;
+    function ancho() {
+      spacer.style.width = Math.max(wrap.scrollWidth, wrap.clientWidth) + 'px';
+      bar.scrollLeft = wrap.scrollLeft;
+    }
+    try { wrap.__crmAncho = ancho; } catch (e) {}
+    bar.addEventListener('scroll', function () {
+      if (syncing) return; syncing = true;
+      wrap.scrollLeft = bar.scrollLeft; syncing = false;
+    });
+    wrap.addEventListener('scroll', function () {
+      if (syncing) return; syncing = true;
+      bar.scrollLeft = wrap.scrollLeft; syncing = false;
+    });
+    // Rueda con Mayús (o rueda horizontal) mueve la tabla a los lados
+    // sin usar la barra: útil cuando la tabla es muy ancha.
+    wrap.addEventListener('wheel', function (ev) {
+      if (ev.shiftKey && !ev.ctrlKey && !ev.metaKey) {
+        if (wrap.scrollWidth > wrap.clientWidth) {
+          wrap.scrollLeft += (ev.deltaY || 0);
+          try { bar.scrollLeft = wrap.scrollLeft; } catch (e2) {}
+          ev.preventDefault();
+        }
+      }
+    }, { passive: false });
+    ancho();
+    if (window.ResizeObserver) {
+      try {
+        new ResizeObserver(ancho).observe(wrap);
+        var tabla = wrap.querySelector('table');
+        if (tabla) new ResizeObserver(ancho).observe(tabla);
+        var cuerpo = wrap.querySelector('tbody');
+        if (cuerpo) new ResizeObserver(ancho).observe(cuerpo);
+      } catch (e) {}
+    }
+    window.addEventListener('resize', ancho);
+  };
+  function aplicarBarras() {
+    var zonas = document.querySelectorAll('.table-wrap');
+    for (var i = 0; i < zonas.length; i++) window.CRMTopScroll(zonas[i]);
+  }
+  window.CRMTopScrollRefresh = aplicarBarras;
+  aplicarBarras();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', aplicarBarras);
+  }
+  window.addEventListener('load', aplicarBarras);
+  document.addEventListener('crm:tabla-actualizada', aplicarBarras);
+  if (window.MutationObserver) {
+    try {
+      var raiz = document.documentElement || document;
+      var antiRuido = false;
+      new MutationObserver(function (muts) {
+        if (antiRuido) return;
+        var hay = false;
+        for (var i = 0; i < muts.length && !hay; i++) {
+          var nodos = muts[i].addedNodes || [];
+          for (var j = 0; j < nodos.length; j++) {
+            var n = nodos[j];
+            if (n.nodeType === 1 && (n.matches('.table-wrap') || (n.querySelector && n.querySelector('.table-wrap')))) { hay = true; break; }
+          }
+          // Filas nuevas dentro de una tabla existente: reanchar su barra.
+          try {
+            var t = muts[i].target;
+            if (t && t.closest) {
+              var w = t.closest('.table-wrap');
+              if (w && w.__crmAncho) { w.__crmAncho(); }
+            }
+          } catch (e2) {}
+        }
+        if (hay) {
+          antiRuido = true;
+          try { aplicarBarras(); } finally { antiRuido = false; }
+        }
+      }).observe(raiz, { childList: true, subtree: true });
+    } catch (e) {}
+  }
   // theme.js se carga en <head>; el botón vive en el cuerpo (barra lateral),
   // así que el enlace se intenta ya y, si el botón aún no existe, al cargar
   // el DOM. Idempotente: nunca se registran dos listeners sobre el mismo botón.

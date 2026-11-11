@@ -101,6 +101,85 @@ def test_chat_catalogo_y_stock_desde_bd(path):
     assert '3 unidades' in res2['answer']
 
 
+def test_chat_interno_ve_domicilio_y_observaciones(path):
+    """El chat interno muestra precio a domicilio, observaciones y vigencia;
+    las notas internas sólo con rol admin (nunca para rol sin permiso)."""
+    r = svc.catalog_create(path, name='Cepillo suave demo', kind='producto',
+                           created_by=1)
+    iid = r['item_id']
+    rev = 1
+    for campo, valor in [('price_cents', 650),
+                         ('price_domicilio_cents', 850),
+                         ('currency', 'USD'),
+                         ('stock_na', 0),
+                         ('stock', 12),
+                         ('details', 'Cerdas suaves.'),
+                         ('public_notes', 'Promo de marzo.'),
+                         ('internal_notes', 'Reponer bajo 5.'),
+                         ('valid_from', '2026-03-01'),
+                         ('valid_until', '2026-03-31')]:
+        up = svc.catalog_update(path, item_id=iid, expected_revision=rev,
+                                field=campo, value=valor, actor=1,
+                                publish=True, role='admin')
+        assert up['ok'], (campo, up)
+        rev += 1
+    res = svc.responder_chat_internal(
+        path, '¿cuánto cuesta el cepillo suave a domicilio?',
+        role='admin', adaptador=chat_adapter.AdaptadorSimulado())
+    assert res['ok']
+    assert 'USD 6,50' in res['answer']
+    assert 'USD 8,50' in res['answer']
+    assert 'Promo de marzo' in res['answer']
+    assert 'Reponer bajo 5' in res['answer']
+    assert '2026-03-31' in res['answer']
+    res_user = svc.responder_chat_internal(
+        path, '¿cuánto cuesta el cepillo suave a domicilio?',
+        role='user', adaptador=chat_adapter.AdaptadorSimulado())
+    assert res_user['ok']
+    assert 'USD 8,50' in res_user['answer']
+    assert 'Promo de marzo' in res_user['answer']
+    assert 'Reponer bajo 5' not in res_user['answer']
+
+
+def test_chat_atributo_y_domicilio_desde_ficha_y_zonas(path):
+    """Color/sabor se responden desde detalle/observaciones (nunca desde
+    documentos); el domicilio desde las zonas con tarifa (tolera typos).
+    Sin dato cargado se dice con honestidad, sin inventar."""
+    r = svc.catalog_create(path, name='Cepillo suave demo', kind='producto',
+                           created_by=1)
+    iid = r['item_id']
+    rev = 1
+    for campo, valor in [('price_cents', 650),
+                         ('stock_na', 0), ('stock', 10),
+                         ('details', 'Cerdas suaves en azul y rojo.'),
+                         ('public_notes', 'Promo de marzo.'),
+                         ('currency', 'USD')]:
+        up = svc.catalog_update(path, item_id=iid, expected_revision=rev,
+                                field=campo, value=valor, actor=1,
+                                publish=True, role='admin')
+        assert up['ok'], (campo, up)
+        rev += 1
+    with connect(path) as conn:
+        conn.execute("INSERT INTO comercio_zonas(codigo,nombre,tarifa_cents,activa)"
+                     " VALUES ('NORTE','Zona norte',500,1)")
+    ad = chat_adapter.AdaptadorSimulado()
+    res = svc.responder_chat_internal(
+        path, 'de que color es el cepillo suave', role='admin', adaptador=ad)
+    assert 'azul' in res['answer'].lower(), res['answer']
+    res = svc.responder_chat_internal(
+        path, 'hace entregas a domisilio', role='admin', adaptador=ad)
+    # Decisión del negocio (2026-11-10): el bot NO enumera tarifas por zona
+    # (sonaba a costo inventado); afirma la entrega y, si la ficha tiene precio
+    # a domicilio, usa ese. Aquí la ficha no lo tiene: lo coordina el equipo.
+    assert 'Zona norte' not in res['answer'], res['answer']
+    assert 'USD 5' not in res['answer'], res['answer']
+    assert 'domicilio' in res['answer'].lower(), res['answer']
+    res = svc.responder_chat_internal(
+        path, 'en que color tiene', role='admin', adaptador=ad)
+    assert 'De qué producto' in res['answer'], res['answer']
+    assert 'garantía' not in res['answer'].lower(), res['answer']
+
+
 def test_chat_stock_refleja_importacion_de_inventario(path):
     """La IA lee existencias de la BD, no de una copia del Excel."""
     csv_b = b'id;nombre;tipo;stock;activo\nANES-10;Anestesia lidocaina 2%;producto;40;si\n'

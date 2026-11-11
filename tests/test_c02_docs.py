@@ -246,8 +246,15 @@ def test_kb_edicion_sube_version_y_reindexa(path):
                             data=docx2, visibility='publico', actor=1)
     assert r2['version'] == 2     # la edición del mismo documento sube revisión
     assert svc.kb_detail(path, r2['doc_id'], role='admin')['document']['version'] == 2
-    # Se desindexa lo viejo: la nueva versión queda en borrador hasta publicar.
-    assert not svc.kb_search(path, 'Versión uno')
+    # Editar NO retira lo publicado (R3): la revisión publicada sigue
+    # respondiendo mientras la nueva está en borrador.
+    assert svc.kb_search(path, 'Versión uno')
+    # Al publicar la nueva, el puntero se mueve: ya no queda el cuerpo anterior.
+    svc.kb_publish(path, doc_id=r2['doc_id'], actor=1)
+    tras_publicar = svc.kb_search(path, 'Versión uno')
+    assert tras_publicar and all(h['doc_version'] == 2 for h in tras_publicar)
+    assert not any('Versión uno' in h['body'] for h in tras_publicar)
+    assert svc.kb_search(path, 'Versión dos')
 
 
 # ---------------------------------------------------------------------------
@@ -434,3 +441,37 @@ def test_xlsx_dos_hojas_extrae_hojas_y_filas():
 def crm(tmp_path):
     app, _email = _make_app(tmp_path, role='admin')
     return app
+
+
+def test_docx_cuadro_de_texto_si_y_escaneado_dice_como_resolverlo():
+    import io as _io
+    import zipfile as _zf
+    cuerpo = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+              '<w:body><w:p><w:r><w:t> </w:t></w:r></w:p>'
+              '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+              '<mc:Choice><w:drawing><w:txbxContent '
+              'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+              '<w:p><w:r><w:t>Horario de texto en cuadro</w:t></w:r></w:p>'
+              '</w:txbxContent></w:drawing></mc:Choice></mc:AlternateContent>'
+              '</w:body></w:document>')
+    buf = _io.BytesIO()
+    with _zf.ZipFile(buf, 'w', _zf.ZIP_DEFLATED) as zf:
+        zf.writestr('word/document.xml', cuerpo.encode('utf-8'))
+    r = D.extraer_documento('caja.docx', buf.getvalue())
+    assert r['ok'] and 'cuadro' in (r.get('body_text') or '')
+    escaneado = cuerpo.replace('<w:t>Horario de texto en cuadro</w:t>', '')
+    buf2 = _io.BytesIO()
+    with _zf.ZipFile(buf2, 'w', _zf.ZIP_DEFLATED) as zf:
+        zf.writestr('word/document.xml', escaneado.encode('utf-8'))
+    r2 = D.extraer_documento('vacio.docx', buf2.getvalue())
+    assert not r2['ok']
+    buf3 = _io.BytesIO()
+    with _zf.ZipFile(buf3, 'w', _zf.ZIP_DEFLATED) as zf:
+        zf.writestr('word/document.xml', ('<?xml version="1.0"?>' + (
+            '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+            '<w:body><w:p><w:r><w:drawing><pic:pic '
+            'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"/>'
+            '</w:drawing></w:r></w:p></w:body></w:document>')).encode('utf-8'))
+    r3 = D.extraer_documento('scan.docx', buf3.getvalue())
+    assert not r3['ok'] and 'escaneado' in (r3.get('extract_error') or '').lower()

@@ -552,3 +552,19 @@ def test_rutas_inventario_lote_mixto_rechazado_http():
         reg = conn.execute('SELECT COUNT(*) AS n FROM crm_inventory_imports').fetchone()['n']
     assert reg == 0
 
+
+
+def test_catalogo_en_inventario_redirige_al_flujo_correcto(path):
+    from crm import comercio_excel as xl
+    data = xl._libro([('Hoja1', [
+        ['Código', 'Nombre', 'Tipo', 'Profesional', 'Precio', 'Moneda',
+         'Unidades disponibles', 'Duración', 'Vigencia desde', 'Vigencia hasta',
+         'Detalle (visible para el paciente)', 'Precio venta local',
+         'Precio venta entrega domicilio'],
+        ['CONS-001', 'Consulta', 'Consulta', 'Dra. Ana', '35.00', 'USD', '0', '30',
+         '2026-01-01', '2026-12-31', 'Detalle', '35.00', '42.00'],
+    ])])
+    r = inv.inventory_upload_info('Libro3.xlsx', data)
+    assert not r['ok'] and 'Catálogo' in r['message']
+    r = inv.inventory_preview(path, 'Libro3.xlsx', data, 'Hoja1', {'code': 'A'})
+    assert not r['ok'] and 'Catálogo' in r['message']

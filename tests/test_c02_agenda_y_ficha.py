@@ -8,7 +8,7 @@ Cubre:
 - varios especialistas + «primera vez»: asigna uno,
 - hueco ocupado: ofrece alternativas.
 """
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -50,7 +50,8 @@ def _profesional(path, nombre):
 
 def _ctx(*nombres):
     return {'professionals': [{'id': i + 1, 'name': n} for i, n in enumerate(nombres)],
-            'zonas': ['America/Guayaquil'], 'now_local': None}
+            'zonas': ['America/Guayaquil'], 'now_local': None,
+            'hoy': '2030-01-07'}
 
 
 def _paso(path, texto, externo, ctx, phone='59170000111'):
@@ -75,10 +76,20 @@ def _manana_laborable():
     return dia
 
 
+def _manana_del_reloj_fijo():
+    """Mañana laborable según el 'hoy' fijo inyectado en _ctx (2030-01-07,
+    miércoles): las fechas explícitas del diálogo deben ser futuras para el
+    reloj simulado del worker, no para el reloj real."""
+    dia = date(2030, 1, 7) + timedelta(days=1)
+    while dia.weekday() >= 5:
+        dia += timedelta(days=1)
+    return dia
+
+
 # --- Chat interno: agenda ---------------------------------------------------
 
-def test_resumen_cuenta_hoy_y_manana_con_estados_en_espanol(path):
-    dia = _manana_laborable()
+def test_resumen_cuenta_hoy_con_estados_canonicos(path):
+    dia = datetime.now(ZONA).date()
     with connect(path) as conn:
         conn.execute("""INSERT INTO crm_professionals(name,specialty,email,active)
                         VALUES ('Dra. Ana','General','ana@local',1)""")
@@ -87,12 +98,12 @@ def test_resumen_cuenta_hoy_y_manana_con_estados_en_espanol(path):
             conn.execute(
                 """INSERT INTO crm_appointments(professional_id,title,start,end,status,event_id,
                        operational_status,updated_at)
-                   VALUES (1,'Consulta',?,?,'active',?,'confirmada',?)""",
+                   VALUES (1,'Consulta',?,?,'active',?,'confirmed',?)""",
                 (inicio.astimezone(timezone.utc).isoformat(),
                  (inicio + timedelta(minutes=30)).astimezone(timezone.utc).isoformat(),
                  'ev-%d' % hora, now()))
     resumen = svc._agenda_summary(path)
-    assert resumen['citas_manana'] == 2
+    assert resumen['citas_hoy'] == 2
     assert '2' in resumen['texto']
 
 
@@ -123,7 +134,7 @@ def test_pregunta_para_quien_es_y_guarda_el_paciente(path):
     _servicio(path)
     _profesional(path, 'Dra. Ana')
     ctx = _ctx('Dra. Ana')
-    dia = _manana_laborable()
+    dia = _manana_del_reloj_fijo()
 
     _paso(path, 'quiero reservar una limpieza dental', 'm1', ctx)
     _paso(path, '%s 10:30' % dia.isoformat(), 'm2', ctx)
@@ -140,7 +151,7 @@ def test_respuesta_para_mi_usa_el_titular(path):
     _servicio(path)
     _profesional(path, 'Dra. Ana')
     ctx = _ctx('Dra. Ana')
-    dia = _manana_laborable()
+    dia = _manana_del_reloj_fijo()
 
     _paso(path, 'quiero reservar una limpieza dental', 'p1', ctx)
     _paso(path, '%s 11:00' % dia.isoformat(), 'p2', ctx)
@@ -161,7 +172,7 @@ def test_un_solo_especialista_se_anuncia_sin_preguntar(path):
 
     _paso(path, 'quiero una limpieza dental', 's1', ctx)
     textos = ' '.join(_textos(path))
-    assert 'Te atenderá Dra. Ana' in textos
+    assert 'Le atenderá Dra. Ana' in textos
     assert '¿Con qué profesional' not in textos
 
 
@@ -172,10 +183,14 @@ def test_varios_especialistas_preguntan_por_primera_vez(path):
     ctx = _ctx('Dra. Ana', 'Dr. Luis')
 
     _paso(path, 'quiero una limpieza dental', 'v1', ctx)
-    assert 'ya te has atendido antes' in ' '.join(_textos(path))
+    # BOT-EVAL-01: la pregunta ya no exige responder «no»; acepta nombre,
+    # número o «sin preferencia» y sigue ofreciendo asignar al más libre.
+    textos = ' '.join(_textos(path))
+    assert 'sin preferencia' in textos
+    assert 'Dra. Ana' in textos and 'Dr. Luis' in textos
 
     _paso(path, 'no, es mi primera vez', 'v2', ctx)
-    assert 'Te atenderá' in ' '.join(_textos(path))
+    assert 'Le atenderá' in ' '.join(_textos(path))
 
 
 # --- Alternativas -----------------------------------------------------------
@@ -185,7 +200,7 @@ def test_hueco_ocupado_ofrece_alternativas(path):
     _profesional(path, 'Dra. Ana')
     _profesional(path, 'Dr. Luis')
     ctx = _ctx('Dra. Ana', 'Dr. Luis')
-    dia = _manana_laborable()
+    dia = _manana_del_reloj_fijo()
 
     _paso(path, 'quiero una limpieza dental', 'h1', ctx)
     _paso(path, '1', 'h2', ctx)
@@ -202,3 +217,60 @@ def test_hueco_ocupado_ofrece_alternativas(path):
             "SELECT payload FROM crm_outbox WHERE recipient=? ORDER BY id DESC LIMIT 1",
             (otro,)).fetchone()['payload']
     assert 'ocupado' in payload or 'Te puedo ofrecer' in payload
+
+
+# --- Vinculación doctor ↔ cuenta: sólo sus citas ----------------------------
+
+def _usuario(path, email, role='user'):
+    from werkzeug.security import generate_password_hash as _gph
+    with connect(path) as conn:
+        cur = conn.execute(
+            "INSERT INTO crm_users(email,name,password_hash,role) VALUES (?,?,?,'%s')" % role,
+            (email, 'U', _gph('x' * 12)))
+        return cur.lastrowid
+
+
+def _cita(path, prof_id, dia, hora, titulo='Consulta'):
+    from crm.store import now as _now
+    inicio = datetime(dia.year, dia.month, dia.day, hora, tzinfo=ZONA)
+    with connect(path) as conn:
+        conn.execute(
+            """INSERT INTO crm_appointments(professional_id,title,start,end,status,event_id,
+                   operational_status,updated_at)
+               VALUES (?, ?,?,?,?,?,?,?)""",
+            (prof_id, titulo,
+             inicio.astimezone(timezone.utc).isoformat(),
+             (inicio + timedelta(minutes=30)).astimezone(timezone.utc).isoformat(),
+             'active', 'ev-%d-%d' % (prof_id, hora), 'confirmed', _now()))
+
+
+def test_agenda_dia_doctor_vinculado_solo_sus_citas(path):
+    _profesional(path, 'Dra. Ana')
+    _profesional(path, 'Dr. Luis')
+    with connect(path) as conn:
+        ana = conn.execute("SELECT id FROM crm_professionals WHERE email='ana@local'").fetchone()['id']
+        luis = conn.execute("SELECT id FROM crm_professionals WHERE email='luis@local'").fetchone()['id']
+        conn.execute("UPDATE crm_professionals SET email='ana@demo.local' WHERE id=?", (ana,))
+    _usuario(path, 'ana@demo.local')
+    # Jueves siguiente al día real: agenda_dia usa el reloj del negocio.
+    hoy_real = datetime.now(ZONA).date()
+    dia = hoy_real + timedelta(days=(3 - hoy_real.weekday()) % 7 or 7)
+    _cita(path, ana, dia, 9)
+    _cita(path, luis, dia, 10)
+    with connect(path) as conn:
+        uid = conn.execute("SELECT id FROM crm_users WHERE email='ana@demo.local'").fetchone()['id']
+    res = svc.agenda_dia(path, 'tenemos citas el jueves', role='user', user_id=uid)
+    assert res is not None and res['total'] == 1
+    assert 'Ana' in res['texto'] and 'Luis' not in res['texto']
+    assert svc.agenda_dia(path, 'tenemos citas el jueves', role='user', user_id=None) is None
+    admin = svc.agenda_dia(path, 'tenemos citas el jueves', role='admin')
+    assert admin is not None and admin['total'] == 2
+
+
+@__import__('pytest').fixture(autouse=True)
+def _flujo_clasico_recepcion(monkeypatch):
+    """Estas pruebas cubren el flujo clásico (lista de profesionales, varias
+    alternativas, colega el mismo día). La recepción directa por defecto se
+    cubre en tests/test_c02_recepcion_comercial.py."""
+    from crm import canal as _canal
+    monkeypatch.setattr(_canal, 'RECEPCION_DIRECTA', False)

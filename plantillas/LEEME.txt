@@ -1,0 +1,20 @@
+PLANTILLAS OFICIALES (no las modifique a mano: descargue siempre la última del panel).
+
+1. CONFIGURACION_DEL_NEGOCIO.xlsx → Catálogo → Importación de configuración.
+   Crea/actualiza profesionales, servicios, productos, precios, vigencias, zonas,
+   promociones y preguntas frecuentes. Columnas fijas; no agregue ni quite columnas.
+   También acepta su planilla comercial con columnas Código/Nombre/Tipo/Profesional/
+   Precio/Moneda/Unidades disponibles/Duración/Vigencia desde/Vigencia hasta/
+   Detalle/Precio venta local/Precio venta entrega domicilio.
+2. ACTUALIZAR_INVENTARIO.xlsx → mismo lugar, hojas INVENTARIO (conteo físico
+   absoluto, no movimientos) y PRECIOS (centavos enteros; 0 válido, vacío no cambia).
+3. PLANTILLA_CONOCIMIENTO.docx → Conocimiento → Subir documento (sólo .docx/.pdf/.txt
+   con texto; los escaneados sin texto no sirven). Elija público o privado.
+4. PLANTILLA_PROTOCOLO_INTERNO.docx → mismo lugar, visibilidad PRIVADA.
+   Estructura: Objetivo, Alcance, Responsables, Procedimiento paso a paso,
+   Registros y Revisión. El bot nunca la muestra a pacientes.
+5. PLANTILLA_INFORMACION_PUBLICA.docx → mismo lugar, visibilidad PÚBLICA.
+   Un tema por documento, máximo 5 frases, sin precios (viven en Catálogo).
+
+Nunca suba planillas al Conocimiento ni documentos al inventario: cada flujo
+valida su formato y rechaza el resto con el motivo.

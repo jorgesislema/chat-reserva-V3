@@ -181,6 +181,9 @@ def from_dict(data, source='inline'):
     hours = {}
     raw_hours = data.get('horarios') or {}
     for day, window in raw_hours.items():
+        if window in (None, '', []):
+            # Un día sin ventana (null) significa cerrado; no es un error.
+            continue
         if not isinstance(window, (list, tuple)) or len(window) != 2:
             raise ProfileError(
                 f'Horario del {day} mal formado: se espera ["HH:MM", "HH:MM"]')

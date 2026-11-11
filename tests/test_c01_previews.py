@@ -69,7 +69,10 @@ def test_agenda_roundtrip_create_read_reprogram_cancel_on_fixtures(crm):
     data = appointment_data()
     post(client, '/appointments', **data)
     # recargar la lista desde /api/agenda y comprobar que aparece el cliente/especialista.
-    agenda = client.get('/api/agenda').get_json()
+    # Se pide la semana de la cita creada: si hoy es domingo, «mañana» ya es
+    # la semana siguiente y la vista por defecto (semana actual) no la trae.
+    fecha = data['start'][:10]
+    agenda = client.get('/api/agenda?date=' + fecha).get_json()
     appointments = agenda.get('appointments') or []
     created = [a for a in appointments if a.get('title') == 'Consulta de diagnóstico']
     assert len(created) == 1
@@ -78,7 +81,7 @@ def test_agenda_roundtrip_create_read_reprogram_cancel_on_fixtures(crm):
 
     # 2) Consultar el detalle por ID (recargar después de una visita a otra página).
     assert client.get('/?tab=leads').status_code == 200
-    agenda2 = client.get('/api/agenda').get_json()
+    agenda2 = client.get('/api/agenda?date=' + fecha).get_json()
     again = [a for a in (agenda2.get('appointments') or []) if a.get('id') == first['id']]
     assert len(again) == 1 and again[0]['title'] == 'Consulta de diagnóstico'
 

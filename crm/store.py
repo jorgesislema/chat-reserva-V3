@@ -871,6 +871,320 @@ def _migration_022_reclamos(db):
     db.execute('CREATE INDEX IF NOT EXISTS idx_claims_estado ON crm_claims(status)')
 
 
+def _migration_023_kb_publicaciones(db):
+    """v23 — revisiones inmutables del conocimiento y publicación activa.
+
+    Editar un documento ya no retira lo publicado (R3). Cada guardado crea una
+    revisión INMUTABLE en ``crm_kb_versions`` y ``published_version`` apunta a
+    la versión que responde: sólo una publicación explícita mueve el puntero,
+    de forma atómica. Desactivar sí retira la publicación (historial intacto).
+    """
+    db.execute('ALTER TABLE crm_kb_documents ADD COLUMN published_version INTEGER')
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_kb_versions (
+             id INTEGER PRIMARY KEY,
+             doc_id INTEGER NOT NULL REFERENCES crm_kb_documents(id),
+             version INTEGER NOT NULL,
+             name TEXT NOT NULL,
+             kind TEXT NOT NULL DEFAULT 'texto',
+             visibility TEXT NOT NULL DEFAULT 'privado',
+             body_text TEXT NOT NULL DEFAULT '',
+             source_name TEXT, source_path TEXT, procedencia TEXT, extract_error TEXT,
+             state TEXT NOT NULL DEFAULT 'borrador',
+             created_by INTEGER,
+             created_at TEXT NOT NULL,
+             UNIQUE(doc_id, version))""")
+    db.execute('CREATE INDEX IF NOT EXISTS crm_kb_versions_doc '
+               'ON crm_kb_versions(doc_id, version)')
+    # Relleno de la revisión vigente de cada documento existente. Si estaba
+    # publicado, esa misma revisión es la publicación activa (nadie pierde
+    # conocimiento por migrar).
+    stamp = now()
+    for row in db.execute('SELECT * FROM crm_kb_documents').fetchall():
+        db.execute(
+            """INSERT OR IGNORE INTO crm_kb_versions
+               (doc_id, version, name, kind, visibility, body_text, source_name,
+                source_path, procedencia, extract_error, state, created_by, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (row['id'], row['version'], row['name'], row['kind'], row['visibility'],
+             row['body_text'], row['source_name'], row['source_path'],
+             row['procedencia'], row['extract_error'], row['state'],
+             row['uploaded_by'], stamp))
+        if row['state'] == 'publicado':
+            db.execute('UPDATE crm_kb_documents SET published_version=? WHERE id=?',
+                       (row['version'], row['id']))
+
+
+def _migration_024_c02_chat_owner(db):
+    """v24 — memoria del chat interno aislada por usuario (R2).
+
+    El rol no identifica a una persona: dos usuarios del mismo rol con el mismo
+    ``conversation_id`` compartían historial. Cada fila lleva ahora un
+    ``owner`` (``u:<id>`` del usuario autenticado, ``''`` para llamadas sin
+    usuario) que acota lectura, escritura y poda. La unicidad pasa a
+    (conversación, owner, turno) para que dos usuarios puedan usar el mismo id
+    sin colisionar, y ``crm_c02_chat_conversations`` registra quién reclamó cada
+    id para rechazar ids ajenos. Las filas existentes se atribuyen a su usuario
+    cuando lo tienen; si no, quedan en el espacio sin usuario (nunca se ofrecen
+    a una cuenta autenticada).
+    """
+    db.execute(
+        """CREATE TABLE crm_c02_chat_memory_v24 (
+             id INTEGER PRIMARY KEY,
+             conversation_id TEXT NOT NULL,
+             owner TEXT NOT NULL DEFAULT '',
+             turno INTEGER NOT NULL,
+             role TEXT NOT NULL,
+             user_id INTEGER,
+             question TEXT NOT NULL,
+             question_busqueda TEXT NOT NULL,
+             answer TEXT NOT NULL,
+             fuentes TEXT NOT NULL DEFAULT '[]',
+             abstencion INTEGER NOT NULL DEFAULT 0,
+             created_at TEXT NOT NULL,
+             UNIQUE(conversation_id, owner, turno))""")
+    db.execute(
+        """INSERT INTO crm_c02_chat_memory_v24
+              (id, conversation_id, owner, turno, role, user_id, question,
+               question_busqueda, answer, fuentes, abstencion, created_at)
+           SELECT id, conversation_id,
+                  CASE WHEN user_id IS NULL THEN '' ELSE 'u:' || user_id END,
+                  turno, role, user_id, question, question_busqueda, answer,
+                  fuentes, abstencion, created_at
+           FROM crm_c02_chat_memory""")
+    db.execute('DROP TABLE crm_c02_chat_memory')
+    db.execute('ALTER TABLE crm_c02_chat_memory_v24 RENAME TO crm_c02_chat_memory')
+    db.execute('CREATE INDEX IF NOT EXISTS crm_c02_chat_memory_conv '
+               'ON crm_c02_chat_memory(conversation_id, owner, turno)')
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS crm_c02_chat_conversations (
+             conversation_id TEXT PRIMARY KEY,
+             owner TEXT NOT NULL,
+             created_at TEXT NOT NULL)""")
+
+
+def _migration_025_cita_origen_sync(db):
+    """v25 — origen del evento al reasignar una cita entre calendarios (R6).
+
+    Una cita sincronizada que cambia de profesional debe migrarse de calendario:
+    el evento del calendario anterior se retira y se crea en el destino. Estas
+    columnas conservan la identidad ANTERIOR (calendario y cuenta) mientras la
+    migración está pendiente, de modo que un fallo parcial sea reintentable sin
+    duplicar ni dejar eventos huérfanos.
+    """
+    db.execute('ALTER TABLE crm_appointments ADD COLUMN sync_origin_calendar_id TEXT')
+    db.execute('ALTER TABLE crm_appointments ADD COLUMN sync_origin_account_id INTEGER')
+
+
+def _migration_026_conversacion_trato(db):
+    """v26 — preferencia de trato (tú/usted) por conversación.
+
+    El perfil público tutea por defecto. Si la persona pide «háblame de usted»
+    (o escribe de usted), la preferencia se conserva en la conversación para
+    no alternar entre mensajes. La configuración del negocio sigue fijando el
+    valor inicial. Columna aditiva con valor por defecto: no reescribe filas
+    existentes ni cambia citas.
+    """
+    db.execute("ALTER TABLE crm_conversations ADD COLUMN trato TEXT NOT NULL DEFAULT ''")
+
+
+def _migration_027_comercio(db):
+    """v27 — recorrido comercial: zonas, promociones, pedidos e incidencias.
+
+    Tablas nuevas con ``IF NOT EXISTS`` (idempotente, aditiva). Los precios se
+    guardan en centavos enteros; el pedido conserva el snapshot acordado para
+    que un cambio posterior del catálogo no altere lo confirmado.
+    """
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_zonas (
+             id INTEGER PRIMARY KEY,
+             codigo TEXT NOT NULL UNIQUE,
+             nombre TEXT NOT NULL DEFAULT '',
+             tarifa_cents INTEGER,
+             activa INTEGER NOT NULL DEFAULT 1)"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_promociones (
+             id INTEGER PRIMARY KEY,
+             codigo TEXT NOT NULL UNIQUE,
+             nombre TEXT NOT NULL DEFAULT '',
+             tipo TEXT NOT NULL DEFAULT 'monto'
+               CHECK(tipo IN ('monto','porcentaje')),
+             valor INTEGER NOT NULL DEFAULT 0,
+             moneda TEXT NOT NULL DEFAULT '',
+             combinable INTEGER NOT NULL DEFAULT 0,
+             modo TEXT NOT NULL DEFAULT 'ambos'
+               CHECK(modo IN ('retiro','domicilio','ambos')),
+             vigencia_desde TEXT,
+             vigencia_hasta TEXT,
+             activa INTEGER NOT NULL DEFAULT 1,
+             condiciones TEXT NOT NULL DEFAULT '{}')"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_promocion_items (
+             promo_id INTEGER NOT NULL REFERENCES comercio_promociones(id),
+             item_id INTEGER NOT NULL REFERENCES crm_catalog_items(id),
+             UNIQUE(promo_id, item_id))"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_regalos (
+             promo_id INTEGER NOT NULL REFERENCES comercio_promociones(id),
+             gift_item_id INTEGER NOT NULL REFERENCES crm_catalog_items(id),
+             cantidad INTEGER NOT NULL DEFAULT 1,
+             activa INTEGER NOT NULL DEFAULT 1,
+             UNIQUE(promo_id, gift_item_id))"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_cotizaciones (
+             id INTEGER PRIMARY KEY,
+             clave TEXT NOT NULL UNIQUE,
+             item_id INTEGER NOT NULL REFERENCES crm_catalog_items(id),
+             cantidad INTEGER NOT NULL,
+             modo TEXT NOT NULL CHECK(modo IN ('retiro','domicilio')),
+             zona_codigo TEXT,
+             promo_codigo TEXT,
+             snapshot TEXT NOT NULL DEFAULT '{}',
+             total_cents INTEGER,
+             pendiente_envio INTEGER NOT NULL DEFAULT 0,
+             estado TEXT NOT NULL DEFAULT 'vigente',
+             expira_en TEXT NOT NULL,
+             creada_en TEXT NOT NULL)"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_pedidos (
+             id INTEGER PRIMARY KEY,
+             codigo TEXT NOT NULL UNIQUE,
+             conversacion_id INTEGER REFERENCES crm_conversations(id),
+             cotizacion_clave TEXT NOT NULL,
+             snapshot TEXT NOT NULL DEFAULT '{}',
+             total_cents INTEGER NOT NULL,
+             pago_estado TEXT NOT NULL DEFAULT 'pendiente'
+               CHECK(pago_estado IN ('pendiente','pagado')),
+             estado TEXT NOT NULL DEFAULT 'coordinacion'
+               CHECK(estado IN ('coordinacion','cancelado','entregado')),
+             creada_en TEXT NOT NULL)"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_pedido_lineas (
+             id INTEGER PRIMARY KEY,
+             pedido_id INTEGER NOT NULL REFERENCES comercio_pedidos(id),
+             item_id INTEGER NOT NULL REFERENCES crm_catalog_items(id),
+             cantidad INTEGER NOT NULL,
+             precio_cents INTEGER NOT NULL,
+             descuento_cents INTEGER NOT NULL DEFAULT 0,
+             es_regalo INTEGER NOT NULL DEFAULT 0)"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_reservas_stock (
+             id INTEGER PRIMARY KEY,
+             pedido_id INTEGER NOT NULL REFERENCES comercio_pedidos(id),
+             item_id INTEGER NOT NULL REFERENCES crm_catalog_items(id),
+             cantidad INTEGER NOT NULL,
+             estado TEXT NOT NULL DEFAULT 'reservado'
+               CHECK(estado IN ('reservado','liberado')))"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_incidencias (
+             id INTEGER PRIMARY KEY,
+             fecha TEXT NOT NULL,
+             categoria TEXT NOT NULL,
+             estado TEXT NOT NULL DEFAULT 'abierta'
+               CHECK(estado IN ('abierta','resuelta')),
+             detalle TEXT NOT NULL DEFAULT '',
+             ref_tipo TEXT NOT NULL DEFAULT '',
+             ref_id INTEGER)"""
+    )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS comercio_importaciones (
+             id INTEGER PRIMARY KEY,
+             sha256 TEXT NOT NULL UNIQUE,
+             archivo TEXT NOT NULL DEFAULT '',
+             hoja TEXT NOT NULL DEFAULT '',
+             resumen TEXT NOT NULL DEFAULT '{}',
+             actor INTEGER REFERENCES crm_users(id),
+             creada_en TEXT NOT NULL)"""
+    )
+
+
+def _migration_028_precios_y_contacto(db):
+    """v28 — precio de venta a domicilio y teléfono de contacto.
+
+    - ``crm_catalog_items.price_domicilio_cents``: precio de venta con entrega
+      a domicilio en centavos. NULL = igual que el precio local.
+    - ``crm_appointments.contact_phone``: teléfono de contacto de la reserva
+      (por defecto el número del chat; el paciente puede indicar otro).
+    Columnas aditivas y anulables: no reescriben filas ni cambian citas.
+    """
+    cols_items = {r[1] for r in db.execute('PRAGMA table_info(crm_catalog_items)')}
+    if 'price_domicilio_cents' not in cols_items:
+        db.execute('ALTER TABLE crm_catalog_items ADD COLUMN price_domicilio_cents INTEGER')
+    cols_citas = {r[1] for r in db.execute('PRAGMA table_info(crm_appointments)')}
+    if 'contact_phone' not in cols_citas:
+        db.execute('ALTER TABLE crm_appointments ADD COLUMN contact_phone TEXT')
+
+
+def _migration_029_almuerzo_profesional(db):
+    """v29 — pausa de almuerzo por profesional (rotan sin cerrar).
+
+    Columnas anulares ``almuerzo_inicio``/``almuerzo_fin`` (HH:MM) en
+    ``crm_professionals``. Vacías = sin pausa. La reserva la respeta en
+    ``reservation_service``; el negocio puede tener además su propia pausa
+    global por día (``negocio_almuerzos``).
+    """
+    cols = {r[1] for r in db.execute('PRAGMA table_info(crm_professionals)')}
+    if 'almuerzo_inicio' not in cols:
+        db.execute('ALTER TABLE crm_professionals ADD COLUMN almuerzo_inicio TEXT')
+    if 'almuerzo_fin' not in cols:
+        db.execute('ALTER TABLE crm_professionals ADD COLUMN almuerzo_fin TEXT')
+
+
+def _migration_030_horario_profesional(db):
+    """v30 — horario semanal por profesional (días y horas que trabaja).
+
+    Columna ``horario_json`` (TEXT JSON) en ``crm_professionals`` con el mapa
+    día -> ventana: ``{"1": ["09:00", "13:00"]}`` es horario propio ese día,
+    ``{"1": []}`` sigue el horario del negocio, día ausente = no trabaja
+    (p. ej. por comisión sólo algunos días/horas). Vacío/nulo = todo por
+    defecto (horario del negocio). La reserva lo respeta en el canal, el
+    panel y la API (propuesta, alternativas, auto-asignación y alta).
+    """
+    cols = {r[1] for r in db.execute('PRAGMA table_info(crm_professionals)')}
+    if 'horario_json' not in cols:
+        db.execute('ALTER TABLE crm_professionals ADD COLUMN horario_json TEXT')
+
+
+def _migration_031_catalogo_detalle(db):
+    """v31 - detalle de producto/tratamiento legible por el bot.
+
+    Hasta ahora todo dato (color, alergenos, nombres de venta) vivia en
+    ``details``/``public_notes`` como prosa. Se agregan columnas aditivas para
+    que cada dato tenga su campo y el bot pueda afirmarlo o decir que no lo
+    tiene confirmado:
+
+    - ``aliases``: nombres de venta/sinonimos, uno por linea.
+    - ``brand``, ``presentation``: marca y presentacion/contenido.
+    - ``attributes_json``: atributos simples (color, dureza, tamano) en JSON.
+    - ``allergens``, ``warnings``: alergenos declarados y advertencias de uso.
+    - ``sessions``, ``prep_notes``, ``aftercare_notes``, ``requires_evaluation``:
+      datos propios de tratamientos.
+
+    Todas anulables o con valor por defecto vacio: no reescriben filas.
+    """
+    cols = {r[1] for r in db.execute('PRAGMA table_info(crm_catalog_items)')}
+    textos = ('aliases', 'brand', 'presentation', 'allergens', 'warnings',
+              'attributes_json', 'prep_notes', 'aftercare_notes')
+    for col in textos:
+        if col not in cols:
+            db.execute(
+                'ALTER TABLE crm_catalog_items ADD COLUMN %s TEXT NOT NULL DEFAULT \'\''
+                % col)
+    if 'sessions' not in cols:
+        db.execute('ALTER TABLE crm_catalog_items ADD COLUMN sessions INTEGER')
+    if 'requires_evaluation' not in cols:
+        db.execute('ALTER TABLE crm_catalog_items ADD COLUMN requires_evaluation '
+                   'INTEGER NOT NULL DEFAULT 0')
+
+
 MIGRATIONS = [
     (1, _migration_001_initial),
     (2, _migration_002_agenda),
@@ -894,6 +1208,15 @@ MIGRATIONS = [
     (20, _migration_020_profesional_whatsapp),
     (21, _migration_021_cita_paciente),
     (22, _migration_022_reclamos),
+    (23, _migration_023_kb_publicaciones),
+    (24, _migration_024_c02_chat_owner),
+    (25, _migration_025_cita_origen_sync),
+    (26, _migration_026_conversacion_trato),
+    (27, _migration_027_comercio),
+    (28, _migration_028_precios_y_contacto),
+    (29, _migration_029_almuerzo_profesional),
+    (30, _migration_030_horario_profesional),
+    (31, _migration_031_catalogo_detalle),
 ]
 
 _CRM_TABLES = ('crm_users', 'crm_professionals', 'crm_appointments', 'crm_leads')

@@ -18,10 +18,13 @@ ANTES de la llamada externa: nunca una transacción abierta durante la red.
 Si la toma humana se confirmó antes de ese CAS, la tarea IA se invalida y la
 llamada NO comienza (cero efectos externos); si el CAS gana, el transporte YA
 comenzó y una toma posterior lo informa como ``envio_en_curso`` (criterio
-linealizable mostrado al operador, sin afirmar cancelación imposible). La caída
-del consumidor se recupera con ``outbox_recover_stale``: ``began_at`` NULL ⇒
-abandono CIERTO reintentable; ``began_at`` NOT NULL ⇒ ``incierto`` sin reenvío
-ciego.
+linealizable mostrado al operador, sin afirmar cancelación imposible). El mismo
+CAS se aplica a la salida HUMANA y de SISTEMA: sin él, la recuperación creía que
+un envío humano en vuelo nunca había comenzado y lo reencolaba (respuesta
+entregada dos veces, R1). La caída del consumidor se recupera con
+``outbox_recover_stale``: ``began_at`` NULL ⇒ abandono CIERTO reintentable;
+``began_at`` NOT NULL ⇒ ``incierto`` sin reenvío ciego. Una tarea DIFERIDA (no
+hubo llamada al proveedor) libera su marca de comienzo.
 
 Resultado honesto (CH-02): el estado del transporte se clasifica en CIERTO
 (``enviado`` con ``entregado``/``aceptado``; ``fallo`` con rechazo explícito del
@@ -140,6 +143,17 @@ def egress_drain(path, transporte, worker='egress', limit=10, hooks=None,
                                 transport_timeout_seconds=transport_timeout_seconds)
 
 
+def _informar_en_curso(resultados, tarea):
+    """El comienzo de la tarea ya está fijado: se informa sin volver a entregar.
+
+    El resultado final lo decidirá quien retiene el envío (o la recuperación,
+    que con ``began_at`` fijado marca ``incierto`` y NUNCA reencola a ciegas).
+    """
+    resultados.append({'outbox_id': tarea['id'], 'origen': tarea.get('origin'),
+                       'correlation': tarea.get('correlation'),
+                       'estado': 'ya_en_curso'})
+
+
 def _clasificar_no_comenzado(resultados, tarea, state, provider_state, contadores):
     """Clasifica una tarea que no inició su envío por decisión del CAS
     (``begin_send``/``mark_sending``) según el estado durable ya decidido por
@@ -249,6 +263,10 @@ def _registrar_entrega(path, tarea, entrega, contadores, resultados) -> None:
         svc.outbox_mark(path, tarea['id'], 'diferido',
                         provider_state=entrega.get('provider_state') or 'fuera_ventana',
                         attempts_delta=0)
+        # No hubo llamada al proveedor: se libera la marca de comienzo para que
+        # la tarea pueda entregarse cuando se cumpla la condición (si no, la
+        # recuperación la trataría como en vuelo para siempre).
+        svc.outbox_release_send(path, tarea['id'])
         contadores.setdefault('diferidas', 0)
         contadores['diferidas'] += 1
         resultados.append({'outbox_id': tarea['id'], 'origen': tarea.get('origin'),
@@ -383,16 +401,44 @@ def egress_drain_claimed(path, claim, transporte, hooks=None, worker=None,
                                                  *_estado_actual(path, tarea['id']),
                                                  contadores)
                     continue
+                if inicio.get('ya'):
+                    # El comienzo REAL de esta tarea ya estaba fijado por otro
+                    # consumidor (o por un intento previo): llamar al transporte
+                    # otra vez duplicaría el mensaje. No se entrega aquí.
+                    _informar_en_curso(resultados, tarea)
+                    continue
                 entrega = _deliver_with_timeout(transporte, tarea,
                                                 transport_timeout_seconds)
                 _registrar_entrega(path, tarea, entrega, contadores, resultados)
                 continue
-        # --- Tarea de origen humano: el operador ya tiene el control ---------
-        try:
-            entrega = transporte.deliver(tarea) or {}
-        except Exception as exc:  # transporte inyectable: resultado indeterminado
-            entrega = {'ok': False, 'incierto': True,
-                       'provider_state': 'timeout:' + type(exc).__name__}
+        # --- Tarea de origen humano o de sistema -----------------------------
+        # El operador ya tiene el control de la conversación, pero el envío
+        # necesita la MISMA marca durable de comienzo que la salida IA: sin
+        # ``began_at`` la recuperación (``outbox_recover_stale``) creería que la
+        # llamada nunca empezó y la reencolaría con el mensaje ya en vuelo
+        # (respuesta duplicada, R1). El CAS re-valida además la propiedad del
+        # intento y la invalidación por toma.
+        inicio = svc.outbox_mark_sending(path, tarea['id'], worker=worker)
+        if not inicio.get('comenzado'):
+            if inicio.get('invalidada'):
+                contadores['invalidadas'] += 1
+                resultados.append({'outbox_id': tarea['id'], 'origen': tarea.get('origin'),
+                                   'correlation': tarea.get('correlation'),
+                                   'estado': 'invalidada'})
+            elif inicio.get('ajeno'):
+                contadores['invalidadas'] += 1
+                resultados.append({'outbox_id': tarea['id'], 'origen': tarea.get('origin'),
+                                   'correlation': tarea.get('correlation'),
+                                   'estado': 'no_comenzado_otro_consumidor'})
+            else:
+                _clasificar_no_comenzado(resultados, tarea,
+                                         *_estado_actual(path, tarea['id']),
+                                         contadores)
+            continue
+        if inicio.get('ya'):
+            _informar_en_curso(resultados, tarea)
+            continue
+        entrega = _deliver_with_timeout(transporte, tarea, transport_timeout_seconds)
         _registrar_entrega(path, tarea, entrega, contadores, resultados)
     for inv in claim['invalidadas']:
         resultados.append({'outbox_id': inv['outbox_id'], 'origen': inv['origin'],

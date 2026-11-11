@@ -106,6 +106,38 @@ def _detect_magic(kind: str, data: bytes) -> Optional[str]:
     return None
 
 
+MAX_XML_DESCOMPRIMIDO_BYTES = 50 * 1024 * 1024
+
+
+def _zip_descomprimido_ok(data: bytes) -> 'Optional[str]':
+    """Rechaza bombas ZIP (muchos MB descomprimidos desde pocos MB subidos)."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            total = sum(i.file_size for i in zf.infolist())
+    except zipfile.BadZipFile:
+        return None
+    if total > MAX_XML_DESCOMPRIMIDO_BYTES:
+        return ('El archivo descomprimido es demasiado grande (%d MB); '
+                'revise el contenido y vuelva a subirlo.'
+                % (total // (1024 * 1024)))
+    return None
+
+
+def _xml_seguro(xml_bytes: bytes, etiqueta: str = 'documento'):
+    """Parsea XML de Office rechazando DOCTYPE/ENTITY (expansión de entidades).
+
+    Lanza ``xml.etree.ElementTree.ParseError`` como el parseo normal, así los
+    ``except`` existentes siguen funcionando.
+    """
+    import xml.etree.ElementTree as ET
+    cabezal = bytes(xml_bytes[:4096]).lower()
+    if b'<!doctype' in cabezal or b'<!entity' in cabezal:
+        raise ET.ParseError(
+            'El XML de %s contiene DOCTYPE/ENTITY: no se procesa por '
+            'seguridad.' % etiqueta)
+    return ET.fromstring(xml_bytes)
+
+
 def _unescape_pdf_token(token: bytes) -> str:
     out = []
     i = 0
@@ -194,22 +226,20 @@ def _extract_docx(data: bytes) -> Dict[str, Any]:
     except (zipfile.BadZipFile, KeyError) as exc:
         return _err_extract(f'No se pudo leer el .docx: {exc}')
     try:
-        root = ET.fromstring(xml_data)
+        root = _xml_seguro(xml_data)
     except ET.ParseError as exc:
         return _err_extract(f'El XML del .docx está dañado: {exc}')
     procedencia: List[Dict[str, Any]] = []
     body_parts: List[str] = []
     body = root.find(_W_NS + 'body')
-    para_idx = 0
     for node in list(body or root):
         if node.tag == _W_NS + 'p':
             texts = [t.text or '' for t in node.iter(_W_NS + 't')]
             para_text = ''.join(texts).strip()
-            para_idx += 1
             if para_text:
                 body_parts.append(para_text)
                 procedencia.append({'tipo': 'párrafo',
-                                    'ubicacion': f'párrafo {para_idx}',
+                                    'ubicacion': f'párrafo {len(body_parts)}',
                                     'texto': para_text})
         elif node.tag == _W_NS + 'tbl':
             tbl_idx = len([p for p in procedencia if p['tipo'] == 'tabla']) + 1
@@ -223,8 +253,27 @@ def _extract_docx(data: bytes) -> Dict[str, Any]:
                     procedencia.append({'tipo': 'tabla',
                                         'ubicacion': f'tabla {tbl_idx}, fila {row_idx}',
                                         'texto': row_text})
+        else:
+            # Contenedores (cuadros de texto, formas): sus párrafos no son
+            # hijos directos del cuerpo; se leen sin duplicar las tablas.
+            for p in node.iter(_W_NS + 'p'):
+                texts = [t.text or '' for t in p.iter(_W_NS + 't')]
+                para_text = ''.join(texts).strip()
+                if para_text and para_text not in body_parts:
+                    body_parts.append(para_text)
+                    procedencia.append({'tipo': 'párrafo',
+                                        'ubicacion': f'párrafo {len(body_parts)}',
+                                        'texto': para_text})
+    n_imagenes = sum(1 for _ in root.iter(
+        '{http://schemas.openxmlformats.org/drawingml/2006/picture}pic'))
     body = '\n'.join(body_parts)
     if not body.strip():
+        if n_imagenes:
+            return _err_extract(
+                'El .docx sólo contiene imágenes, sin texto extraíble '
+                '(parece escaneado). Súbalo con texto seleccionable, use OCR '
+                'antes, o pegue el contenido en el cuadro de texto.',
+                kind=KIND_DOCX)
         return _err_extract('El .docx no contiene texto extraíble (documento vacío).',
                             kind=KIND_DOCX)
     return {'ok': True, 'kind': KIND_DOCX, 'body_text': body,
@@ -239,7 +288,7 @@ def _shared_strings(zf: zipfile.ZipFile) -> List[str]:
     except KeyError:
         return strings
     try:
-        root = ET.fromstring(xml_data)
+        root = _xml_seguro(xml_data)
     except ET.ParseError:
         return strings
     for si in root.iter(_MAIN_NS + 'si'):
@@ -255,7 +304,7 @@ def _sheet_name(zf: zipfile.ZipFile, target: str) -> str:
         rels_data = zf.read('xl/_rels/workbook.xml.rels')
     except KeyError:
         return target
-    rels = ET.fromstring(rels_data)
+    rels = _xml_seguro(rels_data)
     rid = None
     for rel in rels.iter(_REL_NS + 'Relationship'):
         rt = rel.get('Target', '').lstrip('/')
@@ -265,7 +314,7 @@ def _sheet_name(zf: zipfile.ZipFile, target: str) -> str:
     if not rid:
         return target
     try:
-        wb = ET.fromstring(zf.read('xl/workbook.xml'))
+        wb = _xml_seguro(zf.read('xl/workbook.xml'))
     except (KeyError, ET.ParseError):
         return target
     for sh in wb.iter(_MAIN_NS + 'sheet'):
@@ -296,12 +345,12 @@ def _extract_xlsx(data: bytes) -> Dict[str, Any]:
     except zipfile.BadZipFile:
         return _err_extract('El archivo no es un .xlsx válido.')
     try:
-        workbook = ET.fromstring(zf.read('xl/workbook.xml'))
+        workbook = _xml_seguro(zf.read('xl/workbook.xml'))
     except (KeyError, ET.ParseError) as exc:
         return _err_extract(f'No se pudo leer el libro .xlsx: {exc}')
     strings = _shared_strings(zf)
     sheet_targets = []
-    for rel in (ET.fromstring(zf.read('xl/_rels/workbook.xml.rels'))
+    for rel in (_xml_seguro(zf.read('xl/_rels/workbook.xml.rels'))
                 .iter(_REL_NS + 'Relationship')):
         tgt = rel.get('Target', '')
         if tgt.startswith('/xl/'):
@@ -317,7 +366,7 @@ def _extract_xlsx(data: bytes) -> Dict[str, Any]:
         except KeyError:
             continue
         try:
-            sroot = ET.fromstring(sheet_xml)
+            sroot = _xml_seguro(sheet_xml)
         except ET.ParseError:
             continue
         name = _sheet_name(zf, target)
@@ -417,6 +466,10 @@ def extraer_documento(filename: str, data: bytes) -> Dict[str, Any]:
     magic_error = _detect_magic(kind, data)
     if magic_error:
         return _err_extract(magic_error)
+    if kind in (KIND_DOCX, KIND_XLSX):
+        bomba = _zip_descomprimido_ok(data)
+        if bomba:
+            return _err_extract(bomba)
     if kind == KIND_DOCX:
         return _extract_docx(data)
     if kind == KIND_XLSX:

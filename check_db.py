@@ -1,8 +1,14 @@
+import os
+
 import paramiko
+
+# Credenciales SOLO por entorno (nunca en el codigo): VPS_HOST, VPS_USER,
+# VPS_PASSWORD y opcional VPS_PORT.
 
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect('66.154.127.82', port=22, username='root', password='8WxWO3k226')
+ssh.connect(os.environ['VPS_HOST'], port=int(os.getenv('VPS_PORT', '22')),
+            username=os.environ['VPS_USER'], password=os.environ['VPS_PASSWORD'])
 
 # Script para verificar datos
 check_script = '''

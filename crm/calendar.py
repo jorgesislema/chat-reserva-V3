@@ -132,11 +132,16 @@ def _claim_outbox(path, doctor_id, current):
     la cita sigue en la cola y el siguiente ciclo la reenvía con la misma
     identidad ``event_id`` (las operaciones de Google son idempotentes con esa
     identidad). La exclusividad real la da el arriendo por profesional.
+
+    Incluye la identidad ANTERIOR del evento (``sync_origin_*``) cuando la cita
+    viene de una reasignación de profesional: hay que retirarla del calendario de
+    origen antes de crearla en el de destino (R6).
     """
     with connect(path) as db:
         db.execute('BEGIN IMMEDIATE')
         rows = db.execute(
-            """SELECT id, event_id, status, title, start, end, row_version
+            """SELECT id, event_id, status, title, start, end, row_version,
+                      sync_origin_calendar_id, sync_origin_account_id
                FROM crm_appointments
                WHERE professional_id=? AND sync_status IN ('pending','error')
                  AND origin!='demo'
@@ -146,15 +151,37 @@ def _claim_outbox(path, doctor_id, current):
         return [dict(row) for row in rows]
 
 
-def _send_appointment(service, calendar_id, item, zone):
-    """Llamadas de red para subir una cita. No toca la base de datos."""
+def _delete_remote_event(service, calendar_id, event_id):
+    """Retira un evento del calendario indicado (404/410 = ya no está)."""
+    try:
+        service.events().delete(calendarId=calendar_id,
+                                eventId=event_id).execute(num_retries=3)
+    except Exception as exc:
+        if error_status(exc) not in (404, 410):
+            raise
+    return True
+
+
+def _send_appointment(service, calendar_id, item, zone, origin_service=None):
+    """Llamadas de red para subir una cita. No toca la base de datos.
+
+    Si la cita se reasignó desde otro profesional (``sync_origin_calendar_id``),
+    primero se crea/actualiza el evento en el calendario de DESTINO y sólo
+    después se retira del calendario anterior: una caída parcial deja, como
+    mucho, un evento duplicado que el siguiente intento retira (nunca una cita
+    sin evento y sin rastro). Si el calendario de origen no se puede abrir, la
+    cita se marca para revisión humana en lugar de duplicarse en silencio.
+    """
+    origen = item.get('sync_origin_calendar_id')
+    migra = bool(origen) and origen != calendar_id
+    if migra and origin_service is None:
+        raise SyncConflict(
+            'Reasignada de otro calendario y no se pudo abrir la cuenta de origen; '
+            'requiere revisión')
     if item['status'] == 'cancelled':
-        try:
-            service.events().delete(calendarId=calendar_id,
-                                    eventId=item['event_id']).execute(num_retries=3)
-        except Exception as exc:
-            if error_status(exc) not in (404, 410):
-                raise
+        _delete_remote_event(service, calendar_id, item['event_id'])
+        if migra:
+            _delete_remote_event(origin_service, origen, item['event_id'])
         return
     conflicts = list_events(service, calendar_id, item['start'], item['end'], zone)
     if any(e.get('id') != item['event_id'] and e.get('status') != 'cancelled'
@@ -179,6 +206,9 @@ def _send_appointment(service, calendar_id, item, zone):
             body.pop('id')
             service.events().patch(calendarId=calendar_id, eventId=item['event_id'],
                                    body=body).execute(num_retries=3)
+    if migra:
+        # El destino ya tiene su evento: se retira el del calendario anterior.
+        _delete_remote_event(origin_service, origen, item['event_id'])
 
 
 def _next_attempt(attempts, current):
@@ -205,7 +235,9 @@ def _record_send_result(path, item, kind, message, clock=None):
             return 'edited'
         if kind == 'ok':
             db.execute("UPDATE crm_appointments SET sync_status='synced', sync_error=NULL, "
-                       'sync_attempts=0, sync_next_attempt=NULL WHERE id=?', (item['id'],))
+                       'sync_attempts=0, sync_next_attempt=NULL, '
+                       'sync_origin_calendar_id=NULL, sync_origin_account_id=NULL '
+                       'WHERE id=?', (item['id'],))
             outcome = 'synced'
         elif kind == 'conflict':
             db.execute("UPDATE crm_appointments SET sync_status='review', sync_error=?, "
@@ -364,6 +396,25 @@ def _record_professional_error(path, doctor_id, message):
                    (message, doctor_id))
 
 
+def _origin_service(path, account_id, service_factory):
+    """Servicio del calendario de ORIGEN de una cita reasignada (R6).
+
+    Devuelve ``None`` si la cuenta ya no existe o no se puede construir: quien
+    llama lo trata como conflicto revisable, nunca como envío silencioso.
+    """
+    if not account_id:
+        return None
+    with connect(path) as db:
+        cuenta = db.execute('SELECT * FROM crm_accounts WHERE id=?',
+                            (account_id,)).fetchone()
+    if cuenta is None:
+        return None
+    try:
+        return service_factory(dict(cuenta))
+    except Exception:  # credenciales ausentes: revisión, no duplicado
+        return None
+
+
 def _sync_doctor(path, doctor, zone, service_factory, clock=None):
     current = _clock(clock)
     try:
@@ -375,8 +426,14 @@ def _sync_doctor(path, doctor, zone, service_factory, clock=None):
     sent = failed = conflicts = 0
     try:
         for item in _claim_outbox(path, doctor['id'], current):
+            origen_servicio = None
+            if item.get('sync_origin_calendar_id') and \
+                    item['sync_origin_calendar_id'] != doctor['calendar_id']:
+                origen_servicio = _origin_service(
+                    path, item.get('sync_origin_account_id'), service_factory)
             try:
-                _send_appointment(service, doctor['calendar_id'], item, zone)
+                _send_appointment(service, doctor['calendar_id'], item, zone,
+                                  origin_service=origen_servicio)
             except SyncConflict as exc:
                 _record_send_result(path, item, 'conflict', str(exc), clock)
                 conflicts += 1
@@ -400,6 +457,42 @@ def _sync_doctor(path, doctor, zone, service_factory, clock=None):
             'sent': sent, 'failed': failed, 'conflicts': conflicts}
 
 
+def _retirar_origenes_huerfanos(path, service_factory, current):
+    """Retira el evento del calendario anterior cuando el destino es LOCAL (R6).
+
+    Si la cita se reasignó a un profesional sin calendario, no se sube a ningún
+    sitio; el evento del calendario de origen quedaría vivo y visible para
+    siempre. Se procesan lotes acotados y la marca de origen SÓLO se limpia tras
+    confirmar la retirada: un fallo de red la deja para el siguiente ciclo.
+    """
+    with connect(path) as db:
+        rows = db.execute(
+            """SELECT a.id, a.event_id, a.sync_origin_calendar_id,
+                      a.sync_origin_account_id
+               FROM crm_appointments a
+               JOIN crm_professionals p ON p.id=a.professional_id
+               WHERE a.sync_origin_calendar_id IS NOT NULL
+                 AND p.calendar_id IS NULL AND a.status='active'
+               ORDER BY a.id LIMIT 50""").fetchall()
+    retirados = 0
+    for row in rows:
+        servicio = _origin_service(path, row['sync_origin_account_id'], service_factory)
+        if servicio is None:
+            continue
+        try:
+            _delete_remote_event(servicio, row['sync_origin_calendar_id'], row['event_id'])
+        except Exception:
+            continue
+        with connect(path) as db:
+            db.execute(
+                """UPDATE crm_appointments SET sync_origin_calendar_id=NULL,
+                       sync_origin_account_id=NULL, sync_error=NULL, updated_at=?,
+                       row_version=row_version+1 WHERE id=?""",
+                (now(), row['id']))
+        retirados += 1
+    return retirados
+
+
 def sync(path, zone='America/Guayaquil', service_factory=service_for, clock=None):
     """Sincroniza cada profesional activo con calendario usando outbox y arriendo.
 
@@ -412,6 +505,12 @@ def sync(path, zone='America/Guayaquil', service_factory=service_for, clock=None
     results = []
     try:
         current = _clock(clock)
+        # 0) Citas reasignadas a un profesional sin calendario: se retira el
+        #    evento del calendario anterior (no hay destino donde subirlo).
+        try:
+            _retirar_origenes_huerfanos(path, service_factory, current)
+        except Exception as exc:  # nunca impide sincronizar el resto
+            results.append({'name': 'Reasignaciones', 'error': str(exc)[:1000]})
         with connect(path) as db:
             doctors = db.execute("""SELECT p.*, a.credential_env FROM crm_professionals p
                 JOIN crm_accounts a ON a.id=p.account_id

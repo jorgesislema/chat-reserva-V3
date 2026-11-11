@@ -1,5 +1,11 @@
 # Extra opcional para sincronizar Google Calendar desde el CRM.
 # El CRM inicia sin estos paquetes; sólo se importan al ejecutar la sincronización.
+#
+# Antes este archivo fijaba google-api-python-client==2.121.0 y
+# google-auth-httplib2==0.2.0, por debajo de los mínimos de requirements-crm.txt
+# (>=2.201.0 y >=0.4.1): instalar el extra degradaba lo ya instalado y dejaba una
+# resolución imposible (R4). Se mantienen los mismos rangos que el runtime y el
+# lock de cierre.
 -r requirements-crm.txt
-google-api-python-client==2.121.0
-google-auth-httplib2==0.2.0
+google-api-python-client>=2.201.0,<3.0
+google-auth-httplib2>=0.4.1,<1.0

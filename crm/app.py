@@ -176,6 +176,47 @@ def password_hash(password):
     return generate_password_hash(password, method='scrypt')
 
 
+def _reindexar_en_fondo(origen: str) -> None:
+    """Reconstruye el índice vectorial sin bloquear la respuesta HTTP.
+
+    Los cambios por unidad (publicar/retirar un artículo o documento) se
+    aplican de forma sincrónica en su endpoint; la reconstrucción completa
+    tras una importación va en hilo daemon y nunca tumba la petición.
+    """
+    import threading as _hilos
+
+    def _trabajo():
+        try:
+            from crm import rag_vector as _rv
+            _rv.reconstruir(origen)
+        except Exception:
+            pass
+
+    try:
+        h = _hilos.Thread(target=_trabajo, daemon=True)
+        h.start()
+    except Exception:
+        pass
+
+
+def _telefono_prueba(valor):
+    """Normaliza el «número de prueba» del simulador: solo dígitos, 6-15.
+
+    Devuelve (telefono, error). Sin valor devuelve (None, None) y se usa el
+    número fijo del operador, como hasta ahora. El número permite probar un
+    paciente con historial (cliente conocido) o uno nuevo en la misma copia.
+    """
+    if valor is None:
+        return None, None
+    texto = str(valor).strip()
+    if not texto:
+        return None, None
+    limpio = re.sub(r'[\s\-().]', '', texto).lstrip('+')
+    if not limpio.isdigit() or not (6 <= len(limpio) <= 15):
+        return None, 'El número de prueba debe tener entre 6 y 15 dígitos.'
+    return limpio, None
+
+
 def _arena_simulador(origen: str, user_id=None):
     """Copia y teléfono de prueba AISLADOS por operador (punto 7 del informe).
 
@@ -193,21 +234,133 @@ def _arena_simulador(origen: str, user_id=None):
             '593999%06d' % (uid % 1000000))
 
 
+def _copiar_indice_arena(origen: str, arena: str) -> bool:
+    """Copia el índice vectorial de la base a la arena del simulador.
+
+    Sin esto la arena nunca tiene ``<arena>.qdrant`` y el simulador trabaja
+    siempre sólo con texto (el índice vive junto a cada base y está ignorado
+    por git, así que tampoco viaja solo). La copia es una foto coherente:
+    al publicar contenido las arenas se invalidan y la próxima conversación
+    vuelve a copiar el índice vigente.
+    """
+    import shutil as _sh
+    try:
+        fuente = Path(str(origen) + '.qdrant')
+        destino = Path(str(arena) + '.qdrant')
+        if not fuente.is_dir():
+            return False
+        # El cliente en caché mantiene storage.sqlite abierto (bloqueo en
+        # Windows): cerrarlo antes de copiar; se reabre solo al usarlo.
+        try:
+            from crm import rag_vector as _rv
+            _rv.cerrar(origen)
+            _rv.cerrar(arena)
+        except Exception:
+            pass
+        if destino.exists():
+            if destino.is_dir():
+                _sh.rmtree(destino, ignore_errors=True)
+            else:
+                destino.unlink()
+        _sh.copytree(fuente, destino)
+        return True
+    except OSError:
+        return False
+
+
+def _invalidar_arenas_simulador(origen: str) -> int:
+    """Borra las copias del simulador tras publicar contenido.
+
+    El simulador trabaja sobre una copia de la base y la reutiliza entre
+    mensajes: sin esto, un cambio publicado en catálogo o conocimiento no se
+    ve en el simulador hasta pulsar «Nueva conversación». El chat interno y
+    WhatsApp leen la base viva y lo ven de inmediato.
+    """
+    import shutil as _sh
+    try:
+        base = Path(str(origen))
+        patron = base.name + '.simulador-*'
+        borradas = 0
+        for p in base.parent.glob(patron):
+            try:
+                if p.is_file():
+                    p.unlink()
+                    borradas += 1
+                elif p.is_dir() and p.name.endswith('.qdrant'):
+                    try:
+                        from crm import rag_vector as _rv
+                        _rv.cerrar(str(p)[:-len('.qdrant')])
+                    except Exception:
+                        pass
+                    _sh.rmtree(p, ignore_errors=True)
+                    borradas += 1
+            except OSError:
+                pass
+        return borradas
+    except OSError:
+        return 0
+
+
 def create_app(test_config=None):
     load_dotenv(ROOT / '.env')
     app = Flask(__name__)
     accent = (os.getenv('CRM_ACCENT') or '#18765b').strip()
     if not re.fullmatch(r'#[0-9a-fA-F]{6}', accent):
         accent = '#18765b'
-    app.config.update(DATABASE=os.getenv('CRM_DATABASE') or str(ROOT / 'analitica.db'),
-                      SECRET_KEY=os.getenv('CRM_SECRET_KEY') or secrets.token_hex(32),
+    import hashlib as _hl
+    _base = os.getenv('CRM_DATABASE') or str(ROOT / 'analitica.db')
+    _jar = 'crm_' + _hl.sha256(str(_base).encode()).hexdigest()[:12]
+    try:
+        _asset_v = str(int(max(
+            (p.stat().st_mtime for p in (ROOT / 'crm' / 'static').glob('*.js')),
+            default=0)))
+    except OSError:  # noqa: BLE001 - sin estáticos versionados, versión fija
+        _asset_v = '1'
+    _secret = os.getenv('CRM_SECRET_KEY')
+    _efimera = not _secret
+    if _efimera:
+        _secret = secrets.token_hex(32)
+    _cookie_raw = (os.getenv('CRM_COOKIE_SECURE') or '').strip().lower()
+    if _cookie_raw in ('1', 'true', 'si', 'sí', 'yes'):
+        _cookie_secure = True
+    elif _cookie_raw in ('0', 'false', 'no'):
+        _cookie_secure = False
+    else:
+        _host = (os.getenv('CRM_HOST') or '').strip().lower()
+        _cookie_secure = _host not in ('', 'localhost', '127.0.0.1')
+    app.config.update(DATABASE=_base,
+                      SECRET_KEY=_secret,
+                      SESSION_COOKIE_NAME=_jar,
                       BUSINESS_NAME=os.getenv('CRM_BUSINESS_NAME', ''),
                       ACCENT=accent,
                       SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
+                      SESSION_COOKIE_SECURE=_cookie_secure,
                       PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+                      ASSET_V=_asset_v,
                       MAX_CONTENT_LENGTH=10 * 1024 * 1024)
+    if _efimera:
+        app.logger.warning(
+            'CRM_SECRET_KEY no configurado: se usa una clave efímera; '
+            'las sesiones se invalidarán al reiniciar. Configure CRM_SECRET_KEY.')
     if test_config:
         app.config.update(test_config)
+    if not app.config.get('TESTING'):
+        # Diagnóstico visible del RAG vectorial: sin índice no hay vectores
+        # (ni en panel interno, ni en simulador, ni en WhatsApp). El índice
+        # vive junto a cada base y está ignorado por git: hay que construirlo
+        # en cada servidor con scripts/reconstruir_indice.py.
+        try:
+            _ruta_base = str(app.config.get('DATABASE') or '')
+            _ruta_qdrant = Path(_ruta_base + '.qdrant') if _ruta_base else None
+            if _ruta_qdrant is not None and _ruta_qdrant.is_dir():
+                app.logger.info('RAG vectorial listo: %s', _ruta_qdrant)
+            else:
+                app.logger.warning(
+                    'RAG vectorial SIN índice (%s.qdrant no existe): el bot '
+                    'responde sólo con texto. Constrúyalo con '
+                    'scripts/reconstruir_indice.py', _ruta_base)
+        except Exception:
+            pass
     # G01B R1: el perfil es la ÚNICA autoridad de zona y nombre operativo.
     # CRM_TIMEZONE sólo alimenta el perfil interno cuando no hay perfil
     # externo; un conflicto se rechaza en el arranque (nunca silencioso).
@@ -225,6 +378,11 @@ def create_app(test_config=None):
             f"la configuración indica {test_config['TIMEZONE']}")
     app.config['PROFILE'] = profile
     app.config['TIMEZONE'] = profile.zone
+    # La configuración efectiva parte de ESTE perfil (y crm_settings lo
+    # sobrescribe en tiempo de ejecución): única autoridad de zona para web,
+    # agenda, bot, resúmenes y sincronización (R9).
+    from crm import business_config as _business_config
+    _business_config.set_active_profile(profile, app.config['DATABASE'])
     if not app.config.get('BUSINESS_NAME'):
         # Sin CRM_BUSINESS_NAME (ni valor de pruebas), manda el perfil.
         app.config['BUSINESS_NAME'] = os.getenv('CRM_BUSINESS_NAME') or profile.name
@@ -232,6 +390,34 @@ def create_app(test_config=None):
 
     def db():
         return connect(app.config['DATABASE'])
+
+    def zona_efectiva():
+        """ZONA ÚNICA efectiva del negocio, resuelta EN CADA PETICIÓN.
+
+        ``app.config['TIMEZONE']`` es sólo el valor de arranque (perfil). La
+        autoridad real es la configuración efectiva guardada en la base: así un
+        cambio administrativo de zona afecta a altas, agenda, rangos, etiquetas,
+        sincronización y CLI por igual, sin reiniciar el proceso ni desplazar
+        las citas ya guardadas en UTC (R9). Si la configuración no se puede
+        leer, se usa el valor de arranque en lugar de fallar la petición.
+        """
+        try:
+            cache = g.get('_zona_efectiva')
+        except RuntimeError:  # fuera de contexto de petición (CLI)
+            cache = None
+        if cache:
+            return cache
+        try:
+            zona = _eff_zone(app.config['DATABASE']) or app.config['TIMEZONE']
+        except Exception:  # noqa: BLE001 - arranque como respaldo, nunca 500
+            zona = app.config['TIMEZONE']
+        # Caché por petición: una agenda con muchas citas no repite la lectura
+        # de configuración por cada campo serializado.
+        try:
+            g._zona_efectiva = zona
+        except RuntimeError:
+            pass
+        return zona
 
     def protected(admin=False):
         def decorator(fn):
@@ -308,12 +494,12 @@ def create_app(test_config=None):
         from crm import planes
         return dict(csrf=session['csrf'], business=app.config['BUSINESS_NAME'], stages=STAGES,
                     limite_profesionales=planes.LIMITE_PROFESIONALES,
-                    user=g.user, zone=app.config['TIMEZONE'], accent=app.config['ACCENT'],
-                    demo=demo)
+                    user=g.user, zone=zona_efectiva(), accent=app.config['ACCENT'],
+                    demo=demo, asset_v=app.config.get('ASSET_V', '1'))
 
     @app.template_filter('localtime')
     def localtime(value):
-        return datetime.fromisoformat(value).astimezone(ZoneInfo(app.config['TIMEZONE'])).strftime('%d/%m/%Y %H:%M') if value else '—'
+        return datetime.fromisoformat(value).astimezone(ZoneInfo(zona_efectiva())).strftime('%d/%m/%Y %H:%M') if value else '—'
 
     @app.errorhandler(ValueError)
     def bad_input(exc):
@@ -395,8 +581,13 @@ def create_app(test_config=None):
         session.clear()
         return redirect(url_for('login'))
 
-    def _analitica(database, dias=30):
-        """Actividad del periodo: citas, atendidas, canceladas, inasistencias y reparto."""
+    def _analitica(database, dias=30, profesional_nombre=None):
+        """Actividad del periodo: citas, atendidas, canceladas, inasistencias y reparto.
+
+        Con ``profesional_nombre`` (cuenta de doctor vinculada) todo lo de
+        citas se filtra a SUS citas; los resúmenes globales (ventas,
+        reclamos) se excluyen y la plantilla los oculta.
+        """
         from datetime import date as _date, timedelta as _td
         from zoneinfo import ZoneInfo as _Zone
 
@@ -406,12 +597,21 @@ def create_app(test_config=None):
         ini = datetime.combine(desde, datetime.min.time(), zona).astimezone(timezone.utc).isoformat()
         fin = datetime.combine(hoy + _td(days=1), datetime.min.time(), zona).astimezone(timezone.utc).isoformat()
         with db() as conn:
-            filas = conn.execute(
-                """SELECT a.start, a.operational_status, p.name AS profesional
-                   FROM crm_appointments a
-                   JOIN crm_professionals p ON p.id = a.professional_id
-                   WHERE a.status='active' AND a.start >= ? AND a.start < ?""",
-                (ini, fin)).fetchall()
+            if profesional_nombre:
+                filas = conn.execute(
+                    """SELECT a.start, a.operational_status, p.name AS profesional
+                       FROM crm_appointments a
+                       JOIN crm_professionals p ON p.id = a.professional_id
+                       WHERE a.status='active' AND a.start >= ? AND a.start < ?
+                       AND p.name=?""",
+                    (ini, fin, profesional_nombre)).fetchall()
+            else:
+                filas = conn.execute(
+                    """SELECT a.start, a.operational_status, p.name AS profesional
+                       FROM crm_appointments a
+                       JOIN crm_professionals p ON p.id = a.professional_id
+                       WHERE a.status='active' AND a.start >= ? AND a.start < ?""",
+                    (ini, fin)).fetchall()
             nuevos = conn.execute(
                 'SELECT COUNT(*) c FROM crm_leads WHERE created_at >= ?', (ini,)).fetchone()['c']
             ganados = conn.execute(
@@ -434,7 +634,7 @@ def create_app(test_config=None):
 
         total = sum(conteo.values())
         cerradas = conteo['atendida'] + conteo['cancelada'] + conteo['no_asistio']
-        return {
+        resumen = {
             'dias': dias, 'desde': desde.isoformat(), 'hasta': hoy.isoformat(),
             'total': total, 'conteo': conteo, 'por_profesional': por_prof,
             'por_franja': por_franja, 'cerradas': cerradas,
@@ -443,13 +643,20 @@ def create_app(test_config=None):
             'nuevos_leads': nuevos, 'ganados': ganados, 'total_leads': total_leads,
             'conversion': round(100 * ganados / total_leads, 1) if total_leads else 0,
             'reclamos': c02.claims_resumen(database, dias),
+            'alcance': 'propio' if profesional_nombre else 'global',
         }
+        try:
+            from crm import comercio as _comercio
+            resumen['comercio'] = _comercio.resumen(database, dias)
+        except Exception:  # noqa: BLE001 - el resumen comercial no tumba el panel
+            resumen['comercio'] = {'disponible': False}
+        return resumen
 
     @app.get('/')
     @protected()
     def home():
         tab = request.args.get('tab', 'overview')
-        if tab in ('team', 'users', 'accounts', 'audit', 'sync') and g.user['role'] != 'admin':
+        if tab in ('team', 'users', 'accounts', 'audit', 'sync', 'analytics') and g.user['role'] != 'admin':
             abort(403)
         search = request.args.get('q', '').strip()[:100]
         stage = request.args.get('stage', '')
@@ -472,7 +679,7 @@ def create_app(test_config=None):
                 FROM crm_leads GROUP BY source ORDER BY total DESC""").fetchall()
             total = sum(funnel.values())
             pipeline = conn.execute("SELECT COALESCE(SUM(value),0) FROM crm_leads WHERE stage NOT IN ('Ganado','Perdido')").fetchone()[0]
-            today = datetime.now(ZoneInfo(app.config['TIMEZONE'])).date().isoformat()
+            today = datetime.now(ZoneInfo(zona_efectiva())).date().isoformat()
             overdue = conn.execute("SELECT COUNT(*) FROM crm_leads WHERE followup<=? AND stage NOT IN ('Ganado','Perdido')", (today,)).fetchone()[0]
             pending = conn.execute("""SELECT COUNT(*) FROM crm_appointments a JOIN crm_professionals p
                 ON p.id=a.professional_id WHERE a.sync_status!='synced' AND p.calendar_id IS NOT NULL""").fetchone()[0]
@@ -551,18 +758,37 @@ def create_app(test_config=None):
         return redirect(url_for('home', tab='accounts'))
 
     def _reasignar_citas_futuras(conn, professional_id):
-        """Mueve las citas futuras del profesional a otro activo con el hueco libre.
+        """Mueve las citas futuras del profesional a otro activo con hueco libre.
 
-        Las que no encuentran hueco se quedan con él: siguen visibles en la agenda
-        (la regla del panel es no ocultar reservas) para moverlas a mano.
+        NO es un simple UPDATE de ``professional_id`` (R6). Cada cita movida:
+
+        * incrementa ``row_version``: una pantalla abierta antes de la baja no
+          puede seguir presentando su versión como vigente;
+        * queda en ``sync_status='pending'`` para que la sincronización la suba
+          al calendario del profesional de destino;
+        * si el evento vive en OTRO calendario, guarda la identidad anterior
+          (``sync_origin_calendar_id``/``sync_origin_account_id``) para que el
+          ciclo de sincronización cree el evento en el destino y RETIRE el
+          anterior, con reintentos y sin dejar huérfanos ni duplicados;
+        * deja historial con calendario de origen y destino.
+
+        Las citas sin hueco se quedan con el profesional de baja: siguen
+        visibles en la agenda (la regla del panel es no ocultar reservas) para
+        moverlas a mano.
         """
         ahora = datetime.now(timezone.utc).isoformat()
+        origen = conn.execute(
+            'SELECT id, calendar_id, account_id FROM crm_professionals WHERE id=?',
+            (professional_id,)).fetchone()
+        calendario_origen = origen['calendar_id'] if origen else None
+        cuenta_origen = origen['account_id'] if origen else None
         candidatos = [r['id'] for r in conn.execute(
             'SELECT id FROM crm_professionals WHERE active=1 AND id<>? ORDER BY id',
             (professional_id,))]
         citas = conn.execute(
-            "SELECT id, start, end FROM crm_appointments WHERE professional_id=? "
-            "AND status='active' AND start>=? ORDER BY start", (professional_id, ahora)).fetchall()
+            "SELECT id, start, end, event_id, sync_status, sync_origin_calendar_id, sync_origin_account_id FROM crm_appointments "
+            "WHERE professional_id=? AND status='active' AND start>=? ORDER BY start",
+            (professional_id, ahora)).fetchall()
         movidas = 0
         sin_hueco = 0
         for cita in citas:
@@ -577,11 +803,37 @@ def create_app(test_config=None):
             if destino is None:
                 sin_hueco += 1
                 continue
-            conn.execute('UPDATE crm_appointments SET professional_id=?, updated_at=? WHERE id=?',
-                         (destino, ahora, cita['id']))
-            conn.execute('INSERT INTO crm_appointment_history (appointment_id, action, reason, created_at) '
-                         'VALUES (?,?,?,?)',
-                         (cita['id'], 'reasignada', 'Baja del profesional %d' % professional_id, ahora))
+            destino_prof = conn.execute(
+                'SELECT calendar_id, account_id FROM crm_professionals WHERE id=?',
+                (destino,)).fetchone()
+            calendario_destino = destino_prof['calendar_id'] if destino_prof else None
+            # Identidad ANTERIOR del evento: la que ya estuviera pendiente de
+            # migrar o el calendario del profesional de baja. Sólo se conserva
+            # si el evento estaba fuera del calendario de destino.
+            calendario_previo = cita['sync_origin_calendar_id'] or calendario_origen
+            cuenta_previa = cita['sync_origin_account_id'] or cuenta_origen
+            migra = bool(calendario_previo) and calendario_previo != calendario_destino
+            conn.execute(
+                """UPDATE crm_appointments SET professional_id=?, updated_at=?,
+                       row_version=row_version+1, sync_status='pending',
+                       sync_error=NULL, sync_attempts=0, sync_next_attempt=NULL,
+                       sync_origin_calendar_id=?, sync_origin_account_id=?
+                   WHERE id=?""",
+                (destino, ahora,
+                 calendario_previo if migra else None,
+                 cuenta_previa if migra else None, cita['id']))
+            conn.execute(
+                'INSERT INTO crm_appointment_history (appointment_id, action, reason, '
+                'before_json, after_json, created_at) VALUES (?,?,?,?,?,?)',
+                (cita['id'], 'reasignada', 'Baja del profesional %d' % professional_id,
+                 json.dumps({'professional_id': professional_id,
+                             'calendar_id': calendario_origen,
+                             'sync_status': cita['sync_status']}, ensure_ascii=False),
+                 json.dumps({'professional_id': destino,
+                             'calendar_id': calendario_destino,
+                             'sync_status': 'pending',
+                             'migracion_calendario': migra}, ensure_ascii=False),
+                 ahora))
             movidas += 1
         return movidas, sin_hueco
 
@@ -590,6 +842,10 @@ def create_app(test_config=None):
     def professional_baja(identifier):
         """Da de baja al profesional y reparte sus citas futuras entre los demás."""
         with db() as conn:
+            # Transacción con lock de escritura (mismo mecanismo que
+            # save_appointment): la baja, la reasignación y su historial se
+            # confirman juntos y no se cruzan con una reserva simultánea (R6).
+            conn.execute('BEGIN IMMEDIATE')
             prof = conn.execute('SELECT id, name FROM crm_professionals WHERE id=?',
                                 (identifier,)).fetchone()
             if not prof:
@@ -611,15 +867,41 @@ def create_app(test_config=None):
             raise ValueError('Seleccione cuenta y calendario, o deje ambos vacíos para uso local')
         with db() as conn:
             from crm import planes
-            if not identifier:
-                activos = conn.execute(
-                    'SELECT COUNT(*) AS n FROM crm_professionals WHERE active=1').fetchone()['n']
+            # El límite es de la EDICIÓN (tres activos), no sólo del alta: antes
+            # reactivar un cuarto profesional inactivo lo superaba (R7). El
+            # conteo y la escritura van en la MISMA transacción con lock de
+            # escritura (BEGIN IMMEDIATE), de modo que dos solicitudes
+            # simultáneas no pueden pasar ambas el control.
+            conn.execute('BEGIN IMMEDIATE')
+            nuevo_activo = int(request.form.get('active') == '1') if identifier else 1
+            if nuevo_activo:
+                filtro = 'SELECT COUNT(*) AS n FROM crm_professionals WHERE active=1'
+                args = []
+                if identifier:
+                    filtro += ' AND id<>?'
+                    args.append(identifier)
+                activos = conn.execute(filtro, args).fetchone()['n']
                 if activos >= planes.LIMITE_PROFESIONALES:
+                    conn.execute('ROLLBACK')
                     flash(planes.MENSAJE_PROFESIONALES, 'error')
                     return redirect(url_for('home', tab='team'))
             values = (required('name'), required('specialty'), email(),
                       request.form.get('whatsapp', '').strip() or None,
                       calendar_id, account)
+            almuerzo_inicio = (request.form.get('almuerzo_inicio') or '').strip() or None
+            almuerzo_fin = (request.form.get('almuerzo_fin') or '').strip() or None
+            # 00:00 = casilla sin usar (el reloj queda en 00:00 al limpiar).
+            if almuerzo_inicio == '00:00':
+                almuerzo_inicio = None
+            if almuerzo_fin == '00:00':
+                almuerzo_fin = None
+            if bool(almuerzo_inicio) != bool(almuerzo_fin):
+                raise ValueError('El almuerzo necesita hora de inicio y fin, o ninguna')
+            for etiqueta, valor in (('inicio', almuerzo_inicio), ('fin', almuerzo_fin)):
+                if valor and not re.fullmatch(r'[0-2]\d:[0-5]\d', valor):
+                    raise ValueError('Hora de almuerzo no válida (use HH:MM)')
+            if almuerzo_inicio and almuerzo_fin and almuerzo_inicio >= almuerzo_fin:
+                raise ValueError('El inicio del almuerzo debe ser anterior al fin')
             if identifier:
                 previous = conn.execute('SELECT * FROM crm_professionals WHERE id=?', (identifier,)).fetchone()
                 if not previous:
@@ -627,17 +909,20 @@ def create_app(test_config=None):
                 if previous['calendar_id'] != calendar_id and conn.execute(
                         'SELECT 1 FROM crm_appointments WHERE professional_id=? LIMIT 1', (identifier,)).fetchone():
                     raise ValueError('Este profesional ya tiene citas: conserve su calendario o cree otro profesional')
-                nuevo_activo = int(request.form.get('active') == '1')
-                conn.execute('UPDATE crm_professionals SET name=?,specialty=?,email=?,whatsapp=?,calendar_id=?,account_id=?,active=? WHERE id=?',
-                             (*values, nuevo_activo, identifier))
+                conn.execute('UPDATE crm_professionals SET name=?,specialty=?,email=?,whatsapp=?,calendar_id=?,account_id=?,active=?,almuerzo_inicio=?,almuerzo_fin=? WHERE id=?',
+                             (*values, nuevo_activo, almuerzo_inicio, almuerzo_fin, identifier))
                 if not nuevo_activo:
                     movidas, sin_hueco = _reasignar_citas_futuras(conn, int(identifier))
                     if movidas or sin_hueco:
                         flash('Citas futuras: %d reasignadas y %d sin espacio en la agenda de los '
                               'demás profesionales.' % (movidas, sin_hueco), 'info')
             else:
-                conn.execute('INSERT INTO crm_professionals(name,specialty,email,whatsapp,calendar_id,account_id) VALUES (?,?,?,?,?,?)', values)
+                conn.execute('INSERT INTO crm_professionals(name,specialty,email,whatsapp,calendar_id,account_id,almuerzo_inicio,almuerzo_fin) VALUES (?,?,?,?,?,?,?,?)', (*values, almuerzo_inicio, almuerzo_fin))
             audit(conn, g.user['id'], 'Actualización de profesionales')
+        # El simulador trabaja sobre una COPIA de la base: si no se invalida,
+        # sigue viendo los profesionales antiguos y propone a alguien que ya no
+        # está en la lista (fallo reportado el 2026-11-10).
+        _invalidar_arenas_simulador(app.config['DATABASE'])
         return redirect(url_for('home', tab='team'))
 
     @app.post('/leads')
@@ -733,7 +1018,7 @@ def create_app(test_config=None):
         from crm import analytics
         target = os.getenv('CRM_ANALYTICS_DB') or str(ROOT / 'analitica_bi.db')
         summary = analytics.rebuild(app.config['DATABASE'], target,
-                                    app.config['TIMEZONE'])
+                                    zona_efectiva())
         flash(f"Base analítica reconstruida: {summary['fact_citas']} citas, "
               f"{summary['dim_cliente']} clientes ({summary['desde']} a "
               f"{summary['hasta']}).", 'success')
@@ -742,7 +1027,7 @@ def create_app(test_config=None):
     @app.post('/sync')
     @protected(admin=True)
     def calendar_sync():
-        results = sync(app.config['DATABASE'], app.config['TIMEZONE'])
+        results = sync(app.config['DATABASE'], zona_efectiva())
         for result in results:
             flash(result['name'] + ': ' + (result.get('error') or f"{result.get('events', 0)} eventos sincronizados"),
                   'error' if result.get('error') else 'success')
@@ -766,7 +1051,7 @@ def create_app(test_config=None):
         return 400
 
     def serialize_event(row):
-        tz = app.config['TIMEZONE']
+        tz = zona_efectiva()
         start = agenda_time.local_label(row['start'], tz)
         end = agenda_time.local_label(row['end'], tz)
         has_notes = row['has_notes'] if 'has_notes' in row.keys() else False
@@ -785,7 +1070,7 @@ def create_app(test_config=None):
         }
 
     def serialize_detail(result):
-        tz = app.config['TIMEZONE']
+        tz = zona_efectiva()
         appointment = result['appointment']
         appointment.pop('calendar_id', None)
         for key in ('start', 'end'):
@@ -804,14 +1089,25 @@ def create_app(test_config=None):
     @app.get('/api/agenda')
     @protected_api()
     def api_agenda():
-        tz = app.config['TIMEZONE']
+        from crm import c02_services as _c02
+        tz = zona_efectiva()
         view = request.args.get('view', 'week')
         date_value = request.args.get('date') or datetime.now(ZoneInfo(tz)).date().isoformat()
+        profesional = request.args.get('professional', '')
+        if g.user['role'] != 'admin':
+            # Cuenta vinculada a un profesional: sólo ve SUS citas e historial.
+            vinculo = _c02._profesional_del_usuario(
+                app.config['DATABASE'], g.user['id'])
+            if vinculo is None:
+                return jsonify(view=view, date=date_value, timezone=tz,
+                               label='', range={}, days=[], professionals=[],
+                               appointments=[])
+            profesional = vinculo['name']
         try:
             rng = agenda_time.view_range(view, date_value, tz)
             rows = list_appointments(
                 app.config['DATABASE'], start_utc=rng['start_utc'], end_utc=rng['end_utc'],
-                professional=request.args.get('professional', ''),
+                professional=profesional,
                 status=request.args.get('status', ''),
                 include_cancelled=request.args.get('cancelled', '0') in ('1', 'true', 'on'))
         except (ValueError, TypeError) as exc:
@@ -819,6 +1115,9 @@ def create_app(test_config=None):
         with db() as conn:
             professionals = conn.execute(
                 'SELECT id,name,active FROM crm_professionals ORDER BY name').fetchall()
+        if g.user['role'] != 'admin':
+            professionals = [p for p in professionals
+                             if p['name'] == profesional]
         return jsonify(view=view, date=date_value, timezone=tz,
                        label=agenda_time.period_label(rng),
                        range={key: rng[key] for key in
@@ -833,6 +1132,13 @@ def create_app(test_config=None):
                                     role=g.user['role'])
         if not result['ok']:
             return api_error(result['code'], result['message'], service_status(result['code']))
+        if g.user['role'] != 'admin':
+            from crm import c02_services as _c02
+            vinculo = _c02._profesional_del_usuario(
+                app.config['DATABASE'], g.user['id'])
+            cita = (result.get('appointment') or {})
+            if vinculo is None or cita.get('professional_id') != vinculo['id']:
+                return api_error('forbidden', 'Sin permiso para ver esta cita.', 403)
         return jsonify(serialize_detail(result))
 
     def _guardar_paciente(database, appointment_id, datos, actor):
@@ -974,7 +1280,7 @@ def create_app(test_config=None):
     @app.cli.command('sync-calendar')
     def sync_command():
         """Sincroniza todos los profesionales activos; apto para el Programador de tareas."""
-        results = sync(app.config['DATABASE'], app.config['TIMEZONE'])
+        results = sync(app.config['DATABASE'], zona_efectiva())
         for result in results:
             click.echo(str(result))
         if any(result.get('error') for result in results):
@@ -997,7 +1303,7 @@ def create_app(test_config=None):
         return jsonify(items=items)
 
     @app.post('/api/c02/catalog')
-    @protected()
+    @protected(admin=True)
     def c02_catalog_create():
         body = request.get_json(silent=True) or {}
         res = c02.catalog_create(app.config['DATABASE'], name=body.get('name'),
@@ -1021,7 +1327,7 @@ def create_app(test_config=None):
         return jsonify(c02.catalog_revisions(app.config['DATABASE'], identifier))
 
     @app.post('/api/c02/catalog/<int:identifier>')
-    @protected()
+    @protected(admin=True)
     def c02_catalog_update(identifier):
         body = request.get_json(silent=True) or {}
         res = c02.catalog_update(
@@ -1033,10 +1339,17 @@ def create_app(test_config=None):
         return jsonify(res), (200 if res['ok'] else 409 if res['code'] == 'version_conflict' else 400)
 
     @app.post('/api/c02/catalog/<int:identifier>/publish')
-    @protected()
+    @protected(admin=True)
     def c02_catalog_publish(identifier):
         res = c02.catalog_publish(app.config['DATABASE'], item_id=identifier,
                                   actor=g.user['id'])
+        if res['ok']:
+            _invalidar_arenas_simulador(app.config['DATABASE'])
+            try:
+                from crm import rag_vector as _rv
+                _rv.sincronizar_catalogo(app.config['DATABASE'], identifier)
+            except Exception:
+                pass
         return jsonify(res), (200 if res['ok'] else 400)
 
     @app.get('/api/c02/knowledge')
@@ -1063,6 +1376,13 @@ def create_app(test_config=None):
             return jsonify(ok=False, error={'code': 'too_large',
                                             'message': 'El archivo excede el límite de 10 MB'}), 400
         extracted = c02_docs.extraer_documento(file.filename, data)
+        if extracted.get('kind') in ('xlsx', 'csv'):
+            return jsonify(ok=False, error={
+                'code': 'invalid',
+                'message': 'Esto es una planilla de datos, no un documento para el '
+                           'conocimiento: súbala en Catálogo → Importación de '
+                           'configuración. Aquí sólo PDF, Word o texto con '
+                           'descripciones y políticas.'}), 400
         preview = {
             'filename': file.filename,
             'kind': extracted['kind'],
@@ -1085,6 +1405,12 @@ def create_app(test_config=None):
     @protected(admin=True)
     def c02_kb_save():
         body = request.get_json(silent=True) or {}
+        if (body.get('kind') or '') in ('xlsx', 'csv'):
+            return jsonify(ok=False, error={
+                'code': 'invalid',
+                'message': 'Esto es una planilla de datos, no un documento para el '
+                           'conocimiento: súbala en Catálogo → Importación de '
+                           'configuración.'}), 400
         res = c02.kb_upsert(app.config['DATABASE'], doc_id=body.get('doc_id'),
                             name=body.get('name'), body_text=body.get('body_text', ''),
                             kind=body.get('kind') or 'texto',
@@ -1100,13 +1426,48 @@ def create_app(test_config=None):
     @protected(admin=True)
     def c02_kb_publish(identifier):
         res = c02.kb_publish(app.config['DATABASE'], doc_id=identifier, actor=g.user['id'])
+        if res['ok']:
+            _invalidar_arenas_simulador(app.config['DATABASE'])
+            try:
+                from crm import rag_vector as _rv
+                _rv.sincronizar_documento(app.config['DATABASE'], identifier)
+            except Exception:
+                pass
         return jsonify(res), (200 if res['ok'] else 400)
 
     @app.post('/api/c02/knowledge/<int:identifier>/deactivate')
     @protected(admin=True)
     def c02_kb_deactivate(identifier):
         res = c02.kb_deactivate(app.config['DATABASE'], doc_id=identifier, actor=g.user['id'])
+        if res['ok']:
+            _invalidar_arenas_simulador(app.config['DATABASE'])
+            try:
+                from crm import rag_vector as _rv
+                _rv.sincronizar_documento(app.config['DATABASE'], identifier)
+            except Exception:
+                pass
         return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.post('/api/c02/knowledge/<int:identifier>/restore')
+    @protected(admin=True)
+    def c02_kb_restore(identifier):
+        """Reversión explícita a una revisión anterior (queda versionada)."""
+        body = request.get_json(silent=True) or {}
+        try:
+            version = int(body.get('version'))
+        except (TypeError, ValueError):
+            return jsonify(ok=False, error={'code': 'invalid',
+                                            'message': 'Indique la versión a restaurar'}), 400
+        res = c02.kb_restore(app.config['DATABASE'], doc_id=identifier,
+                             version=version, actor=g.user['id'])
+        if res['ok']:
+            _invalidar_arenas_simulador(app.config['DATABASE'])
+            try:
+                from crm import rag_vector as _rv
+                _rv.sincronizar_documento(app.config['DATABASE'], identifier)
+            except Exception:
+                pass
+        return jsonify(res), (200 if res['ok'] else 404 if res.get('code') == 'not_found' else 400)
 
     @app.get('/api/c02/knowledge/<int:identifier>')
     @protected()
@@ -1177,6 +1538,66 @@ def create_app(test_config=None):
         res = c02_inventory.inventory_apply(app.config['DATABASE'], file.filename,
                                             data, sheet, mapping, confirm,
                                             actor=g.user['id'])
+        if res['ok']:
+            _invalidar_arenas_simulador(app.config['DATABASE'])
+            _reindexar_en_fondo(app.config['DATABASE'])
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.get('/api/comercio/plantilla/<cual>')
+    @protected(admin=True)
+    def comercio_plantilla(cual):
+        from crm import comercio_excel as _xl
+        from flask import Response as _Response
+        if cual == 'configuracion':
+            data = _xl.plantilla_configuracion()
+            nombre = 'CONFIGURACION_DEL_NEGOCIO.xlsx'
+        elif cual == 'inventario':
+            data = _xl.plantilla_inventario()
+            nombre = 'ACTUALIZAR_INVENTARIO.xlsx'
+        else:
+            return jsonify(ok=False, error={'code': 'invalid',
+                                            'message': 'Plantilla no válida'}), 400
+        return _Response(
+            data,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            headers={'Content-Disposition': 'attachment; filename=%s' % nombre})
+
+    @app.post('/api/comercio/importar/vista-previa')
+    @protected(admin=True)
+    def comercio_importar_preview():
+        from crm import comercio_excel as _xl
+        from crm import c02_docs as _docs
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify(ok=False, error={'code': 'empty',
+                                            'message': 'Seleccione un archivo'}), 400
+        data = file.read(_docs.MAX_UPLOAD_BYTES + 1)
+        if len(data) > _docs.MAX_UPLOAD_BYTES:
+            return jsonify(ok=False, error={'code': 'too_large',
+                                            'message': 'El archivo excede el límite de 10 MB'}), 400
+        res = _xl.vista_previa(app.config['DATABASE'], file.filename, data)
+        return jsonify(res), (200 if res['ok'] else 400)
+
+    @app.post('/api/comercio/importar/aplicar')
+    @protected(admin=True)
+    def comercio_importar_apply():
+        from crm import comercio_excel as _xl
+        from crm import c02_docs as _docs
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify(ok=False, error={'code': 'empty',
+                                            'message': 'Seleccione un archivo'}), 400
+        data = file.read(_docs.MAX_UPLOAD_BYTES + 1)
+        if len(data) > _docs.MAX_UPLOAD_BYTES:
+            return jsonify(ok=False, error={'code': 'too_large',
+                                            'message': 'El archivo excede el límite de 10 MB'}), 400
+        confirm = request.form.get('confirm') == 'true'
+        token = request.form.get('token', '')
+        res = _xl.aplicar(app.config['DATABASE'], file.filename, data,
+                          confirm=confirm, actor=g.user['id'], token=token)
+        if res['ok']:
+            _invalidar_arenas_simulador(app.config['DATABASE'])
+            _reindexar_en_fondo(app.config['DATABASE'])
         return jsonify(res), (200 if res['ok'] else 400)
 
     @app.post('/api/c02/chat')
@@ -1184,13 +1605,11 @@ def create_app(test_config=None):
     def c02_chat_internal():
         body = request.get_json(silent=True) or {}
         pregunta = body.get('question', '')
-        # Conversación del chat interno: id estable por sesión de navegador (o
-        # id explícito del cliente). La memoria es por conversación y rol; sin
-        # sesión (p.ej. API pública) el chat es stateless.
-        conv = body.get('conversation_id') or ''
-        if not isinstance(conv, str) or not conv.strip():
-            conv = session.get('c02_chat_conv') or ''
-        conv = conv.strip()[:64]
+        # Conversación del chat interno: la resuelve SIEMPRE el servidor a partir
+        # de la sesión. Un id enviado por el cliente se ignora (nunca se adopta:
+        # podría ser el de otra persona), así que dos cuentas no pueden
+        # encontrarse en el mismo hilo por casualidad (R2).
+        conv = session.get('c02_chat_conv') or ''
         if not conv:
             conv = secrets.token_hex(16)
             session['c02_chat_conv'] = conv
@@ -1198,6 +1617,9 @@ def create_app(test_config=None):
             app.config['DATABASE'], pregunta, role=g.user['role'],
             conversation_id=conv,
             user_id=g.user['id'] if 'id' in g.user.keys() else None)
+        if res.get('code') == 'forbidden':
+            return jsonify(ok=False, error={'code': 'forbidden',
+                                            'message': res.get('error', '')}), 403
         respuesta = jsonify(answer=res.get('answer', ''), ok=res.get('ok', True),
                             fuente=res.get('fuente'), documento=res.get('documento'),
                             version=res.get('version'), procedencia=res.get('procedencia'),
@@ -1228,6 +1650,20 @@ def create_app(test_config=None):
         body = request.get_json(silent=True) or {}
         res = c02.config_set(app.config['DATABASE'], key=body.get('key'),
                              value=body.get('value'), actor=g.user['id'])
+        if res.get('ok') and body.get('key') in ('negocio_zona', 'zona'):
+            # Refresco explícito de la zona del proceso: la interfaz y cualquier
+            # caché de plantillas deben mostrar YA la zona nueva. La autoridad
+            # sigue siendo la base (zona_efectiva), no este atributo (R9).
+            try:
+                app.config['TIMEZONE'] = _eff_zone(app.config['DATABASE']) or app.config['TIMEZONE']
+            except Exception:  # noqa: BLE001 - se conserva la última válida
+                pass
+        if res.get('ok') and body.get('key') in (
+                'negocio_especialistas', 'negocio_horarios', 'negocio_almuerzos',
+                'negocio_excepciones', 'negocio_nombre'):
+            # Negocio y horarios cambia quién atiende: la copia del simulador
+            # debe rehacerse o seguiría proponiendo doctores que ya no están.
+            _invalidar_arenas_simulador(app.config['DATABASE'])
         return jsonify(res), (200 if res['ok'] else 400)
 
     @app.get('/api/c02/inbox')
@@ -1243,11 +1679,21 @@ def create_app(test_config=None):
     @protected()
     def c02_inbox_messages(conversation_id):
         from crm import c02_services as _c
-        msgs = _c.conv_messages(app.config['DATABASE'], conversation_id)
+        if g.user['role'] != 'admin' and not _c.conv_autorizada(
+                app.config['DATABASE'], conversation_id,
+                role=g.user['role'], user_id=g.user['id']):
+            return jsonify(error={'code': 'forbidden',
+                                  'message': 'No autorizado para esta conversación.'}), 403
+        try:
+            msgs = _c.conv_messages(app.config['DATABASE'], conversation_id,
+                                    role=g.user['role'], user_id=g.user['id'])
+        except PermissionError:
+            return jsonify(error={'code': 'forbidden',
+                                  'message': 'No autorizado para esta conversación.'}), 403
         return jsonify(messages=msgs)
 
     @app.post('/api/c02/inbox/<int:conversation_id>/reply')
-    @protected()
+    @protected_api()
     def c02_inbox_reply(conversation_id):
         from crm import c02_services as _c
         data = request.get_json(silent=True) or {}
@@ -1260,21 +1706,21 @@ def create_app(test_config=None):
         return jsonify(res), status
 
     @app.post('/api/c02/inbox/<int:conversation_id>/take')
-    @protected()
+    @protected_api()
     def c02_inbox_take(conversation_id):
         res = c02.conv_take(app.config['DATABASE'], conversation_id=conversation_id,
                             user_id=g.user['id'], role=g.user['role'])
         return jsonify(res), (200 if res['ok'] else 403 if res['code'] == 'forbidden' else 409)
 
     @app.post('/api/c02/inbox/<int:conversation_id>/return')
-    @protected()
+    @protected_api()
     def c02_inbox_return(conversation_id):
         res = c02.conv_return(app.config['DATABASE'], conversation_id=conversation_id,
                               user_id=g.user['id'])
         return jsonify(res), (200 if res['ok'] else 403 if res['code'] == 'forbidden' else 409)
 
     @app.post('/api/c02/inbox/<int:conversation_id>/close')
-    @protected()
+    @protected_api()
     def c02_inbox_close(conversation_id):
         res = c02.conv_close(app.config['DATABASE'], conversation_id=conversation_id,
                              user_id=g.user['id'])
@@ -1284,7 +1730,12 @@ def create_app(test_config=None):
     @protected()
     def c02_inbox_alert_mark(alert_id):
         state = (request.get_json(silent=True) or {}).get('state', 'leida')
-        c02.conv_mark_alert(app.config['DATABASE'], alert_id, state)
+        try:
+            c02.conv_mark_alert(app.config['DATABASE'], alert_id, state,
+                                role=g.user['role'], user_id=g.user['id'])
+        except PermissionError:
+            return jsonify(error={'code': 'forbidden',
+                                  'message': 'Sólo el administrador o el responsable.'}), 403
         return jsonify(ok=True)
 
     # --- Alerta superior de atención humana (campana global) ---
@@ -1508,7 +1959,13 @@ def create_app(test_config=None):
 
         No envía nada por WhatsApp ni modifica los datos operativos: la copia
         (``<base>.simulador.db``) se crea con la API de respaldo de SQLite y se
-        puede reiniciar desde la pantalla.
+        puede reiniciar desde la pantalla. Todo lo que pase (citas, pedidos,
+        premios) vive sólo en esa copia de prueba.
+
+        ``modo``: ``reglas`` (MotorSimulado + adaptador simulado: pruebas
+        aisladas, determinista) o ``real`` (MotorIA + adaptador remoto
+        configurado en el servidor: clasifica la intención con el proveedor
+        real y redacta con el modelo real usando el RAG de la copia).
         """
         from uuid import uuid4
 
@@ -1517,12 +1974,23 @@ def create_app(test_config=None):
         from crm.store import connect as _connect
 
         cuerpo = request.get_json(silent=True) or {}
+        modo = (cuerpo.get('modo') or 'reglas').strip().lower()
+        telefono_pedido, error_telefono = _telefono_prueba(cuerpo.get('telefono'))
+        if error_telefono:
+            return jsonify(ok=False, error={
+                'code': 'telefono_invalido',
+                'message': error_telefono}), 400
         origen = app.config['DATABASE']
         operador = getattr(getattr(g, 'user', None), 'id', None)
         arena, telefono = _arena_simulador(origen, operador)
+        if telefono_pedido:
+            telefono = telefono_pedido
         if cuerpo.get('reiniciar') or not Path(arena).exists():
             with sqlite3.connect(origen) as src, sqlite3.connect(arena) as dst:
                 src.backup(dst)
+            # La arena necesita su propia copia del índice vectorial; si no,
+            # todo el simulador cae a sólo-texto sin avisar.
+            _copiar_indice_arena(origen, arena)
         texto = (cuerpo.get('texto') or '').strip()[:400]
         if texto:
             _c02.wa_ingest(arena, external_id='sim-' + uuid4().hex,
@@ -1530,21 +1998,33 @@ def create_app(test_config=None):
         with _connect(arena) as conn:
             profesionales = [dict(r) for r in conn.execute(
                 'SELECT id, name FROM crm_professionals WHERE active=1 ORDER BY name')]
-        zona = 'America/Guayaquil'
-        perfil = os.getenv('CRM_PERFIL_NEGOCIO')
-        if perfil and Path(perfil).is_file():
-            try:
-                zona = json.loads(Path(perfil).read_text(encoding='utf-8')).get('zona') or zona
-            except (ValueError, OSError):
-                pass
+        zona = zona_efectiva()
         contexto = {'professionals': profesionales, 'zonas': [zona], 'now_local': None}
         # Adaptador simulado SOLO para esta ejecución: no se toca el global
         # compartido, así que una petición simultánea no puede quedarse con
         # el adaptador equivocado.
         from crm import chat_adapter as _chat_adapter
+        info_modo = {'modo': 'reglas', 'modelo': 'reglas deterministas (sin IA)'}
+        if modo == 'real':
+            remoto = _chat_adapter.AdaptadorRemotoConfigurable()
+            if not remoto.configurado:
+                return jsonify(ok=False, error={
+                    'code': 'ia_no_configurada',
+                    'message': 'Modo real pedido pero sin proveedor configurado '
+                               '(revise CRM_CHAT_PROVEEDOR y la clave en el servidor). '
+                               'Use el modo de reglas.'}), 400
+            motor = _canal.MotorIA(_chat_adapter.ClasificadorIntenciones(
+                adaptador_remoto=remoto))
+            adaptador_rag = remoto
+            info_modo = {'modo': 'real',
+                         'modelo': '%s/%s' % (remoto.proveedor or 'remoto',
+                                              remoto._modelo or 'por defecto')}
+        else:
+            motor = _canal.MotorSimulado()
+            adaptador_rag = _chat_adapter.AdaptadorSimulado()
         _canal.WorkerCanal(arena, worker='w-simulador',
-                           motor=_canal.MotorSimulado()).paso(
-            contexto=contexto, adaptador_rag=_chat_adapter.AdaptadorSimulado())
+                           motor=motor).paso(
+            contexto=contexto, adaptador_rag=adaptador_rag)
         sello = datetime.now(timezone.utc).isoformat()
         with _connect(arena) as conn:
             # En el simulador no hay transporte: lo que el bot dejó en la cola de
@@ -1577,8 +2057,11 @@ def create_app(test_config=None):
                 (conv['id'],))]
         return jsonify(
             ok=True,
+            telefono=telefono,
             estado=(conv['state'] if conv else 'ia_activa'),
             derivado=bool(conv and conv['state'] == 'esperando_humano'),
+            modo=info_modo['modo'],
+            modelo=info_modo['modelo'],
             mensajes=[{'dir': 'out' if m['direction'] == 'outbound' else 'in',
                       'autor': m['author_type'],
                        'texto': m['body'], 'hora': (m['created_at'] or '')[11:16]}

@@ -1,0 +1,70 @@
+{
+  "version": "2.0",
+  "base": "docs/producto/evals/tono_v1",
+  "total": 225,
+  "originales": 120,
+  "nuevos": 105,
+  "multiturno": 44,
+  "cambios": [
+    {
+      "tipo": "revision_referencia",
+      "detalle": "Se conservan las 120 referencias de tono_v1 como material histórico; se evalúan hechos y acciones, no coincidencia literal. Cada caso declara old_id."
+    },
+    {
+      "tipo": "texto_aclarado",
+      "detalle": "PRE06, PRE08, COM01 y COM03 se reformularon para nombrar el servicio; antes el bot de reglas no podía identificar el artículo y la referencia exigía un dato sin contexto. La expectativa de precio y la prohibición de inventar se mantienen."
+    },
+    {
+      "tipo": "nuevos_escenarios",
+      "detalle": "Se añaden 105 casos de las 20 situaciones cotidianas del encargo, con hechos, acciones y efectos prohibidos."
+    },
+    {
+      "tipo": "bloqueo_declarado",
+      "detalle": "Los casos que dependen de funciones no implementadas (timeout tras commit, retorno explícito a IA) se marcan bloqueados y no cuentan como aprobados."
+    },
+    {
+      "tipo": "requiere_modelo",
+      "detalle": "Los fragmentos/desorden y la política de menores requieren comprensión de modelo; en modo reglas se reportan omitidos."
+    },
+    {
+      "tipo": "precondicion_timeout",
+      "detalle": "TIM03/TIM05 usan una pregunta de precio con proveedor caído, no un saludo: el saludo puro es determinista y no requiere proveedor, así que no prueba la pausa. La regla de silencio tras toma humana/fallo se mantiene."
+    },
+    {
+      "tipo": "presentacion_stock",
+      "detalle": "PROD01/PROD02/PROD03 ya no exigen el conteo exacto: el canal público informa disponibilidad sin exponer cifras internas de inventario. El equipo sigue viendo existencias en el perfil interno."
+    },
+    {
+      "tipo": "negacion_prompt",
+      "detalle": "SEG13 espera la negativa explícita («No puedo compartir…») en vez de la abstención genérica. Los pedidos de credenciales no cuentan como prompt."
+    }
+  ],
+  "por_categoria": {
+    "cambios": 10,
+    "canal": 6,
+    "cobertura": 4,
+    "comercial": 10,
+    "despedida": 4,
+    "duplicados": 5,
+    "errores": 10,
+    "familia": 5,
+    "fechas": 7,
+    "fragmentos": 5,
+    "humano": 17,
+    "informacion": 10,
+    "medios": 5,
+    "multiturno": 20,
+    "negacion": 7,
+    "precios": 16,
+    "presupuesto": 4,
+    "productos": 15,
+    "profesional": 6,
+    "queja": 4,
+    "reservas": 10,
+    "saludos": 15,
+    "seguridad": 16,
+    "texto": 5,
+    "timeout": 5,
+    "ventana": 4
+  }
+}

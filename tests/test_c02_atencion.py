@@ -79,7 +79,7 @@ def test_motivo_solicitud_humana_deriva_con_alerta(path):
     r = svc.conv_raise_alert(path, conversation_id=conv['id'],
                              reason='humano_explicito', priority='normal')
     assert r['ok'] and not r.get('existing')
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert panel['total_pendientes'] == 1
     assert panel['pendientes'][0]['conversation_id'] == conv['id']
     assert panel['pendientes'][0]['alerts'][0]['reason'] == 'humano_explicito'
@@ -91,7 +91,7 @@ def test_motivo_reclamo_eleva_alerta_de_prioridad_alta(path):
     r = svc.conv_raise_alert(path, conversation_id=conv['id'],
                              reason='reclamo', priority='alta')
     assert r['ok']
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert panel['pendientes'][0]['alerts'][0]['reason'] == 'reclamo'
     assert panel['pendientes'][0]['prioridad_max'] == 'alta'
 
@@ -100,7 +100,7 @@ def test_motivo_emergencia_eleva_alerta(path):
     conv = _conv(path, '59170000003')
     svc.conv_raise_alert(path, conversation_id=conv['id'],
                          reason='emergencia', priority='alta')
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert panel['pendientes'][0]['alerts'][0]['reason'] == 'emergencia'
     assert panel['pendientes'][0]['prioridad_max'] == 'alta'
 
@@ -112,7 +112,7 @@ def test_motivo_sin_fuente_y_fallo_servicio_derivan_visibles(path):
                          reason='sin_fuente', priority='normal')
     svc.conv_raise_alert(path, conversation_id=conv_b['id'],
                          reason='fallo_servicio', priority='alta')
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     razones = {it['alerts'][0]['reason'] for it in panel['pendientes']}
     assert razones == {'sin_fuente', 'fallo_servicio'}
     assert panel['total_pendientes'] == 2
@@ -127,7 +127,8 @@ def test_deteccion_en_worker_por_motivo(path):
         conn.execute("""INSERT INTO crm_leads(name,phone,created_at,updated_at)
                         VALUES ('Cliente','59170000006',?,?)""", (now(), now()))
     ctx = {'professionals': [{'id': 1, 'name': 'Dra. Ana'}],
-           'zonas': ['America/Guayaquil'], 'now_local': None}
+           'zonas': ['America/Guayaquil'], 'now_local': None,
+           'hoy': '2030-01-07'}
     casos = [('quiero hablar con una persona', 'humano_explicito'),
              ('pásame con recepción por favor', 'humano_explicito'),
              ('necesito un especialista', 'humano_explicito'),
@@ -158,7 +159,8 @@ def test_negaciones_no_derivan(path):
         conn.execute("""INSERT INTO crm_leads(name,phone,created_at,updated_at)
                         VALUES ('Cliente','59170000013',?,?)""", (now(), now()))
     ctx = {'professionals': [{'id': 1, 'name': 'Dra. Ana'}],
-           'zonas': ['America/Guayaquil'], 'now_local': None}
+           'zonas': ['America/Guayaquil'], 'now_local': None,
+           'hoy': '2030-01-07'}
     negaciones = ['no necesito hablar con una persona',
                   'no es un doble cobro, ya lo revisé',
                   'no quiero quejarme, solo es una consulta',
@@ -195,7 +197,7 @@ def test_reenvio_no_duplica_alerta(path):
     r2 = svc.conv_raise_alert(path, conversation_id=conv['id'],
                               reason='reclamo', priority='alta')
     assert r2.get('existing') is True or r2.get('handled') == 'duplicate'
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert panel['total_pendientes'] == 1
     assert len(panel['pendientes'][0]['alerts']) == 1
 
@@ -208,7 +210,7 @@ def test_conversacion_con_dos_motivos_cuenta_una_vez(path):
                          reason='humano_explicito', priority='normal')
     svc.conv_raise_alert(path, conversation_id=conv['id'],
                          reason='reclamo', priority='alta')
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert panel['total_pendientes'] == 1
     assert panel['total_pendientes_global'] == 1
     item = panel['pendientes'][0]
@@ -222,7 +224,7 @@ def test_alerta_persistida_entre_paneles_y_otra_pestaña(path):
     svc.conv_raise_alert(path, conversation_id=conv['id'],
                          reason='emergencia', priority='alta')
     # Una segunda consulta (otra pestaña) lee el mismo estado persistido.
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert panel['total_pendientes'] == 1
     with connect(path) as conn:
         fila = conn.execute('SELECT reason,state FROM crm_human_alerts '
@@ -244,7 +246,7 @@ def test_toma_mueve_a_en_atencion_con_responsable(path):
                          reason='reclamo', priority='alta')
     r = svc.conv_take(path, conversation_id=conv['id'], user_id=1, role='admin')
     assert r['ok']
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert panel['total_pendientes'] == 0
     assert panel['total_en_atencion'] == 1
     assert panel['en_atencion'][0]['responsible_name'] == 'Admin1'
@@ -267,7 +269,7 @@ def test_resolver_apaga_solo_esa_atencion_y_preserva_historial(path):
                             'WHERE id=?', (alert_a['id'],)).fetchone()
     assert fila['state'] == 'resuelta' and fila['resolved_at']
     # La reunión B sigue pendiente; el contador denota la conversación B.
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert len(panel['pendientes']) == 1
     assert panel['pendientes'][0]['conversation_id'] == conv_b['id']
     assert panel['total_en_atencion'] == 0
@@ -285,7 +287,7 @@ def test_nueva_incidencia_tras_resolucion_crea_atencion_nueva(path):
                          reason='reclamo', priority='alta')
     activas = svc.conv_alerts(path, conversation_id=conv['id'], include_resolved=False)
     assert len(activas) == 1 and activas[0]['id'] != alerta['id']
-    panel = svc.atencion_panel(path)
+    panel = svc.atencion_panel(path, role='admin')
     assert panel['total_pendientes'] == 1
 
 

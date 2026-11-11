@@ -64,6 +64,18 @@ def _clean(value, length=400):
     return str(value).strip()[:length]
 
 
+def _clean_multilinea(value, length=2000):
+    """Texto de varias líneas (listas de alérgenos, sinónimos, cuidados).
+
+    Conserva los saltos de línea para que el formulario y el bot lean cada
+    dato por separado; recorta espacios en cada línea y líneas vacías.
+    """
+    if value is None:
+        return ''
+    lineas = [ln.strip() for ln in str(value).replace('\r\n', '\n').split('\n')]
+    return '\n'.join(ln for ln in lineas if ln)[:length]
+
+
 def _money(cents):
     return None if cents in (None, '') else int(cents)
 
@@ -168,8 +180,13 @@ def catalog_item_public(path, item_id):
         return snap
 
 
-def catalog_create(path, *, name, kind='servicio', professional_id=None, created_by=None):
-    """Crea un artículo en borrador con su primera revisión."""
+def catalog_create(path, *, name, kind='servicio', professional_id=None, created_by=None,
+                 code=None):
+    """Crea un artículo en borrador con su primera revisión.
+
+    ``code`` permite fijar un código estable (importaciones); si se omite o ya
+    existe, se genera uno correlativo.
+    """
     name = _clean(name, 150)
     if not name:
         return _err(EMPTY, 'El nombre del artículo es obligatorio')
@@ -182,7 +199,13 @@ def catalog_create(path, *, name, kind='servicio', professional_id=None, created
             'SELECT COUNT(*) AS n FROM crm_catalog_items WHERE active=1').fetchone()['n']
         if activos >= planes.LIMITE_ARTICULOS:
             return _err('limite', planes.MENSAJE_ARTICULOS)
-        code = 'ART-{:04d}'.format(conn.execute('SELECT COUNT(*) AS n FROM crm_catalog_items').fetchone()['n'] + 1)
+        if code:
+            code = _clean(code, 40)
+            if conn.execute('SELECT 1 FROM crm_catalog_items WHERE code=?',
+                            (code,)).fetchone():
+                code = ''
+        if not code:
+            code = 'ART-{:04d}'.format(conn.execute('SELECT COUNT(*) AS n FROM crm_catalog_items').fetchone()['n'] + 1)
         # Un producto o regalo lleva existencias por defecto; un servicio, no.
         stock_na = 0 if kind in ('producto', 'regalo') else 1
         cursor = conn.execute(
@@ -211,8 +234,12 @@ def catalog_update(path, *, item_id, expected_revision, field, value, actor=None
     Las notas internas (RF-05, sólo equipo) exigen rol admin a la hora de escribirlas.
     """
     if field not in ('name', 'kind', 'details', 'public_notes', 'internal_notes',
-                     'price_cents', 'currency', 'stock', 'stock_na', 'active',
-                     'valid_from', 'valid_until', 'duration_min', 'professional_id'):
+                     'price_cents', 'price_domicilio_cents', 'currency', 'stock',
+                     'stock_na', 'active', 'valid_from', 'valid_until',
+                     'duration_min', 'professional_id', 'aliases', 'brand',
+                     'presentation', 'attributes_json', 'allergens', 'warnings',
+                     'sessions', 'prep_notes', 'aftercare_notes',
+                     'requires_evaluation'):
         return _err(INVALID, 'Campo no editable')
     if field == 'internal_notes' and role != 'admin':
         return _err(FORBIDDEN, 'Sólo un administrador puede escribir notas internas')
@@ -239,7 +266,7 @@ def catalog_update(path, *, item_id, expected_revision, field, value, actor=None
         elif field == 'kind':
             if value not in KINDS:
                 return _err(INVALID, 'Tipo de artículo no válido')
-        elif field == 'price_cents':
+        elif field in ('price_cents', 'price_domicilio_cents'):
             value = _money(value)
         elif field == 'stock':
             value = _int_or(value)
@@ -247,12 +274,35 @@ def catalog_update(path, *, item_id, expected_revision, field, value, actor=None
             value = 1 if value in (True, '1', 'on', 'true') else 0
         elif field == 'active':
             value = 1 if value in (True, '1', 'on', 'true') else 0
-        elif field == 'duration_min':
+        elif field in ('duration_min', 'sessions'):
             value = _int_or(value)
+        elif field == 'requires_evaluation':
+            value = 1 if value in (True, '1', 'on', 'true') else 0
+        elif field == 'attributes_json':
+            # Atributos simples (color, dureza, tamaño): objeto JSON texto→texto.
+            if value in (None, '', {}):
+                value = ''
+            else:
+                if isinstance(value, str):
+                    try:
+                        value = json.loads(value)
+                    except (TypeError, ValueError):
+                        return _err(INVALID, 'Los atributos deben ser JSON válido')
+                if not isinstance(value, dict):
+                    return _err(INVALID, 'Los atributos deben ser un objeto JSON')
+                value = json.dumps({str(k): str(v) for k, v in value.items()
+                                    if str(v).strip()}, ensure_ascii=False,
+                                   sort_keys=True)[:2000]
         elif field == 'professional_id':
             value = _int_or(value) if value else None
         elif field in ('details', 'public_notes', 'internal_notes'):
             value = _clean(value, 4000)
+        elif field in ('aliases', 'allergens', 'warnings', 'prep_notes',
+                       'aftercare_notes'):
+            # Listas y textos largos: se conservan los saltos de línea.
+            value = _clean_multilinea(value, 2000)
+        elif field in ('brand', 'presentation'):
+            value = _clean_multilinea(value, 200)
         else:
             value = _clean(value, 200)
 
@@ -318,15 +368,22 @@ KB_KINDS = ('texto', 'md', 'txt', 'pdf', 'docx', 'xlsx', 'csv')
 def kb_list(path, *, role='admin'):
     with connect(path) as conn:
         rows = conn.execute(
-            'SELECT id, name, version, state, visibility, kind, index_state, '
-            'source_name, procedencia, extract_error, created_at, updated_at '
-            'FROM crm_kb_documents ORDER BY id').fetchall()
+            'SELECT d.id, d.name, d.version, d.state, d.visibility, d.kind, d.index_state, '
+            'd.source_name, d.procedencia, d.extract_error, d.created_at, d.updated_at, '
+            'd.published_version, v.visibility AS published_visibility '
+            'FROM crm_kb_documents d '
+            'LEFT JOIN crm_kb_versions v ON v.doc_id=d.id AND v.version=d.published_version '
+            'ORDER BY d.id').fetchall()
     docs = [dict(r) for r in rows]
     if role != 'admin':
-        # Separación público/interno: un usuario sin privilegios sólo ve
-        # documentos publicados y públicos; nunca borradores ni notas internas.
+        # Separación público/interno: un usuario sin privilegios sólo ve lo que
+        # tiene una PUBLICACIÓN activa y pública. Un borrador sobre un documento
+        # que ya estaba publicado sigue apareciendo (la versión vigente no se
+        # retira al editar), pero nunca muestra borradores inéditos ni notas
+        # internas.
         docs = [d for d in docs
-                if d['state'] == 'publicado' and d['visibility'] == 'publico']
+                if d['published_version'] is not None
+                and d['published_visibility'] == 'publico']
     return _ok(documents=docs)
 
 
@@ -345,7 +402,13 @@ def kb_detail(path, doc_id, *, role='admin'):
 def kb_upsert(path, *, doc_id, name, body_text, kind='texto', visibility='privado',
               state='borrador', source_name=None, source_path=None,
               procedencia=None, extract_error=None, actor=None):
-    """Crea o actualiza (nueva revisión) un documento del conocimiento.
+    """Crea un documento o AÑADE una revisión inmutable (R3).
+
+    Cada guardado escribe una fila nueva en ``crm_kb_versions`` y actualiza el
+    puntero de trabajo del documento; la publicación activa
+    (``published_version``) NO se mueve. Por tanto editar en borrador no retira
+    el conocimiento vigente: la versión anterior sigue respondiendo hasta que
+    alguien publique la nueva (``kb_publish``) o desactive el documento.
 
     ``procedencia`` (JSON: páginas/secciones/hojas/filas) y ``extract_error``
     describen el origen del texto: un documento con error de extracción o sin
@@ -363,12 +426,22 @@ def kb_upsert(path, *, doc_id, name, body_text, kind='texto', visibility='privad
     procedencia_json = json.dumps(procedencia, ensure_ascii=False) if procedencia else None
     stamp = now()
     with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
         if doc_id:
             old = conn.execute('SELECT * FROM crm_kb_documents WHERE id=?', (doc_id,)).fetchone()
             if not old:
+                conn.execute('ROLLBACK')
                 return _err(NOT_FOUND, 'Documento no encontrado')
             version = old['version'] + 1
-            _drop_fragments(conn, doc_id)
+            conn.execute(
+                """INSERT INTO crm_kb_versions
+                   (doc_id, version, name, kind, visibility, body_text, source_name,
+                    source_path, procedencia, extract_error, state, created_by, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (doc_id, version, name, kind, visibility, body_text, source_name,
+                 source_path, procedencia_json, extract_error, state, actor, stamp))
+            # Los fragmentos NO se tocan: los del puntero publicado siguen
+            # respondiendo. Sólo la publicación los reconstruye.
             conn.execute(
                 """UPDATE crm_kb_documents SET name=?, body_text=?, kind=?, visibility=?,
                    state=?, source_name=?, source_path=?, procedencia=?, extract_error=?,
@@ -376,7 +449,9 @@ def kb_upsert(path, *, doc_id, name, body_text, kind='texto', visibility='privad
                    updated_at=? WHERE id=?""",
                 (name, body_text, kind, visibility, state, source_name, source_path,
                  procedencia_json, extract_error, actor, version, stamp, doc_id))
-            return _ok(doc_id=doc_id, version=version)
+            conn.execute('COMMIT')
+            return _ok(doc_id=doc_id, version=version,
+                       published_version=old['published_version'])
         cursor = conn.execute(
             """INSERT INTO crm_kb_documents (name, version, state, visibility, kind,
                body_text, source_name, source_path, procedencia, extract_error,
@@ -385,7 +460,15 @@ def kb_upsert(path, *, doc_id, name, body_text, kind='texto', visibility='privad
             (name, state, visibility, kind, body_text, source_name, source_path,
              procedencia_json, extract_error, actor, stamp, stamp))
         doc_id = cursor.lastrowid
-    return _ok(doc_id=doc_id, version=1)
+        conn.execute(
+            """INSERT INTO crm_kb_versions
+               (doc_id, version, name, kind, visibility, body_text, source_name,
+                source_path, procedencia, extract_error, state, created_by, created_at)
+               VALUES (?,1,?,?,?,?,?,?,?,?,?,?,?)""",
+            (doc_id, name, kind, visibility, body_text, source_name, source_path,
+             procedencia_json, extract_error, state, actor, stamp))
+        conn.execute('COMMIT')
+    return _ok(doc_id=doc_id, version=1, published_version=None)
 
 
 # v12 — crm_kb_documents sin `kind` nuevo en kb_from_upload
@@ -422,58 +505,149 @@ def _drop_fragments(conn, doc_id):
     conn.execute('DELETE FROM crm_kb_fragments WHERE doc_id=?', (doc_id,))
 
 
+def _kb_version(conn, doc):
+    """Revisión inmutable que corresponde a la versión de trabajo del documento.
+
+    Los documentos migrados desde el esquema anterior ya tienen su revisión
+    rellenada por la migración v23; si faltara (base adoptada a mano), se crea
+    aquí para no publicar un cuerpo sin historial.
+    """
+    fila = conn.execute('SELECT * FROM crm_kb_versions WHERE doc_id=? AND version=?',
+                        (doc['id'], doc['version'])).fetchone()
+    if fila is None:
+        conn.execute(
+            """INSERT OR IGNORE INTO crm_kb_versions
+               (doc_id, version, name, kind, visibility, body_text, source_name,
+                source_path, procedencia, extract_error, state, created_by, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (doc['id'], doc['version'], doc['name'], doc['kind'], doc['visibility'],
+             doc['body_text'], doc['source_name'], doc['source_path'],
+             doc['procedencia'], doc['extract_error'], doc['state'],
+             doc['uploaded_by'], doc['updated_at']))
+        fila = conn.execute('SELECT * FROM crm_kb_versions WHERE doc_id=? AND version=?',
+                            (doc['id'], doc['version'])).fetchone()
+    return fila
+
+
 def kb_publish(path, *, doc_id, actor=None):
-    """Publica (o re-publica) un documento y deriva sus fragmentos (índice derivado).
+    """Publica la revisión de trabajo: mueve el puntero de forma atómica.
 
     Un documento con error de extracción (no leído), vacío o desactivado no se
-    publica. La publicación nunca es automática tras la carga.
+    publica. La publicación nunca es automática tras la carga. Los fragmentos
+    del índice derivado se reconstruyen SÓLO aquí, a partir del cuerpo de la
+    revisión publicada (las versiones anteriores quedan en crm_kb_versions).
+    """
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        doc = conn.execute('SELECT * FROM crm_kb_documents WHERE id=?', (doc_id,)).fetchone()
+        if not doc:
+            conn.execute('ROLLBACK')
+            return _err(NOT_FOUND, 'Documento no encontrado')
+        if doc['state'] == 'desactivado':
+            conn.execute('ROLLBACK')
+            return _err(INVALID, 'El documento está desactivado; edítelo antes de publicar')
+        if doc['extract_error']:
+            conn.execute('ROLLBACK')
+            return _err(INVALID, f"No se publica: {doc['extract_error']}")
+        version = _kb_version(conn, doc)
+        body = (version['body_text'] or '') if version else ''
+        if not body.strip():
+            conn.execute('ROLLBACK')
+            return _err(EMPTY, 'Un documento vacío no puede publicarse')
+        _drop_fragments(conn, doc_id)
+        _fragmentize(conn, doc_id, version['version'], version['visibility'], body)
+        conn.execute(
+            "UPDATE crm_kb_documents SET state='publicado', published_version=?, "
+            "index_state='listo', index_error=NULL, updated_at=? WHERE id=?",
+            (version['version'], now(), doc_id))
+        conn.execute('COMMIT')
+    return _ok(doc_id=doc_id, version=version['version'])
+
+
+def kb_restore(path, *, doc_id, version, actor=None):
+    """Reversión explícita: una revisión anterior vuelve a ser la publicada.
+
+    No se reescribe historial: se crea una revisión nueva con el contenido de la
+    versión indicada (aumentando la versión de trabajo) y se publica. Así el
+    cuerpo vigente y lo que responde el bot coinciden otra vez y queda rastro
+    de quién revirtió y cuándo.
+    """
+    stamp = now()
+    with connect(path) as conn:
+        conn.execute('BEGIN IMMEDIATE')
+        doc = conn.execute('SELECT * FROM crm_kb_documents WHERE id=?', (doc_id,)).fetchone()
+        if not doc:
+            conn.execute('ROLLBACK')
+            return _err(NOT_FOUND, 'Documento no encontrado')
+        origen = conn.execute('SELECT * FROM crm_kb_versions WHERE doc_id=? AND version=?',
+                              (doc_id, version)).fetchone()
+        if not origen:
+            conn.execute('ROLLBACK')
+            return _err(NOT_FOUND, 'Versión no encontrada')
+        if origen['extract_error']:
+            conn.execute('ROLLBACK')
+            return _err(INVALID, f"No se publica: {origen['extract_error']}")
+        if not (origen['body_text'] or '').strip():
+            conn.execute('ROLLBACK')
+            return _err(EMPTY, 'Un documento vacío no puede publicarse')
+        nueva = doc['version'] + 1
+        conn.execute(
+            """INSERT INTO crm_kb_versions
+               (doc_id, version, name, kind, visibility, body_text, source_name,
+                source_path, procedencia, extract_error, state, created_by, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,'borrador',?,?)""",
+            (doc_id, nueva, origen['name'], origen['kind'], origen['visibility'],
+             origen['body_text'], origen['source_name'], origen['source_path'],
+             origen['procedencia'], origen['extract_error'], actor, stamp))
+        _drop_fragments(conn, doc_id)
+        _fragmentize(conn, doc_id, nueva, origen['visibility'], origen['body_text'])
+        conn.execute(
+            """UPDATE crm_kb_documents SET name=?, body_text=?, kind=?, visibility=?,
+               source_name=?, source_path=?, procedencia=?, extract_error=?,
+               uploaded_by=?, version=?, state='publicado', published_version=?,
+               index_state='listo', index_error=NULL, updated_at=? WHERE id=?""",
+            (origen['name'], origen['body_text'], origen['kind'], origen['visibility'],
+             origen['source_name'], origen['source_path'], origen['procedencia'],
+             origen['extract_error'], actor, nueva, nueva, stamp, doc_id))
+        conn.execute('COMMIT')
+    return _ok(doc_id=doc_id, version=nueva, restored_from=int(version))
+
+
+def kb_deactivate(path, *, doc_id, actor=None):
+    """Desactiva: retira la publicación activa y sus fragmentos.
+
+    Es la ÚNICA retirada de conocimiento, y es explícita: las revisiones siguen
+    en el historial (``crm_kb_versions``) y pueden republicarse después.
     """
     with connect(path) as conn:
         doc = conn.execute('SELECT * FROM crm_kb_documents WHERE id=?', (doc_id,)).fetchone()
         if not doc:
             return _err(NOT_FOUND, 'Documento no encontrado')
-        if doc['state'] == 'desactivado':
-            return _err(INVALID, 'El documento está desactivado; edítelo antes de publicar')
-        if doc['extract_error']:
-            return _err(INVALID, f"No se publica: {doc['extract_error']}")
-        _drop_fragments(conn, doc_id)
-        body = doc['body_text'] or ''
-        if not body.strip():
-            return _err(EMPTY, 'Un documento vacío no puede publicarse')
-        _fragmentize(conn, doc)
-        conn.execute(
-            "UPDATE crm_kb_documents SET state='publicado', index_state='listo', "
-            "index_error=NULL, updated_at=? WHERE id=?", (now(), doc_id))
-    return _ok(doc_id=doc_id, version=doc['version'])
-
-
-def kb_deactivate(path, *, doc_id, actor=None):
-    """Desactiva: retira fragmentos para impedir recuperación."""
-    with connect(path) as conn:
-        doc = conn.execute('SELECT * FROM crm_kb_documents WHERE id=?', (doc_id,)).fetchone()
-        if not doc:
-            return _err(NOT_FOUND, 'Documento no encontrado')
         _drop_fragments(conn, doc_id)
         conn.execute(
-            "UPDATE crm_kb_documents SET state='desactivado', index_state='pendiente', "
-            "updated_at=? WHERE id=?", (now(), doc_id))
+            "UPDATE crm_kb_documents SET state='desactivado', published_version=NULL, "
+            "index_state='pendiente', updated_at=? WHERE id=?", (now(), doc_id))
     return _ok()
 
 
 def kb_retrieve_public(path, query, limit=5):
-    """Recuperación derivada: fragmentos de documentos públicos publicados.
+    """Recuperación derivada: fragmentos de la PUBLICACIÓN ACTIVA y pública.
 
-    Implementación determinista de marcado de subcadena (sin modelo externo). El
-    índice derivado se consulta aquí; los documentos desactivados no aparecen.
+    Implementación determinista de marcado de subcadena (sin modelo externo). Se
+    consulta el índice derivado de la versión publicada, no la de trabajo: un
+    borrador sin publicar no responde ni retira lo que ya respondía. Los
+    documentos desactivados no aparecen (su publicación se retiró).
     """
     tokens = [t.lower() for t in re.findall(r'\w+', query or '') if len(t) > 1]
     if not tokens:
         return []
     with connect(path) as conn:
         rows = conn.execute(
-            """SELECT f.doc_id, f.doc_version, f.visibility, f.body, d.name, d.version
+            """SELECT f.doc_id, f.doc_version, f.visibility, f.body, d.name
                FROM crm_kb_fragments f JOIN crm_kb_documents d ON d.id=f.doc_id
-               WHERE d.state='publicado' AND d.visibility='publico'
+               WHERE d.published_version IS NOT NULL
+                 AND f.doc_version = d.published_version
+                 AND f.visibility='publico'
                ORDER BY f.id DESC""").fetchall()
     scored = []
     for r in rows:
@@ -485,13 +659,13 @@ def kb_retrieve_public(path, query, limit=5):
     result = [r for _, r in scored[:limit]]
     return [
         {'doc_id': r['doc_id'], 'doc_version': r['doc_version'], 'visibility': r['visibility'],
-         'body': r['body'], 'name': r['name'], 'version': r['version']} for r in result
+         'body': r['body'], 'name': r['name'], 'version': r['doc_version']} for r in result
     ]
 
 
-def _fragmentize(conn, doc):
+def _fragmentize(conn, doc_id, version, visibility, body_text):
     """Divide el texto en oraciones/fragmentos estables (índice derivado)."""
-    body = doc['body_text'] or ''
+    body = body_text or ''
     parts = re.split(r'\n{2,}|(?<=[.!?])\s+', body)
     for idx, part in enumerate(parts):
         part = part.strip()
@@ -499,7 +673,7 @@ def _fragmentize(conn, doc):
             conn.execute(
                 """INSERT INTO crm_kb_fragments (doc_id, doc_version, visibility, body)
                    VALUES (?,?,?,?)""",
-                (doc['id'], doc['version'], doc['visibility'], part))
+                (doc_id, version, visibility, part))
 
 
 # ===========================================================================
@@ -839,6 +1013,22 @@ def outbox_claim(path, worker='egress', limit=10):
                     d['payload'] = {}
                 claimed.append(d)
     return _ok(claimed=claimed, invalidadas=invalidadas)
+
+
+def outbox_release_send(path, outbox_id):
+    """Libera la marca de comienzo de un envío que NO llegó a llamar al destino.
+
+    Una tarea diferida (fuera de la ventana de atención, sin plantilla) no
+    contactó con el proveedor: dejar ``began_at`` fijado la volvería a clasificar
+    como en vuelo y bloquearía su entrega posterior. Se limpia sólo la marca de
+    intento, nunca el estado durable decidido por quien la difirió.
+    """
+    with connect(path) as conn:
+        conn.execute(
+            """UPDATE crm_outbox SET began_at=NULL, claimed_by=NULL, claimed_at=NULL,
+               updated_at=? WHERE id=? AND began_at IS NOT NULL""",
+            (now(), outbox_id))
+    return _ok()
 
 
 def outbox_requeue(path, *, outbox_id=None, max_attempts=3, timeout_seconds=120):
@@ -1200,30 +1390,78 @@ def outbox_cancel(path, *, outbox_id, user_id, role, motivo):
 
 
 def conversations_list(path, *, role='user', user_id=None):
-    """Lista de la bandeja humana: conversaciones con estado, alertas y responsable."""
+    """Lista de la bandeja humana: conversaciones con estado, alertas y responsable.
+
+    Un operador no administrador sólo ve sus conversaciones asignadas
+    (``responsible_user_id``); el administrador las ve todas. El contexto
+    pendiente de diálogo (``pending``) es operativo interno y sólo se
+    devuelve al administrador: nunca al rol ``user``.
+    """
+    es_admin = (role == 'admin')
     with connect(path) as conn:
-        rows = conn.execute(
-            """SELECT c.*, u.name AS responsible_name,
-                      (SELECT COUNT(*) FROM crm_human_alerts a
-                       WHERE a.conversation_id=c.id AND a.state='activa') AS alerts_active,
-                      (SELECT COUNT(*) FROM crm_conversation_messages m
-                       WHERE m.conversation_id=c.id) AS message_count
-               FROM crm_conversations c
-               LEFT JOIN crm_users u ON u.id=c.responsible_user_id
-               ORDER BY c.updated_at DESC""").fetchall()
+        if es_admin:
+            rows = conn.execute(
+                """SELECT c.*, u.name AS responsible_name,
+                          (SELECT COUNT(*) FROM crm_human_alerts a
+                           WHERE a.conversation_id=c.id AND a.state='activa') AS alerts_active,
+                          (SELECT COUNT(*) FROM crm_conversation_messages m
+                           WHERE m.conversation_id=c.id) AS message_count
+                   FROM crm_conversations c
+                   LEFT JOIN crm_users u ON u.id=c.responsible_user_id
+                   ORDER BY c.updated_at DESC""").fetchall()
+        else:
+            if user_id is None:
+                rows = []
+            else:
+                rows = conn.execute(
+                    """SELECT c.*, u.name AS responsible_name,
+                              (SELECT COUNT(*) FROM crm_human_alerts a
+                               WHERE a.conversation_id=c.id AND a.state='activa') AS alerts_active,
+                              (SELECT COUNT(*) FROM crm_conversation_messages m
+                               WHERE m.conversation_id=c.id) AS message_count
+                       FROM crm_conversations c
+                       LEFT JOIN crm_users u ON u.id=c.responsible_user_id
+                       WHERE c.responsible_user_id = ?
+                       ORDER BY c.updated_at DESC""",
+                    (user_id,)).fetchall()
     result = []
     for r in rows:
         d = dict(r)
-        try:
-            import json as _json
-            d['pending'] = _json.loads(d['pending']) if d.get('pending') else None
-        except (TypeError, ValueError):
-            d['pending'] = None
+        if es_admin:
+            try:
+                import json as _json
+                d['pending'] = _json.loads(d['pending']) if d.get('pending') else None
+            except (TypeError, ValueError):
+                d['pending'] = None
+        else:
+            # El contexto pendiente del diálogo no sale hacia el rol user.
+            d.pop('pending', None)
         result.append(d)
     return result
 
 
-def conv_messages(path, conversation_id, limit=200):
+def conv_autorizada(path, conversation_id, *, role='user', user_id=None) -> bool:
+    """¿Puede este rol ver la conversación? Administrador o responsable.
+
+    No existe tabla de participantes: la asignación vive en
+    ``responsible_user_id``; sólo el responsable (o el administrador) está
+    autorizado a leer sus mensajes, atenderla o marcar sus alertas.
+    """
+    if role == 'admin':
+        return True
+    if user_id is None:
+        return False
+    with connect(path) as conn:
+        conv = conn.execute(
+            'SELECT responsible_user_id FROM crm_conversations WHERE id=?',
+            (conversation_id,)).fetchone()
+    return bool(conv) and conv['responsible_user_id'] == user_id
+
+
+def conv_messages(path, conversation_id, limit=200, *, role=None, user_id=None):
+    if role is not None and role != 'admin' and not conv_autorizada(
+            path, conversation_id, role=role, user_id=user_id):
+        raise PermissionError('No autorizado para esta conversación')
     with connect(path) as conn:
         rows = conn.execute(
             """SELECT m.*, u.name AS author_name, w.phone AS wa_phone
@@ -1392,10 +1630,22 @@ def conv_raise_alert(path, *, conversation_id, reason, priority='alta', message=
     return _ok(existing=False, alert_id=alert_id)
 
 
-def conv_mark_alert(path, alert_id, state='leida'):
+def conv_mark_alert(path, alert_id, state='leida', *, role=None, user_id=None):
     """Marca el estado de una alerta. 'resuelta' fija resolved_at (la alerta
     deja de activar el indicador; el historial, motivo y responsable se
-    conservan). Abrir/leer ('leida') NO resuelve la atención."""
+    conservan). Abrir/leer ('leida') NO resuelve la atención.
+
+    Sólo el administrador o el responsable de la conversación de la alerta
+    pueden marcarla: cualquier otro rol recibe ``PermissionError``.
+    """
+    if role is not None and role != 'admin':
+        with connect(path) as conn:
+            fila = conn.execute(
+                """SELECT c.responsible_user_id FROM crm_human_alerts a
+                   JOIN crm_conversations c ON c.id = a.conversation_id
+                   WHERE a.id=?""", (alert_id,)).fetchone()
+        if not fila or fila['responsible_user_id'] != user_id:
+            raise PermissionError('Sólo el administrador o el responsable marcan alertas')
     stamp = now() if state == 'resuelta' else None
     with connect(path) as conn:
         if stamp:
@@ -1416,6 +1666,8 @@ def atencion_panel(path, *, role='user', user_id=None):
     alertas de la misma conversación). NO expone mensajes privados: sólo
     motivo, prioridad, antigüedad, cliente y responsable. Abrir la campana
     (GET) no muta ningún estado: la resolución es un acto explícito del operador.
+    Un operador no administrador sólo ve las atenciones de sus conversaciones
+    asignadas; el administrador las ve todas.
     """
     ahora = now()
     try:
@@ -1423,16 +1675,32 @@ def atencion_panel(path, *, role='user', user_id=None):
     except ValueError:
         ahora_dt = datetime.now(timezone.utc)
     with connect(path) as conn:
-        rows = conn.execute(
-            """SELECT a.id AS alert_id, a.conversation_id, a.reason, a.priority,
-                      a.state, a.created_at, a.resolved_at,
-                      c.client_key, c.state AS conv_state,
-                      u.name AS responsible_name
-               FROM crm_human_alerts a
-               JOIN crm_conversations c ON c.id = a.conversation_id
-               LEFT JOIN crm_users u ON u.id = c.responsible_user_id
-               WHERE a.state IN ('activa','leida')
-               ORDER BY CASE a.priority WHEN 'alta' THEN 0 ELSE 1 END, a.created_at, a.id""").fetchall()
+        if role == 'admin':
+            rows = conn.execute(
+                """SELECT a.id AS alert_id, a.conversation_id, a.reason, a.priority,
+                          a.state, a.created_at, a.resolved_at,
+                          c.client_key, c.state AS conv_state,
+                          c.responsible_user_id,
+                          u.name AS responsible_name
+                   FROM crm_human_alerts a
+                   JOIN crm_conversations c ON c.id = a.conversation_id
+                   LEFT JOIN crm_users u ON u.id = c.responsible_user_id
+                   WHERE a.state IN ('activa','leida')
+                   ORDER BY CASE a.priority WHEN 'alta' THEN 0 ELSE 1 END, a.created_at, a.id""").fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT a.id AS alert_id, a.conversation_id, a.reason, a.priority,
+                          a.state, a.created_at, a.resolved_at,
+                          c.client_key, c.state AS conv_state,
+                          c.responsible_user_id,
+                          u.name AS responsible_name
+                   FROM crm_human_alerts a
+                   JOIN crm_conversations c ON c.id = a.conversation_id
+                   LEFT JOIN crm_users u ON u.id = c.responsible_user_id
+                   WHERE a.state IN ('activa','leida')
+                     AND c.responsible_user_id = ?
+                   ORDER BY CASE a.priority WHEN 'alta' THEN 0 ELSE 1 END, a.created_at, a.id""",
+                (user_id,)).fetchall() if user_id is not None else []
     por_conversacion = {}
     for r in rows:
         d = dict(r)
@@ -1733,6 +2001,23 @@ def conv_pending(path, conversation_id):
     return _conv_pending_row(path, conversation_id) or {}
 
 
+def conv_trato(path, conversation_id):
+    """Preferencia de trato durable de la conversación ('' = sin elegir)."""
+    with connect(path) as conn:
+        row = conn.execute('SELECT trato FROM crm_conversations WHERE id=?',
+                           (conversation_id,)).fetchone()
+    return str((row['trato'] if row else '') or '')
+
+
+def conv_set_trato(path, conversation_id, trato):
+    """Guarda 'tu'/'usted' en la conversación; otro valor se ignora."""
+    valor = trato if trato in ('tu', 'usted') else ''
+    with connect(path) as conn:
+        conn.execute('UPDATE crm_conversations SET trato=?, updated_at=? WHERE id=?',
+                     (valor, now(), conversation_id))
+    return _ok(trato=valor)
+
+
 def conv_set_egress_paused(path, conversation_id, paused):
     with connect(path) as conn:
         conn.execute('UPDATE crm_conversations SET egress_paused=?, updated_at=? WHERE id=?',
@@ -1821,7 +2106,7 @@ def _words_filtradas(query_folded):
             and w not in _STOPWORDS_ES]
 
 
-def kb_search(path, query, limit=4):
+def kb_search(path, query, limit=4, *, solo_publicos=False):
     """Recuperación simple sobre fragmentos publicados (RAG interno).
 
     Devuelve además ``doc_version`` (revisión del documento que aporta el
@@ -1829,66 +2114,157 @@ def kb_search(path, query, limit=4):
     fuentes del chat sean identificables.
     """
     query = _fold((query or ''))
-    words = _words_filtradas(query)
+    from crm.rag_relevancia import terminos
+    words = sorted(terminos(query))
     rows = []
+    import math as _math
+
+    def _tok_match(w, vocab):
+        for bw in vocab:
+            if bw == w:
+                return True
+            if len(w) >= 4 and len(bw) >= 4 and (
+                    bw.startswith(w) or w.startswith(bw)):
+                return True
+        return False
+
+    def _tok(s):
+        # Como _words_filtradas pero partiendo también por guion bajo:
+        # «Tratamiento_Blanqueamiento» son dos palabras a efectos de tema.
+        return [w for w in re.split(r'[\W_]+', s or '') if len(w) > 2
+                and w not in _STOPWORDS_ES]
+
     with connect(path) as conn:
+        # El chat interno responde con la PUBLICACIÓN ACTIVA, no con la versión
+        # de trabajo: un borrador sin publicar no puede dejar sin conocimiento
+        # al asistente (R3). Los fragmentos se acotan a esa revisión.
         docs = conn.execute(
-            "SELECT id, name, visibility, version, procedencia "
-            "FROM crm_kb_documents WHERE state='publicado'").fetchall()
+            "SELECT id, name, visibility, version, published_version, procedencia "
+            "FROM crm_kb_documents WHERE published_version IS NOT NULL").fetchall()
+        corpus = []
         for doc in docs:
             nombre = _fold(doc['name'] or '')
             frags = conn.execute(
-                'SELECT body, doc_version FROM crm_kb_fragments WHERE doc_id=?',
-                (doc['id'],)).fetchall()
+                'SELECT body, doc_version, visibility FROM crm_kb_fragments '
+                'WHERE doc_id=? AND doc_version=?',
+                (doc['id'], doc['published_version'])).fetchall()
             for f in frags:
+                # Filtrar antes de puntuar/limitar: los privados no deben
+                # ocupar los cuatro lugares y ocultar una fuente pública.
+                if solo_publicos and f['visibility'] != 'publico':
+                    continue
                 body = _fold(f['body'] or '')
-                # El nombre del documento cuenta: «¿qué horarios tienen?» debe
-                # encontrar «Horarios y citas» aunque el fragmento diga
-                # «atiende de lunes a viernes». Vale más una coincidencia en el
-                # cuerpo que en el título.
-                score = sum(2 if w in body else 1 for w in words if w in body or w in nombre)
-                if score:
-                    # Desempate por densidad: del mismo modo que el usuario
-                    # pregunta por una palabra, el fragmento MÁS ESPECÍFICO
-                    # (mayor proporción de coincidencias) debe quedar primero;
-                    # con empate exacto gana el de mayor densidad — antes un
-                    # fragmento genérico («lunes a viernes»: 1/7) vencía a uno
-                    # específico («sábados»: 1/6) por orden de inserción.
-                    palabra_body = _words_filtradas(body)
-                    dens = score / max(1, len(palabra_body))
-                    try:
-                        procedencia = json.loads(doc['procedencia']) \
-                            if doc['procedencia'] else None
-                    except (TypeError, ValueError):
-                        procedencia = None
-                    rows.append({'doc_id': doc['id'], 'doc': doc['name'],
-                                 'visibility': doc['visibility'],
-                                 'doc_version': doc['version'],
-                                 'procedencia': procedencia,
-                                 'body': f['body'], 'score': score,
-                                 'densidad': dens})
-    rows.sort(key=lambda r: (r['score'], r['densidad']), reverse=True)
-    return rows[:limit]
+                corpus.append((doc, nombre, f, body,
+                               set(_tok(body)),
+                               set(_tok(nombre))))
+        # Peso por rareza (IDF): una palabra distintiva («rampa») decide más
+        # que una genérica («tienen», «clínica»), que aparece en casi todo.
+        # La coincidencia es por PALABRA (con tolerancia a plural: «sabado»
+        # vale por «sábados»), no por substring: «sale» no puede coincidir
+        # con «oclusales».
+        n_frag = max(1, len(corpus))
+        idf = {}
+        for w in words:
+            df = sum(1 for (_, _, _, _, vb, _vn) in corpus if _tok_match(w, vb))
+            idf[w] = 1.0 + _math.log(n_frag / (1 + df))
+        for doc, nombre, f, body, vocab_body, vocab_name in corpus:
+            # El nombre del documento cuenta como TEMA («Tratamiento_...»):
+            # «cuánto cuesta un blanqueamiento» debe traer la ficha del
+            # blanqueamiento aunque otro documento mencione «cuesta».
+            # Vale lo mismo en cuerpo que en título; y una palabra rara
+            # («rampa», «blanqueamiento») vale más que una genérica
+            # («tienen», «cuesta»).
+            en_cuerpo = any(_tok_match(w, vocab_body) for w in words)
+            en_nombre = any(_tok_match(w, vocab_name) for w in words)
+            if not (en_cuerpo or en_nombre):
+                continue
+            score = sum(idf[w] * ((2 if _tok_match(w, vocab_body) else 0)
+                                  + (2 if _tok_match(w, vocab_name) else 0))
+                        for w in words
+                        if _tok_match(w, vocab_body) or _tok_match(w, vocab_name))
+            if score:
+                # Desempate por densidad: del mismo modo que el usuario
+                # pregunta por una palabra, el fragmento MÁS ESPECÍFICO
+                # (mayor proporción de coincidencias) debe quedar primero;
+                # con empate exacto gana el de mayor densidad — antes un
+                # fragmento genérico («lunes a viernes»: 1/7) vencía a uno
+                # específico («sábados»: 1/6) por orden de inserción.
+                palabra_body = _words_filtradas(body)
+                dens = score / max(1, len(palabra_body))
+                try:
+                    procedencia = json.loads(doc['procedencia']) \
+                        if doc['procedencia'] else None
+                except (TypeError, ValueError):
+                    procedencia = None
+                rows.append({'doc_id': doc['id'], 'doc': doc['name'],
+                             'visibility': f['visibility'],
+                             'doc_version': f['doc_version'],
+                             'procedencia': procedencia,
+                             'body': f['body'], 'score': score,
+                             'densidad': dens, 'via': 'texto'})
+    # Híbrido vectorial: documentos sin coincidencia literal también aportan
+    # (descripciones). Van después de lo textual, ordenados por similitud.
+    try:
+        from crm import rag_vector as _rvkb
+        for _h in _rvkb.verificar(path, _rvkb.buscar(path, query, limite=limit)):
+            if _h.get('kind') != 'kb':
+                continue
+            if any(r['doc_id'] == _h.get('ref_id') for r in rows):
+                continue
+            with connect(path) as _c2:
+                _fr = _c2.execute(
+                    "SELECT body, doc_version, visibility FROM crm_kb_fragments "
+                    "WHERE doc_id=? AND doc_version=? ORDER BY id LIMIT 2",
+                    (_h.get('ref_id'), _h.get('revision') or 0)).fetchall()
+                if not _fr:
+                    _fr = _c2.execute(
+                        "SELECT body, doc_version, visibility FROM crm_kb_fragments "
+                        "WHERE doc_id=? ORDER BY id LIMIT 2", (_h.get('ref_id'),)).fetchall()
+                _nm = _c2.execute("SELECT name FROM crm_kb_documents WHERE id=?",
+                                   (_h.get('ref_id'),)).fetchone()
+            for _f in _fr:
+                rows.append({'doc_id': _h.get('ref_id'),
+                             'doc': (_nm['name'] if _nm else ''),
+                             'visibility': _f['visibility'],
+                             'doc_version': _f['doc_version'],
+                             'procedencia': None,
+                             'body': _f['body'],
+                             'score': 0.0,
+                             'score_vec': round(float(_h.get('score') or 0.0), 4),
+                             'densidad': 0.0, 'via': 'vector'})
+                break
+    except Exception as exc:
+        import logging as _lg2
+        _lg2.getLogger(__name__).warning('vector KB no disponible: %s', exc)
+    rows.sort(key=lambda r: (0 if r.get('via') != 'vector' else 1,
+                             -r.get('score', 0), -r.get('densidad', 0)))
+    _txtk = [r for r in rows if r.get('via') != 'vector']
+    _veck = sorted([r for r in rows if r.get('via') == 'vector'],
+                   key=lambda r: -r.get('score_vec', 0.0))
+    return (_txtk + _veck)[:limit]
 
 
 def _agenda_summary(path):
     """Resumen operativo SIN datos de clientes: profesionales, próxima cita y
     cuántas hay hoy y mañana.
 
-    Los estados del CRM están en español ('pendiente', 'confirmada', ...); antes
-    se consultaban en inglés y el resumen siempre devolvía cero.
+    Los estados del CRM están en español solo en las ETIQUETAS: el dominio
+    persiste estados canónicos en inglés ('pending', 'confirmed', 'attended',
+    'no_show', 'cancelled'). Antes se consultaban 'atendida'/'cancelada' y no
+    existía ninguna fila, así que el asistente informaba cero aunque hubiera
+    atenciones y cancelaciones (R8). Además el contador exigía status='active',
+    lo que excluía toda cancelación incluso traduciendo el estado.
     """
     from datetime import datetime, timedelta, timezone as _tz
     from zoneinfo import ZoneInfo
 
+    # Una sola autoridad de zona (R9): la configuración efectiva del negocio
+    # (crm_settings, clave 'negocio_zona'), no una clave 'timezone' aparte.
     zona = 'America/Guayaquil'
     try:
-        with connect(path) as conn:
-            fila = conn.execute(
-                "SELECT value FROM crm_settings WHERE key='timezone'").fetchone()
-        if fila and fila['value']:
-            zona = fila['value']
-    except Exception:  # noqa: BLE001 - si no hay ajuste, zona por defecto
+        from crm import business_config as _bc
+        zona = _bc.effective_profile(path).zone or zona
+    except Exception:  # noqa: BLE001 - sin configuración se usa la zona por defecto
         pass
 
     ahora_local = datetime.now(ZoneInfo(zona))
@@ -1935,18 +2311,18 @@ def _agenda_summary(path):
     fin_hoy = ini_hoy + timedelta(days=1)
     canceladas_hoy = atendidas_hoy = semana_pasada = recurrentes_mes = 0
     with connect(path) as conn:
-        def _contar(desde, hasta, estado=None):
-            sql = ("SELECT COUNT(*) c FROM crm_appointments WHERE status='active' "
-                   "AND start>=? AND start<?")
-            args = [desde.isoformat(), hasta.isoformat()]
-            if estado:
-                sql += ' AND operational_status=?'
-                args.append(estado)
-            return conn.execute(sql, args).fetchone()['c']
+        def _contar(desde, hasta, estado):
+            # Estado CANÓNICO del dominio y sin filtro de status heredado:
+            # una cita cancelada sigue siendo status='cancelled' y debe contarse
+            # como cancelación, no desaparecer del total.
+            sql = ("SELECT COUNT(*) c FROM crm_appointments "
+                   "WHERE operational_status=? AND start>=? AND start<?")
+            return conn.execute(sql, (estado, desde.isoformat(),
+                                      hasta.isoformat())).fetchone()['c']
 
-        canceladas_hoy = _contar(ini_hoy, fin_hoy, 'cancelada')
-        atendidas_hoy = _contar(ini_hoy, fin_hoy, 'atendida')
-        semana_pasada = _contar(ini_hoy - timedelta(days=7), ini_hoy, 'atendida')
+        canceladas_hoy = _contar(ini_hoy, fin_hoy, 'cancelled')
+        atendidas_hoy = _contar(ini_hoy, fin_hoy, 'attended')
+        semana_pasada = _contar(ini_hoy - timedelta(days=7), ini_hoy, 'attended')
         ini_mes = datetime.combine(hoy.replace(day=1), datetime.min.time(),
                                    ZoneInfo(zona)).astimezone(_tz.utc)
         recurrentes_mes = conn.execute(
@@ -2023,26 +2399,74 @@ def _memoria_limite(limite_turnos):
     return min(v, _MEMORIA_MAX_TURNOS)
 
 
-def chat_memoria_cargar(path, conversation_id, limite_turnos=None, role=None):
+def _chat_owner(user_id) -> str:
+    """Espacio de memoria del chat interno: un usuario autenticado es SU dueño.
+
+    ``'u:<id>'`` para una persona concreta y ``''`` para llamadas internas sin
+    usuario (canal/pruebas). El rol NO identifica a nadie: dos administradores
+    con el mismo ``conversation_id`` ya no comparten historial porque la lectura,
+    la escritura y la poda se filtran por este espacio (R2).
+    """
+    try:
+        return 'u:%d' % int(user_id) if user_id is not None else ''
+    except (TypeError, ValueError):
+        return ''
+
+
+def chat_conversacion_autorizada(path, conversation_id, user_id=None) -> bool:
+    """¿El dueño de la conversación es este usuario (o nadie todavía)?
+
+    El cliente no decide de quién es un identificador: el primero que lo usa
+    autenticado lo reclama y cualquier otra cuenta recibe ``False`` en lugar de
+    contexto ajeno. Las conversaciones históricas sin reclamo pueden usarse,
+    pero sólo dentro del espacio de su propio dueño.
+    """
+    owner = _chat_owner(user_id)
+    if not conversation_id:
+        return True
+    with connect(path) as conn:
+        fila = conn.execute(
+            'SELECT owner FROM crm_c02_chat_conversations WHERE conversation_id=?',
+            (conversation_id,)).fetchone()
+        if fila is None:
+            conn.execute(
+                """INSERT INTO crm_c02_chat_conversations
+                   (conversation_id, owner, created_at) VALUES (?,?,?)
+                   ON CONFLICT(conversation_id) DO NOTHING""",
+                (conversation_id, owner,
+                 datetime.now(timezone.utc).isoformat()))
+            fila = conn.execute(
+                'SELECT owner FROM crm_c02_chat_conversations WHERE conversation_id=?',
+                (conversation_id,)).fetchone()
+    return fila is not None and fila['owner'] == owner
+
+
+def chat_memoria_cargar(path, conversation_id, limite_turnos=None, role=None,
+                        user_id=None):
     """Turnos conservados de una conversación del chat interno, del más viejo
-    al más reciente, limitados a los últimos ``limite_turnos``. Con ``role``
-    se filtran SOLO los turnos de ese rol: la memoria nunca se arrastra a otro
-    rol. Devuelve (turnos, siguiente_turno) donde siguiente_turno es el turno
-    a escribir (máximo global de la conversación + 1)."""
+    al más reciente, limitados a los últimos ``limite_turnos``.
+
+    La memoria se acota SIEMPRE al dueño de la conversación (``user_id``) y,
+    con ``role``, a los turnos de ese rol: ni otro usuario del mismo rol ni otro
+    rol reciben contexto ajeno. Devuelve (turnos, siguiente_turno) donde
+    siguiente_turno es el turno a escribir (máximo del espacio propio + 1).
+    """
     limite = _memoria_limite(limite_turnos)
     if not conversation_id or not isinstance(conversation_id, str) \
             or len(conversation_id) > 64:
         return [], 1
+    owner = _chat_owner(user_id)
     try:
         import sqlite3 as _sqlite3
         with connect(path) as conn:
             fila = conn.execute(
                 'SELECT MAX(turno) AS m FROM crm_c02_chat_memory '
-                'WHERE conversation_id=?', (conversation_id,)).fetchone()
+                'WHERE conversation_id=? AND owner=?', (conversation_id, owner)).fetchone()
             siguiente = (int(fila['m'] or 0) + 1) if fila else 1
             sql = ('SELECT turno, question, question_busqueda, answer, fuentes, '
-                   'abstencion FROM crm_c02_chat_memory WHERE conversation_id=?')
-            params = [conversation_id]
+                   'abstencion FROM crm_c02_chat_memory '
+                   'WHERE conversation_id=? AND owner=?')
+            params = [conversation_id, owner]
             if role:
                 sql += ' AND role=?'
                 params.append(role)
@@ -2068,36 +2492,58 @@ def chat_memoria_guardar(path, conversation_id, *, turno, role, question,
                          question_busqueda, answer, fuentes=None,
                          abstencion=False, user_id=None, limite_turnos=None):
     """Guarda el turno y PODA los anteriores que excedan el límite (atómico:
-    leer el turno siguiente y podar en la misma transacción). Un fallo de
-    memoria jamás tumba el chat: quien llama decide ignorarlo."""
+    leer el turno siguiente y podar en la misma transacción).
+
+    La poda se limita al mismo dueño y rol: nunca borra ni cuenta turnos de otra
+    persona. Un fallo de memoria jamás tumba el chat: quien llama decide
+    ignorarlo.
+    """
     limite = _memoria_limite(limite_turnos)
     if not conversation_id or not isinstance(conversation_id, str) \
             or len(conversation_id) > 64:
         return False
+    owner = _chat_owner(user_id)
     fuentes_json = json.dumps(
         [f if isinstance(f, dict) else getattr(f, 'a_dict', lambda: {})()
          for f in (fuentes or [])][:_MEMORIA_MAX_FUENTES], ensure_ascii=False)
-    if turno is None:
-        _, turno = chat_memoria_cargar(path, conversation_id, limite_turnos=limite)
     stamp = datetime.now(timezone.utc).isoformat()
     try:
         import sqlite3 as _sqlite3
         with connect(path) as conn:
             conn.execute('BEGIN IMMEDIATE')
+            # La escritura RECLAMA la conversación: guardar un turno en un id
+            # ajeno tampoco puede contaminar el contexto de otra cuenta.
+            dueno = conn.execute(
+                'SELECT owner FROM crm_c02_chat_conversations WHERE conversation_id=?',
+                (conversation_id,)).fetchone()
+            if dueno is None:
+                conn.execute(
+                    """INSERT INTO crm_c02_chat_conversations
+                       (conversation_id, owner, created_at) VALUES (?,?,?)""",
+                    (conversation_id, owner, stamp))
+            elif dueno['owner'] != owner:
+                conn.execute('ROLLBACK')
+                return False
+            if turno is None:
+                fila = conn.execute(
+                    'SELECT MAX(turno) AS m FROM crm_c02_chat_memory '
+                    'WHERE conversation_id=? AND owner=?',
+                    (conversation_id, owner)).fetchone()
+                turno = int((fila['m'] if fila else 0) or 0) + 1
             conn.execute(
                 """INSERT INTO crm_c02_chat_memory
-                   (conversation_id, turno, role, user_id, question,
+                   (conversation_id, owner, turno, role, user_id, question,
                     question_busqueda, answer, fuentes, abstencion, created_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
-                (conversation_id, int(turno), role, user_id,
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (conversation_id, owner, int(turno), role, user_id,
                  (question or '')[:_MEMORIA_MAX_QUESTION],
                  (question_busqueda or '')[:_MEMORIA_MAX_QUESTION],
                  (answer or '')[:_MEMORIA_MAX_ANSWER], fuentes_json,
                  1 if abstencion else 0, stamp))
             conn.execute(
                 """DELETE FROM crm_c02_chat_memory
-                   WHERE conversation_id=? AND turno <= ?""",
-                (conversation_id, int(turno) - limite))
+                   WHERE conversation_id=? AND owner=? AND role=? AND turno <= ?""",
+                (conversation_id, owner, role, int(turno) - limite))
             conn.execute('COMMIT')
         return True
     except _sqlite3.OperationalError:
@@ -2159,30 +2605,61 @@ def _resolver_referencia(pregunta: str, historial) -> str:
     return f'{pregunta} ({sujeto})'
 
 
-def agenda_dia(path, texto, role='user'):
+def _profesional_del_usuario(path, user_id):
+    """Profesional vinculado a la cuenta (mismo correo), o None.
+
+    Sin tabla extra: al crear la cuenta del doctor se usa el mismo correo
+    que su ficha de profesional y queda vinculado automáticamente.
+    """
+    if not user_id:
+        return None
+    try:
+        with connect(path) as conn:
+            user = conn.execute('SELECT email FROM crm_users WHERE id=?',
+                                (user_id,)).fetchone()
+            if not user or not (user['email'] or '').strip():
+                return None
+            prof = conn.execute(
+                'SELECT id, name FROM crm_professionals WHERE active=1 AND '
+                'LOWER(email)=LOWER(?)', (user['email'].strip(),)).fetchone()
+            return dict(prof) if prof else None
+    except Exception:  # noqa: BLE001 - sin vínculo se trata como sin equipo
+        return None
+
+
+def agenda_dia(path, texto, role='user', user_id=None):
     """Citas de un día concreto, con nombre. SÓLO administración.
 
     El chat nunca expone pacientes a un rol normal; el dueño del negocio sí
-    necesita ver su agenda del día desde el asistente.
+    necesita ver su agenda del día desde el asistente. Una cuenta vinculada
+    a un profesional (mismo correo) sólo ve SUS citas; el resto del equipo no.
     """
+    vinculo = None
     if role != 'admin':
-        return None
+        vinculo = _profesional_del_usuario(path, user_id)
+        if vinculo is None:
+            return None
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 
     bajo = (texto or '').lower()
+    # Misma autoridad de zona que el resto del producto (R9): configurar el
+    # negocio en Madrid no puede dejar este listado en Guayaquil.
     zona = 'America/Guayaquil'
     try:
-        with connect(path) as conn:
-            fila = conn.execute(
-                "SELECT value FROM crm_settings WHERE key='timezone'").fetchone()
-        if fila and fila['value']:
-            zona = fila['value']
+        from crm import business_config as _bc
+        zona = _bc.effective_profile(path).zone or zona
     except Exception:  # noqa: BLE001
         pass
     hoy = datetime.now(ZoneInfo(zona)).date()
     dias = {'lunes': 0, 'martes': 1, 'miércoles': 2, 'miercoles': 2, 'jueves': 3,
             'viernes': 4, 'sábado': 5, 'sabado': 5, 'domingo': 6}
+    _DIAS_ES = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado',
+                'domingo']
+    _DIAS_ABBR = ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom']
+    solo_canceladas = 'cancel' in bajo
+    cuenta_reprogram = 'reprogram' in bajo or 'aplaz' in bajo
+    es_semana = 'semana' in bajo
     objetivo = None
     if 'pasado mañana' in bajo:
         objetivo = hoy + timedelta(days=2)
@@ -2196,41 +2673,83 @@ def agenda_dia(path, texto, role='user'):
                 adelante = (indice - hoy.weekday()) % 7
                 objetivo = hoy + timedelta(days=adelante or 7)
                 break
-    if objetivo is None:
-        return None
+    if es_semana:
+        # Semana actual o próxima (lunes a domingo), no un día suelto.
+        base = hoy + timedelta(days=7) if 'proxim' in bajo else hoy
+        lunes = base - timedelta(days=base.weekday())
+        desde = datetime.combine(lunes, datetime.min.time(), ZoneInfo(zona))
+        hasta = desde + timedelta(days=7)
+        etiqueta = 'semana del %s' % lunes.strftime('%d/%m')
+    else:
+        if objetivo is None:
+            return None
+        desde = datetime.combine(objetivo, datetime.min.time(), ZoneInfo(zona))
+        hasta = desde + timedelta(days=1)
+        etiqueta = 'el %s' % objetivo.strftime('%d/%m')
 
-    desde = datetime.combine(objetivo, datetime.min.time(), ZoneInfo(zona))
-    hasta = desde + timedelta(days=1)
+    def _iso(dt):
+        return dt.astimezone(ZoneInfo('UTC')).isoformat()
+
     with connect(path) as conn:
+        if cuenta_reprogram:
+            filas = conn.execute(
+                """SELECT DISTINCT a.id, a.start, a.title
+                   FROM crm_appointment_history h
+                   JOIN crm_appointments a ON a.id=h.appointment_id
+                   WHERE h.action IN ('reprogram','reprogramacion')
+                   AND a.start >= ? AND a.start < ?%s
+                   ORDER BY a.start""" % (
+                       ' AND a.professional_id=%d' % int(vinculo['id'])
+                       if vinculo is not None else ''),
+                (_iso(desde), _iso(hasta))).fetchall()
+            if not filas:
+                return {'fecha': desde.date().isoformat(), 'total': 0,
+                        'texto': 'No hay reprogramaciones %s.' % etiqueta}
+            return {'fecha': desde.date().isoformat(), 'total': len(filas),
+                    'texto': 'Reprogramadas %s (%d).' % (etiqueta, len(filas))}
+        if solo_canceladas:
+            estado_where = "a.operational_status='cancelled'"
+        else:
+            estado_where = "a.status='active'"
+        if vinculo is not None:
+            estado_where += ' AND a.professional_id=%d' % int(vinculo['id'])
         filas = conn.execute(
             """SELECT a.start, a.title, a.patient_name, a.operational_status,
                       l.name AS lead_name, p.name AS profesional
                FROM crm_appointments a
                JOIN crm_professionals p ON p.id = a.professional_id
                LEFT JOIN crm_leads l ON l.id = a.lead_id
-               WHERE a.status='active' AND a.start >= ? AND a.start < ?
-               ORDER BY a.start""",
-            (desde.astimezone().astimezone(ZoneInfo('UTC')).isoformat(),
-             hasta.astimezone().astimezone(ZoneInfo('UTC')).isoformat())).fetchall()
+               WHERE %s AND a.start >= ? AND a.start < ?
+               ORDER BY a.start""" % estado_where,
+            (_iso(desde), _iso(hasta))).fetchall()
     if not filas:
-        return {'fecha': objetivo.isoformat(), 'total': 0,
-                'texto': 'No hay citas el %s.' % objetivo.strftime('%d/%m')}
+        que = 'canceladas' if solo_canceladas else 'citas'
+        return {'fecha': desde.date().isoformat(), 'total': 0,
+                'texto': 'No hay %s %s.' % (que, etiqueta)}
     lineas = []
     for fila in filas[:25]:
         try:
-            hora = (datetime.fromisoformat(fila['start'])
-                    .astimezone(ZoneInfo(zona)).strftime('%H:%M'))
+            hl = (datetime.fromisoformat(fila['start'])
+                  .astimezone(ZoneInfo(zona)))
+            hora = hl.strftime('%H:%M')
+            dia_txt = '' if not es_semana else '%s %s ' % (
+                _DIAS_ABBR[hl.weekday()], hl.strftime('%d/%m'))
         except (TypeError, ValueError):
             hora = '--:--'
+            dia_txt = ''
         paciente = fila['patient_name'] or fila['lead_name'] or 'sin nombre'
         servicio = (fila['title'] or '').replace('Reserva: ', '').split(' · ')[0]
-        lineas.append('%s %s · %s (%s)' % (hora, paciente, servicio, fila['profesional']))
-    texto_dia = ('Citas del %s %s (%d): %s' % (objetivo.strftime('%A'), objetivo.strftime('%d/%m'), len(filas),
+        lineas.append('%s%s %s · %s (%s)' % (dia_txt, hora, paciente, servicio, fila['profesional']))
+    que = 'Canceladas' if solo_canceladas else 'Citas'
+    if es_semana:
+        texto = ('%s %s (%d): %s' % (que, etiqueta, len(filas), '; '.join(lineas)))
+    else:
+        texto = ('%s del %s %s (%d): %s' % (que, _DIAS_ES[desde.weekday()], desde.strftime('%d/%m'), len(filas),
                                             '; '.join(lineas)))
-    return {'fecha': objetivo.isoformat(), 'total': len(filas), 'texto': texto_dia}
+    return {'fecha': desde.date().isoformat(), 'total': len(filas), 'texto': texto}
 
 
-def _herramientas_chat(path, role):
+def _herramientas_chat(path, role, user_id=None):
     """Funciones autorizadas que el adaptador IA puede consultar (sólo lectura).
 
     El chat interno de esta entrega CONSULTA: KB publicada, catálogo publicado,
@@ -2238,7 +2757,7 @@ def _herramientas_chat(path, role):
     Ninguna herramienta escribe citas ni inventario.
     """
     def kb_buscar(pregunta):
-        hits = kb_search(path, pregunta)
+        hits = kb_search(path, pregunta, solo_publicos=(role != 'admin'))
         # Separación público/interno: sin rol de administración, la KB sólo
         # recupera conocimiento PUBLISHED PÚBLICO (nunca notas internas).
         if role != 'admin':
@@ -2246,7 +2765,7 @@ def _herramientas_chat(path, role):
         return hits
 
     def catalogo_buscar(q):
-        hits = _catalog_search(path, q)
+        hits = _catalog_search(path, q, incluir_internas=(role == 'admin'))
         return hits
 
     def catalogo_buscar_stock(q):
@@ -2254,12 +2773,53 @@ def _herramientas_chat(path, role):
         # consulta borradores/inventario interno; un usuario sin permiso sólo
         # ve el catálogo publicado (jamás artículos en borrador ni stock
         # privado). El stock de roles autorizados se lee de la BD real.
+        # Las notas internas viajan sólo con rol admin.
         if role != 'admin':
             return _catalog_search(path, q, solo_publicados=True)
-        return _catalog_search(path, q, solo_publicados=False)
+        return _catalog_search(path, q, solo_publicados=False,
+                               incluir_internas=True)
 
     def agenda_resumen():
         return _agenda_summary(path)
+
+    def catalogo_muestra(kind=None):
+        # Oferta explícita («¿qué servicios tienen?»): primeros publicados,
+        # sin texto de búsqueda (el cliente ya dijo que quiere verlos).
+        # Servicios primero salvo que pidan productos.
+        solo = 'producto' if kind == 'producto' else 'servicio'
+        extras = ', internal_notes' if role == 'admin' else ''
+        with connect(path) as conn:
+            rows = conn.execute(
+                f"""SELECT id, name, kind, price_cents, price_domicilio_cents,
+                          currency, stock, stock_na, active, publish_state,
+                          details, public_notes, valid_from, valid_until,
+                          code, current_revision, duration_min{extras}
+                   FROM crm_catalog_items
+                   WHERE publish_state='publicado' AND active=1
+                   ORDER BY CASE WHEN kind=? THEN 0 ELSE 1 END, id LIMIT 8""",
+                (solo,)).fetchall()
+        return [dict(r) for r in rows]
+
+    def horario_negocio():
+        """Horario semanal vigente en texto legible (sin datos de clientes)."""
+        try:
+            from crm.business_config import effective_settings
+            horarios = effective_settings(path).get('negocio_horarios') or {}
+        except Exception:  # noqa: BLE001 - sin configuración no se inventa
+            return ''
+        if not isinstance(horarios, dict) or not horarios:
+            return ''
+        dias = ['lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado',
+                'domingo']
+        partes = []
+        for indice, nombre in enumerate(dias):
+            ventana = horarios.get(str(indice))
+            if not ventana or len(ventana) != 2:
+                continue
+            partes.append('%s de %s a %s' % (nombre, ventana[0], ventana[1]))
+        if not partes:
+            return ''
+        return 'Atendemos ' + ', '.join(partes) + '.'
 
     def stock_consultar(item_id):
         # Relectura operativa desde BD para roles autorizados. Sin permiso, el
@@ -2281,21 +2841,70 @@ def _herramientas_chat(path, role):
         return row['stock']
 
     def agenda_del_dia(pregunta):
-        return agenda_dia(path, pregunta, role)
+        return agenda_dia(path, pregunta, role, user_id=user_id)
+
+    def zonas_con_tarifa():
+        # Zonas de entrega con tarifa formateada (dato público para vender).
+        from crm import comercio as _comercio
+        from crm import moneda as _moneda
+        from crm.business_config import effective_settings as _ajustes
+        moneda = (_ajustes(path).get('negocio_moneda') or 'USD')
+        out = []
+        for z in _comercio.zonas_activas(path):
+            tarifa = z.get('tarifa_cents')
+            out.append({'codigo': z.get('codigo'), 'nombre': z.get('nombre'),
+                        'tarifa_txt': _moneda.formatear_importe(tarifa, moneda)
+                                      if tarifa is not None else None})
+        return out
 
     return {'kb_buscar': kb_buscar, 'catalogo_buscar': catalogo_buscar,
+            'catalogo_muestra': catalogo_muestra,
             'catalogo_buscar_stock': catalogo_buscar_stock,
             'agenda_resumen': agenda_resumen, 'stock_consultar': stock_consultar,
+            'horario_negocio': horario_negocio,
+            'zonas_con_tarifa': zonas_con_tarifa,
             'agenda_dia': agenda_del_dia}
+
+
+def _consultar_adaptador(adaptador, pregunta, *, herramientas, rol, historial,
+                         perfil='interno', negocio=None):
+    """Invoca el adaptador con el perfil cuando su contrato lo admite.
+
+    Los dobles de prueba escritos con la firma anterior (sin ``perfil``) se
+    tratan como internos: no se les pasa un argumento que no aceptan. Los
+    errores del adaptador se propagan al llamador, que los convierte en un
+    fallo explícito (nunca en una respuesta fabricada).
+    """
+    import inspect
+    try:
+        params = inspect.signature(adaptador.consultar).parameters
+    except (TypeError, ValueError):
+        params = {}
+    if 'perfil' in params:
+        if 'negocio' in params:
+            return adaptador.consultar(pregunta, herramientas=herramientas,
+                                       rol=rol, historial=historial,
+                                       perfil=perfil, negocio=negocio)
+        return adaptador.consultar(pregunta, herramientas=herramientas,
+                                   rol=rol, historial=historial,
+                                   perfil=perfil)
+    return adaptador.consultar(pregunta, herramientas=herramientas,
+                               rol=rol, historial=historial)
 
 
 def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
                             conversation_id=None, limite_turnos=None,
-                            user_id=None):
+                            user_id=None, perfil='interno', negocio=None):
     """Chat interno sobre el adaptador IA inyectable (puntos 3 y 6 C02).
 
+    ``perfil='interno'`` (por defecto) es el asistente del equipo: puede citar
+    fuentes [n] y ver contadores de agenda. ``perfil='publico'`` es la
+    recepción del canal: mismo contexto permitido y mismas reglas de
+    abstención, pero presentación natural, sin marcadores ni jerga interna y
+    sin agenda ajena. ``negocio`` aporta nombre/rubro configurados.
+
     Multi-turno con memoria ACOTADA: con ``conversation_id`` se cargan los
-    turnos previos del MISMO contexto (conversación y rol), se resuelven
+    turnos previos del MISMO contexto (conversación, DUEÑO y rol), se resuelven
     referencias («¿y ese cuánto cuesta?»), se vuelven a recuperar las fuentes
     ACTUALES para la pregunta y se guarda el turno con sus fuentes reales,
     podando los anteriores al límite. Sin ``conversation_id`` se comporta
@@ -2316,16 +2925,26 @@ def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
     historial = []
     siguiente_turno = None
     if conversation_id:
+        # Propiedad ANTES de leer: un identificador ajeno no entrega contexto ni
+        # se contamina con turnos de otra cuenta (dos usuarios del mismo rol
+        # pueden enviar el mismo id; el rol no es identidad).
+        if not chat_conversacion_autorizada(path, conversation_id, user_id=user_id):
+            return {'ok': False, 'answer': '', 'code': 'forbidden',
+                    'error': 'La conversación indicada pertenece a otro usuario. '
+                             'Abra el chat de nuevo para empezar una propia.'}
         historial, siguiente_turno = chat_memoria_cargar(
-            path, conversation_id, limite_turnos=limite_turnos, role=role)
+            path, conversation_id, limite_turnos=limite_turnos, role=role,
+            user_id=user_id)
     # Referencia/elipsis del turno anterior resuelta ANTES de recuperar: la
     # pregunta resuelta vuelve a consultar las fuentes actuales.
     pregunta_resuelta = _resolver_referencia(pregunta, historial) \
         if conversation_id else pregunta
-    herramientas = _herramientas_chat(path, role)
+    herramientas = _herramientas_chat(path, role, user_id=user_id)
     try:
-        resp = adaptador.consultar(pregunta_resuelta, herramientas=herramientas,
-                                   rol=role, historial=historial)
+        resp = _consultar_adaptador(adaptador, pregunta_resuelta,
+                                    herramientas=herramientas, rol=role,
+                                    historial=historial, perfil=perfil,
+                                    negocio=negocio)
     except Exception as exc:  # el adaptador nunca debe tumbar el chat interno
         return {'ok': False, 'error': f'Error del adaptador: {exc}', 'answer': '',
                 'modo': getattr(adaptador, 'modo', '')}
@@ -2393,36 +3012,163 @@ def responder_chat_internal(path, pregunta, *, role='admin', adaptador=None,
             'pregunta_resuelta': pregunta_resuelta if conversation_id else None}
 
 
-def _catalog_search(path, query, limit=4, solo_publicados=True):
+def _catalog_search(path, query, limit=4, solo_publicados=True,
+                    incluir_internas=False):
     """Búsqueda simple sobre artículos del catálogo.
 
     ``solo_publicados=True`` es la visión pública (catálogo vigente).
     ``solo_publicados=False`` es la lectura OPERATIVA INTERNA (chat del equipo):
     incluye borradores para consultar existencias reales en BD, pero estos
-    nunca se exponen al público.
+    nunca se exponen al público. ``incluir_internas=True`` (sólo rol admin)
+    añade las notas internas; el resto de campos (domicilio, observaciones
+    públicas, vigencia) viaja siempre porque el adaptador decide qué mostrar
+    según el perfil.
     """
     q = (query or '').lower()
-    words = [w for w in re.split(r'\W+', q) if len(w) > 2]
+    _STOP = {'tienen', 'tiene', 'servicio', 'servicios', 'hay', 'cuanto',
+             'cuanta', 'cuesta', 'cuestan', 'precio', 'precios', 'para', 'con',
+             'los', 'las', 'una', 'uno', 'unos', 'unas', 'del', 'que', 'por',
+             'me', 'mi', 'mis', 'es', 'son', 'estoy', 'quiero', 'quisiera',
+             'necesito', 'puedo', 'podria', 'hola', 'buenas', 'buenos', 'dias',
+             'tardes', 'noches', 'gracias', 'favor', 'sobre', 'mas', 'muy',
+             'al', 'el', 'la', 'de', 'en', 'y', 'o', 'a', 'su', 'sus', 'como',
+             'cual', 'cuales', 'donde', 'cuando'}
+    import unicodedata as _ud
+
+    def _f(s):
+        s = _ud.normalize('NFKD', (s or '').lower())
+        return ''.join(c for c in s if not _ud.combining(c))
+
+    words = [w for w in re.split(r'\W+', _f(q)) if len(w) > 2 and w not in _STOP]
+    # Sinónimos coloquiales seguros: «chequeo» es la valoración inicial.
+    _SINONIMOS_CATALOGO = {'chequeo': 'valoracion', 'chequeos': 'valoracion',
+                           'calza': 'empaste', 'calzas': 'empaste',
+                           'diente roto': 'urgencia', 'muela': 'extraccion'}
+    for _col, _raiz in _SINONIMOS_CATALOGO.items():
+        if _col in _f(q) and _raiz not in words:
+            words.append(_raiz)
     if not words:
         return []
     where = "publish_state='publicado' AND active=1" if solo_publicados else 'active=1'
+    extras = ', internal_notes' if incluir_internas else ''
     with connect(path) as conn:
         rows = conn.execute(
-            f"""SELECT id, name, kind, price_cents, currency, stock, stock_na,
-                       active, publish_state, details, code, current_revision
+            f"""SELECT id, name, kind, price_cents, price_domicilio_cents,
+                       currency, stock, stock_na, active, publish_state,
+                       details, public_notes, valid_from, valid_until,
+                       code, current_revision, aliases, brand, presentation,
+                       attributes_json, allergens, warnings, sessions, duration_min,
+                       prep_notes, aftercare_notes, requires_evaluation{extras}
                FROM crm_catalog_items
                WHERE {where}
                ORDER BY id""").fetchall()
     scored = []
+    def variantes(palabra):
+        """Singular/plural sencillo: «cepillos» debe encontrar «Cepillo suave»."""
+        yield palabra
+        if len(palabra) > 4 and palabra.endswith('es'):
+            yield palabra[:-2]
+        if len(palabra) > 3 and palabra.endswith('s'):
+            yield palabra[:-1]
+
+    def _coincide(texto, palabra):
+        # Palabra completa («anual» NO casa con «manual», «bla» NO casa con
+        # «blanqueamiento»): evita respuestas con el artículo equivocado.
+        return any(re.search(r'\b%s\b' % re.escape(v), texto)
+                   for v in variantes(palabra))
+
     for r in rows:
-        text = ' '.join(str(r[k] or '') for k in ('name', 'kind', 'details')).lower()
-        score = sum(1 for w in words if w in text)
+        # El «kind» genérico («servicio») no debe hacer coincidir cualquier
+        # consulta: se busca en nombre y detalle, no en la categoría.
+        text = _f('%s %s %s %s' % (r['name'], r['details'],
+                                    r['aliases'] or '', r['attributes_json'] or ''))
+        score = sum(1 for w in words if _coincide(text, _f(w)))
         if score:
             d = dict(r)
             d['score'] = score
+            d['aprox'] = False
+            d['via'] = 'texto'
             scored.append(d)
-    scored.sort(key=lambda r: r['score'], reverse=True)
-    return scored[:limit]
+    # Coincidencia exacta de nombre o código: manda sobre cualquier conteo.
+    qf = _f((query or '').strip())
+    for d in scored:
+        if _f(d['name']).strip() == qf or (d.get('code') and _f(d['code']).strip() == qf):
+            d['score'] += 100
+            d['exacta'] = True
+    pegaron = set()
+    for d in scored:
+        text = _f('%s %s' % (d['name'], d.get('details')))
+        for w in words:
+            if _coincide(text, _f(w)):
+                pegaron.add(w)
+    faltan = [w for w in words if w not in pegaron and len(w) >= 6]
+    if faltan:
+        # Tolerancia a typos («cepilos» por «cepillos»): cada palabra sin
+        # acierto se busca parecida en el vocabulario del catálogo.
+        import difflib as _dl
+        vocabulario = {}
+        for r in rows:
+            for w in re.split(r'\W+', _f('%s %s' % (r['name'], r['details']))):
+                if len(w) > 3:
+                    vocabulario.setdefault(w, []).append(r)
+        vistos = set(d['id'] for d in scored)
+        for w in faltan:
+            for parecido in _dl.get_close_matches(_f(w), list(vocabulario), n=3, cutoff=0.8):
+                for r in vocabulario[parecido][:2]:
+                    if r['id'] not in vistos:
+                        vistos.add(r['id'])
+                        d = dict(r)
+                        d['score'] = 1
+                        d['aprox'] = True
+                        scored.append(d)
+    scored.sort(key=lambda r: (r['score'], not r.get('aprox', False)), reverse=True)
+    # Híbrido con el índice vectorial: propone IDs por descripción
+    # («el kit que trae un vasito»); stock/precio/vigencia se leen de la
+    # ficha actual, nunca del índice. Sin índice se sigue sólo con texto.
+    try:
+        from crm import rag_vector as _rv
+        _vhits = _rv.verificar(path, _rv.buscar(path, query, limite=limit))
+    except Exception as exc:
+        import logging as _lg
+        _lg.getLogger(__name__).warning('vector no disponible, solo texto: %s', exc)
+        try:
+            with connect(path) as _conn:
+                audit(_conn, None, 'rag_vector_no_disponible: %s' % str(exc)[:160])
+        except Exception:
+            pass
+        _vhits = []
+    if _vhits:
+        vistos = set(d['id'] for d in scored)
+        with connect(path) as _conn:
+            for _h in _vhits:
+                if _h.get('kind') != 'catalogo' or _h.get('ref_id') in vistos:
+                    continue
+                _row = _conn.execute(
+                    "SELECT id, name, kind, price_cents, price_domicilio_cents,"
+                    " currency, stock, stock_na, active, publish_state, details,"
+                    " public_notes, valid_from, valid_until, code,"
+                    " current_revision, aliases, brand, presentation,"
+                    " attributes_json, allergens, warnings, sessions, duration_min,"
+                    " prep_notes, aftercare_notes, requires_evaluation"
+                    " FROM crm_catalog_items WHERE id=?",
+                    (_h.get('ref_id'),)).fetchone()
+                if _row is None:
+                    continue
+                d = dict(_row)
+                d['score'] = 0
+                d['score_vec'] = round(float(_h.get('score') or 0.0), 4)
+                d['aprox'] = False
+                d['via'] = 'vector'
+                vistos.add(d['id'])
+                scored.append(d)
+    scored.sort(key=lambda r: (0 if r.get('via') != 'vector' else 1,
+                               -r.get('score', 0),
+                               not r.get('aprox', False)))
+    # Dentro de lo vectorial rige la similitud (no el conteo, que es 0).
+    _txt = [d for d in scored if d.get('via') != 'vector']
+    _vec = sorted([d for d in scored if d.get('via') == 'vector'],
+                  key=lambda r: -r.get('score_vec', 0.0))
+    return (_txt + _vec)[:limit]
 
 
 def report_invocation(path, *, operation_id, model, latency_us=None, tokens=None, unknown=False):

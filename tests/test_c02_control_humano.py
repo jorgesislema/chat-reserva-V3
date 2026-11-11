@@ -53,7 +53,8 @@ def _ctx(path):
     with connect(path) as conn:
         p = conn.execute('SELECT id,name FROM crm_professionals LIMIT 1').fetchone()
     return {'professionals': [{'id': p['id'], 'name': p['name']}],
-            'zonas': ['America/Guayaquil'], 'now_local': None}
+            'zonas': ['America/Guayaquil'], 'now_local': None,
+            'hoy': '2030-01-07'}
 
 
 def _egress():
@@ -97,7 +98,7 @@ def test_hum01_peticion_humana_interrumpe_dialogo_pendiente(path):
     assert not any(o['correlation'] == 'op-2' and o['origin'] == 'ia' for o in pend)
     avisos = [o for o in pend if o['correlation'] == 'op-2']
     assert avisos and all(o['origin'] == 'sistema' for o in avisos)
-    assert any('avisado al equipo' in (o.get('payload') or '') for o in avisos)
+    assert any('He dejado su solicitud al equipo' in (o.get('payload') or '') for o in avisos)
 
 
 def test_hum02_emergencia_interrumpe_y_webhook_duplicado_no_duplica_alerta(path):

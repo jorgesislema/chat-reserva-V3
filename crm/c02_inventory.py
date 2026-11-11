@@ -18,8 +18,8 @@ Decisiones de modelo (documentadas, no interpretaciones silenciosas):
   se inventa el valor).
 - Filas con errores se rechazan en bloque: la importación NO aplica cambios
   silenciosos parciales de filas ambiguas.
-- Repetir la misma importación (mismo archivo, misma hoja) se detecta por
-  huella sha256 y NO re-aplica cambios ni crea duplicados.
+- Repetir la misma importación (mismo archivo, misma hoja y mismo mapeo) se
+  detecta por huella sha256 y NO re-aplica cambios ni crea duplicados.
 - La importación nunca despublica: para ítems publicados, los campos operativos
   (stock/activo) se actualizan y la revisión nueva conserva publish_state.
 """
@@ -64,8 +64,25 @@ def inventory_upload_info(filename: str, data: bytes) -> Dict[str, Any]:
         return _err(INVALID, 'La importación de inventario admite .xlsx y .csv únicamente.')
     sheets = []
     if r['kind'] == 'xlsx':
+        import unicodedata as _ud
+
+        def _norm(c):
+            return ''.join(x for x in _ud.normalize('NFKD', str(c).lower())
+                           if not _ud.combining(x))
+
         for s in r.get('sheets') or []:
             filas = s.get('filas') or []
+            cabecera = {_norm((c.get('valor') or '').strip())
+                        for f in filas[:1] for c in (f.get('celdas') or [])}
+            if {'profesional', 'precio', 'duracion', 'vigencia desde',
+                    'precio venta local', 'unidades disponibles'} & cabecera \
+                    and len(cabecera) > 6:
+                return _err(
+                    INVALID,
+                    'Esto parece un catálogo (tiene profesional, precios o '
+                    'vigencias), no un conteo de inventario: súbalo en '
+                    'Catálogo → Importación de configuración, que valida '
+                    'tipos, precios y profesionales.')
             sheets.append({
                 'nombre': s['nombre'], 'n_filas': len(filas),
                 'columnas': _columnas_hoja(filas)})
@@ -124,6 +141,17 @@ def inventory_preview(path: str, filename: str, data: bytes, sheet: str,
     else:
         filas = _csv_filas(r)
         sheet = 'CSV'
+    import unicodedata as _ud
+    cabecera = {_ud.normalize('NFKD', str(
+        (c.get('valor') or '')).lower()).encode('ascii', 'ignore').decode()
+        for f in filas[:1] for c in (f.get('celdas') or [])}
+    if {'profesional', 'precio', 'duracion', 'vigencia desde',
+            'precio venta local'} & cabecera:
+        return _err(
+            INVALID,
+            'Esto parece un catálogo (tiene profesional, precios o vigencias), '
+            'no un conteo de inventario: súbalo en Catálogo → Importación de '
+            'configuración, que valida tipos, precios y profesionales.')
     mapping = {k: (str(v).strip().upper() or None) for k, v in (mapping or {}).items()
                if k in MAPPED_FIELDS}
     if not mapping.get('code'):
@@ -246,11 +274,30 @@ def inventory_apply(path: str, filename: str, data: bytes, sheet: str,
         return _err(EMPTY, 'La columna de ID/código es obligatoria.')
 
     stamp = now()
-    sha = hashlib.sha256(data).hexdigest()
+    sha_datos = hashlib.sha256(data).hexdigest()
+    # La huella incluye el mapeo de columnas: el mismo archivo con distinto
+    # mapeo es una importación distinta, no "ya aplicada".
+    huella = hashlib.sha256(
+        (sha_datos + '|' + sheet_id + '|' + json.dumps(mapping, sort_keys=True)
+         ).encode('utf-8')).hexdigest()
     try:
         with connect(path) as conn:
-            already = conn.execute('SELECT id FROM crm_inventory_imports '
-                                   'WHERE sha256=? AND sheet=?', (sha, sheet_id)).fetchone()
+            already = None
+            for previa in conn.execute(
+                    'SELECT id, sha256, mapping FROM crm_inventory_imports '
+                    'WHERE sheet=?', (sheet_id,)).fetchall():
+                if previa['sha256'] == huella:
+                    already = previa
+                    break
+                if previa['sha256'] == sha_datos:
+                    # Fila legada (huella sólo de datos): coincide si el mapeo
+                    # registrado es el mismo que el actual.
+                    try:
+                        if json.loads(previa['mapping'] or '{}') == mapping:
+                            already = previa
+                            break
+                    except ValueError:
+                        continue
             if already:
                 return _ok(ya_aplicada=True, import_id=already['id'], summary={},
                            message='Esta hoja ya fue importada con éxito; no se aplican cambios.')
@@ -296,7 +343,7 @@ def inventory_apply(path: str, filename: str, data: bytes, sheet: str,
                 """INSERT INTO crm_inventory_imports
                    (filename, sheet, sha256, mapping, summary, created_by, created_at)
                    VALUES (?,?,?,?,?,?,?)""",
-                (filename, sheet_id, sha, json.dumps(mapping, ensure_ascii=False),
+                (filename, sheet_id, huella, json.dumps(mapping, ensure_ascii=False),
                  json.dumps(summary, ensure_ascii=False), actor, stamp)).lastrowid
     except Exception as exc:
         # Rollback total por connect(): la importación nunca deja cambios a medias.
@@ -340,6 +387,19 @@ def _insert_fila(conn, code, campos, actor, stamp):
 def _update_fila(conn, item, campos, actor, stamp):
     """Actualiza campos mapeados de un ítem; una revisión nueva conservando
     publish_state (la importación no despublica nada)."""
+    # Concurrencia optimista: si la revisión cambió desde la vista previa, se
+    # falla en vez de sobrescribir (last-writer-wins prohibido).
+    vigente = conn.execute(
+        'SELECT current_revision FROM crm_catalog_items WHERE id=?',
+        (item['id'],)).fetchone()
+    if vigente is None:
+        raise ValueError('El artículo %s ya no existe; regenere la vista previa.' % item['code'])
+    if int(vigente['current_revision']) != int(item['current_revision']):
+        raise ValueError(
+            'Cambio concurrente: el artículo %s pasó de la revisión %s a la %s '
+            'después de la vista previa; genere una vista previa nueva.' % (
+                item['code'], item['current_revision'],
+                vigente['current_revision']))
     updates = []
     snapshot_updates = dict(item)
     if campos.get('name') is not None:
@@ -365,7 +425,11 @@ def _update_fila(conn, item, campos, actor, stamp):
     if not updates:
         return item['current_revision']
     new_rev = item['current_revision'] + 1
+    permitidos = {'name', 'details', 'public_notes', 'internal_notes',
+                  'kind', 'stock', 'active'}
     for field, value in updates:
+        if field not in permitidos:
+            raise ValueError('Campo no actualizable: %s' % field)
         conn.execute(f'UPDATE crm_catalog_items SET "{field}"=?, updated_at=? WHERE id=?',
                      (value, stamp, item['id']))
     fresh = dict(item)

@@ -227,7 +227,7 @@ def test_webhook_flujo_completo_y_repeticion_no_duplica(crm, fake):
     assert _citas(crm) == []
     pend = outbox_next(db).get('pending', [])
     assert pend and 'Blanqueamiento' not in pend[0]['payload']
-    assert '¿Te lo reservo?' in pend[0]['payload']
+    assert '¿Se lo reservo?' in pend[0]['payload']
 
     # 1c) Respuesta por el transporte REAL (fake): Meta acepta y guarda el wamid.
     outbox_id = pend[0]['id']
@@ -427,15 +427,21 @@ def test_sin_configuracion_transporte_no_envia_y_motor_deriva_a_humano(crm, fake
     est = _estado_outbox(db, oid)
     assert est['provider_state'] == 'no_configurado'
 
-    # MotorIA sin proveedor: deriva a humano (alerta + pausa), sin respuesta.
+    # MotorIA sin proveedor: deriva a humano (alerta + pausa) con UN único
+    # aviso de origen 'sistema'; cero salidas 'ia' fabricadas.
     wa_ingest(db, external_id='wamid-in-8b', phone='59170000111', body='¿me agendan?')
     with connect(db) as conn:
         outbox_antes = conn.execute('SELECT COUNT(*) n FROM crm_outbox').fetchone()['n']
+        ia_antes = conn.execute("SELECT COUNT(*) n FROM crm_outbox WHERE origin='ia'").fetchone()['n']
     res = canal.procesar_lote(db, 'w-t8', canal.MotorIA(), contexto=_ctx(), intervalo=90)
     assert res['procesadas'] >= 1
     with connect(db) as conn:
-        outbox_despues = conn.execute('SELECT COUNT(*) n FROM crm_outbox').fetchone()['n']
-    assert outbox_despues == outbox_antes  # NINGUNA salida IA fabricada
+        filas = conn.execute('SELECT origin FROM crm_outbox ORDER BY id').fetchall()
+        ia_despues = conn.execute("SELECT COUNT(*) n FROM crm_outbox WHERE origin='ia'").fetchone()['n']
+    nuevas = filas[outbox_antes:]
+    assert len(nuevas) >= 1  # al menos un aviso al cliente (una por mensaje)
+    assert nuevas and all(r['origin'] == 'sistema' for r in nuevas)
+    assert ia_despues == ia_antes  # cero salidas IA fabricadas
     with connect(db) as conn:
         n_alertas = conn.execute("SELECT COUNT(*) n FROM crm_human_alerts "
                                  "WHERE reason='fallo_servicio'").fetchone()['n']
@@ -913,10 +919,12 @@ def test_recorrido_positivo_motor_ia(crm, fake, tmp_path):
                                 "WHERE reason='humano_explicito'").fetchone()['n'] >= 1
 
         # Indisponibilidad del proveedor (cliente NUEVO para conversación limpia):
-        # SIN respuestas fabricadas, deriva a humano (alerta + pausa) y el modelo
-        # jamás mutó datos por su cuenta.
+        # UN único aviso de origen 'sistema', cero salidas 'ia'; deriva a humano
+        # (alerta + pausa) y el modelo jamás mutó datos por su cuenta.
         srv_ia.modo = 'error_500'
-        outbox_antes = len(outbox_next(db).get('pending', []))
+        pend_antes = outbox_next(db).get('pending', [])
+        outbox_antes = len(pend_antes)
+        ia_antes = sum(1 for o in pend_antes if o.get('origin') == 'ia')
         r_nuevo = _payload_entrante('quiero reservar algo', 'wamid-mia-n')
         r_nuevo['entry'][0]['changes'][0]['value']['messages'][0]['from'] = '59179999999'
         _post_firmado(crm, r_nuevo)
@@ -926,7 +934,10 @@ def test_recorrido_positivo_motor_ia(crm, fake, tmp_path):
             n_alertas = conn.execute("SELECT COUNT(*) n FROM crm_human_alerts "
                                      "WHERE reason='fallo_servicio'").fetchone()['n']
         assert n_alertas >= 1
-        assert len(outbox_next(db).get('pending', [])) == outbox_antes
+        pend_despues = outbox_next(db).get('pending', [])
+        assert len(pend_despues) == outbox_antes + 1  # un único aviso al cliente
+        assert pend_despues[-1].get('origin') == 'sistema'
+        assert sum(1 for o in pend_despues if o.get('origin') == 'ia') == ia_antes
     finally:
         srv_ia.detener()
 

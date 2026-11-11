@@ -31,8 +31,9 @@
         <thead>
           <tr>
             <th>Código</th><th>Nombre</th><th>Tipo</th><th>Detalle</th>
-            <th>Observaciones</th><th>Precio</th><th>Unidades</th>
-            <th>Estado</th><th>Acciones</th>
+            <th>Observaciones</th><th>Precio local</th><th>Precio domicilio</th>
+            <th>Vigencia</th><th>Unidades</th>
+            <th>Estado</th><th>Activo</th><th>Acciones</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -47,6 +48,15 @@
       <span class="badge">Excel / CSV</span></div>
     <p class="muted">Sube un archivo .xlsx o .csv, elige la hoja, asigna las columnas y revisa la vista previa antes de aplicar. La importación queda registrada en el historial; nunca modifica datos que no hayas mapeado.</p>
     <div id="c02-inventory-zone"></div>
+    <hr class="c02-separator">
+    <div class="section-title"><h2>Importación de configuración</h2>
+      <span class="badge">Plantilla Excel</span></div>
+    <p class="muted">Para cargar el catálogo completo (servicios, productos, precios, vigencias, profesionales y promociones) usa la plantilla fija, sin mapeo de columnas. Descárgala, llénala y súbela: verás la vista previa con errores por fila antes de confirmar.</p>
+    <p>
+      <a class="button ghost" href="/api/comercio/plantilla/configuracion">Descargar CONFIGURACION_DEL_NEGOCIO.xlsx</a>
+      <a class="button ghost" href="/api/comercio/plantilla/inventario">Descargar ACTUALIZAR_INVENTARIO.xlsx</a>
+    </p>
+    <div id="c02-config-zone"></div>
     {% endif %}
   </div>
 
@@ -70,6 +80,8 @@
         </select></label>
         <label>Precio<small>Moneda de contado opcional</small>
           <input type="number" step="0.01" name="price" id="c02-f-price"></label>
+        <label>Precio a domicilio<small>Vacío = igual al local</small>
+          <input type="number" step="0.01" name="price_domicilio" id="c02-f-price-dom"></label>
         <label>Moneda<input name="currency" id="c02-f-currency" maxlength="3" placeholder="USD"></label>
         <label>Unidades disponibles<small>Lo que queda; vacío o «sin stock» = no aplica</small><input type="number" name="stock" id="c02-f-stock"></label>
         <label>Duración<small>Minutos, para la agenda</small>
@@ -78,6 +90,30 @@
         <label>Vigencia hasta<input type="date" name="valid_until" id="c02-f-valid-until"></label>
       </div>
       <label>Detalle (visible para el paciente)<textarea name="details" id="c02-f-details" rows="3"></textarea></label>
+      <div id="c02-bloque-producto" class="form-grid">
+        <p class="muted" style="grid-column:1/-1;margin:0"><strong>Datos de producto</strong> — el bot los usa para responder color, presentación, alérgenos y advertencias. Si un campo queda vacío, el bot dice que no lo tiene confirmado.</p>
+        <label>Marca<input name="brand" id="c02-f-brand" maxlength="200" placeholder="Oral-B"></label>
+        <label>Presentación<small>Contenido o unidad: «tubo 90 g», «1 unidad»</small>
+          <input name="presentation" id="c02-f-presentation" maxlength="200" placeholder="1 unidad"></label>
+        <label style="grid-column:1/-1">Colores y atributos<small>Un dato por línea, formato «atributo: valor» (color: rojo, dureza: suave). El bot responde solo con lo que esté aquí.</small>
+          <textarea name="attributes" id="c02-f-attributes" rows="3" minlength="0" maxlength="2000" placeholder="color: rojo&#10;dureza: suave&#10;tamaño: adulto" spellcheck="false"></textarea></label>
+        <label style="grid-column:1/-1">Alérgenos e ingredientes a declarar<small>Uno por línea. El bot lo dice como «Contiene: …». Nunca se deduce de las observaciones.</small>
+          <textarea name="allergens" id="c02-f-allergens" rows="2" maxlength="2000" placeholder="flúor&#10;sorbitol" spellcheck="true" lang="es"></textarea></label>
+        <label style="grid-column:1/-1">Advertencias de uso<small>Público: edad mínima, no tragar, etc.</small>
+          <textarea name="warnings" id="c02-f-warnings" rows="2" maxlength="2000" placeholder="No apto para menores de 6 años" spellcheck="true" lang="es"></textarea></label>
+        <label style="grid-column:1/-1">Nombres de venta / sinónimos<small>Uno por línea: así lo pide el cliente aunque no coincida con el nombre de la ficha.</small>
+          <textarea name="aliases" id="c02-f-aliases" rows="2" maxlength="2000" placeholder="cepillo de cerdas blandas&#10;cepillo de viaje" spellcheck="true" lang="es"></textarea></label>
+      </div>
+      <div id="c02-bloque-tratamiento" class="form-grid">
+        <p class="muted" style="grid-column:1/-1;margin:0"><strong>Datos de tratamiento</strong> — sesiones, preparación y cuidados posteriores que el paciente pregunta por chat.</p>
+        <label>Número de sesiones<small>Vacío = no se informa</small>
+          <input type="number" min="1" name="sessions" id="c02-f-sessions"></label>
+        <label class="check" style="align-self:end"><input type="checkbox" name="requires_evaluation" id="c02-f-requires-evaluation">Requiere valoración previa</label>
+        <label style="grid-column:1/-1">Preparación antes de la cita<small>Público</small>
+          <textarea name="prep_notes" id="c02-f-prep-notes" rows="2" maxlength="2000" placeholder="Venir sin maquillaje; avisar si toma anticoagulantes" spellcheck="true" lang="es"></textarea></label>
+        <label style="grid-column:1/-1">Cuidados después del tratamiento<small>Público</small>
+          <textarea name="aftercare_notes" id="c02-f-aftercare-notes" rows="2" maxlength="2000" placeholder="No comer 2 horas; evitar café 24 h" spellcheck="true" lang="es"></textarea></label>
+      </div>
       <label>Observaciones para el cliente<small>Promociones, condiciones, «solo clientes nuevos»…</small><textarea name="public_notes" id="c02-f-public-notes" rows="3" placeholder="Promoción blanqueamiento + limpieza · válida diciembre · solo clientes nuevos hasta agotar" spellcheck="true" lang="es"></textarea></label>
       {% if user.role=='admin' %}
       <label>Observaciones internas<small>Sólo el equipo ve estas notas; nunca las envía el bot.</small>
@@ -91,6 +127,7 @@
       <div class="dialog-actions">
         <button type="button" class="button ghost detail-cancel">Cancelar</button>
         <button type="submit" class="button">Guardar</button>
+        <button type="button" class="button" id="c02-detail-save-publish">Guardar y publicar</button>
       </div>
     </form>
   </dialog>

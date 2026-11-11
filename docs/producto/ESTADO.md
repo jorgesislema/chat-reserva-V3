@@ -1,3 +1,616 @@
+## 2026-11-10 (tarde, corrección) — Fuera «Valoración»: consulta genérica y doctora pedida
+
+Corrección pedida por el propietario sobre la entrega anterior: quitar la
+«Valoración» del bot, preguntar la primera vez cuando el número no está en el
+historial y, si el cliente nombra a una doctora, buscar SU hueco; si no lo
+tiene, asignar a quien coincida con la petición.
+
+Cambios en `crm/canal.py`:
+- **Ninguna mención a «Valoración»** en las respuestas: la pregunta de primera
+  vez ya no dice «lo usual es empezar con una valoración»; el precio ya no
+  dice «se confirma con la valoración médica» (ahora «en la consulta»); y no
+  se ofrece el servicio de valoración por iniciativa propia.
+- **Sin tratamiento nombrado y con día/hora ya anotados** → se reserva una
+  **CONSULTA genérica de 30 min** (título «Consulta»), sin inventar servicio ni
+  hacer otra pregunta. Sin día/hora, se pregunta qué tratamiento necesita.
+- **Número desconocido** → pregunta «¿Es su primera vez en la clínica o ya se
+  ha atendido con nosotros?» antes de avanzar (si ya dijo día/hora, se
+  conservan). Si nombra a una doctora, no se le interrumpe: se busca su hueco.
+- **Doctora nombrada**: manda sobre la del catálogo; si no tiene hueco a esa
+  hora, se ofrece otro profesional con hueco real («Con el Dr. Luis no tengo
+  nada a esa hora, pero tengo libre … con la Dra. Ana»).
+- `crm/dialogo_estados.py`: clave `consulta_generica` clasificada.
+
+Pruebas actualizadas de forma deliberada (la política anterior queda sustituida):
+`test_duracion_procede_del_servicio_seleccionado`,
+`test_seleccion_ambigua_inexistente_o_ajena_no_muta`,
+`test_paciente_recurrente_reserva_consulta_sin_valoracion`,
+`test_primera_vez_reserva_consulta_sin_mencionar_valoracion`,
+`test_sin_valoracion_en_catalogo_la_consulta_sigue_siendo_consulta`,
+`test_propuesta_cambia_a_tratamiento_nombrado`, los textos de primera vez y
+los flujos de `test_c02_conversacion.py` y `test_bot_eval_01.py`.
+
+Comprobado sobre una copia de `demo_comercial.db`:
+- número conocido → «Veo que se atiende con la Dra. Ana Torres. Uy, a las 10:00
+  del viernes 13 ya está ocupado. Tengo libre a las 13:00 para Consulta. ¿Se lo
+  reservo?»;
+- número nuevo → «¿Es su primera vez en la clínica o ya se ha atendido con
+  nosotros?»;
+- «quiero una cita con el doctor Luis el viernes a las 10:00» → «Con el Dr.
+  Luis Mendoza no tengo nada a esa hora, pero tengo libre el viernes 13 a las
+  13:00 para Consulta con la Dra. Ana Torres. ¿Se lo reservo?»
+
+Defecto conocido y **preexistente** (no introducido aquí, anotado para la
+siguiente pasada): preguntar el **precio** en mitad de una reserva se responde
+desde el conocimiento («No tengo esa información…») en vez del importe, aunque
+`_precio_y_sigue` devuelve «Cuesta USD 45…» cuando se le llama directamente;
+el hilo no se pierde (la cita se puede cerrar después).
+
+Pruebas reales (PowerShell, .venv-op, `--basetemp` local, sin red):
+batería `test_c02_seleccion_cita + test_bot_eval_01 + test_canal_atencion +
+test_comercio_ventas + test_c02_chat + test_c02_frontend +
+test_c02_config_funcional + test_c02_simulador_vector + test_dialogo_estados +
+test_aceptacion_cliente_conocido + test_simulador_numero_prueba +
+test_seed_demo_historial + test_c02_conversacion +
+test_c02_horarios_profesional + test_c02_simulador_paridad` → **206 passed,
+0 failed, 8 warnings** en 750,37 s (`.tmp-final3-1110`). Ruff 0.8.6 sobre los
+archivos nuevos: OK; `crm/canal.py` conserva los avisos preexistentes
+(F401/F821/E701/F841), ninguno nuevo. Después de esa batería se retiró la
+función ya sin uso `_servicio_valoracion`; `py_compile` OK y las 32 pruebas
+afectadas (`test_dialogo_estados` + aceptación) verdes.
+
+## 2026-11-10 (tarde) — Profesional que solo propone, número de prueba y datos demo (ENTREGA)
+
+Ejecuta el plan acordado esta mañana y cierra el bloqueo de decisiones.
+Respuestas del propietario: (a) el campo «Profesional» del catálogo SOLO
+PROPONE; si el cliente pide otra doctora del equipo se respeta; (b) cualquier
+doctora puede atender el control. Ambas quedan en código, no sólo anotadas.
+
+Código:
+- `crm/canal.py`
+  · la doctora nombrada EN el turno manda sobre la que quedó fijada antes: el
+    caso «ya me ofreció a la Dra. Ana y pido a la Sofía» responde con Sofía y
+    conserva día y hora (antes repetía «Te atenderá Dra. Ana» y volvía a pedir
+    el día);
+  · `_profesionales_activos` toma de la base nombres y estado, conserva el orden
+    del contexto (el «2» de la lista sigue siendo la misma persona) y añade al
+    final a quien sólo exista en la base;
+  · `_historial_paciente` + nota «Veo que se atiende con la Dra. X.» una sola
+    vez, y la propuesta sale del calendario de esa doctora; un número sin
+    historial nunca recibe esa frase;
+  · la pregunta de primera vez mira el estado del turno: un paciente conocido
+    ya no la recibe;
+  · una alternativa única («tengo libre a las 13:00, ¿se lo reservo?») se
+    propone y se reserva con el «sí»; antes preguntaba «¿cuál le viene mejor?»
+    y soltaba la hora;
+  · se retira el rechazo de escritura por servicio→profesional (SEL-01): la
+    asignación del catálogo es una sugerencia, nunca un bloqueo.
+- `crm/app.py` + `crm/templates/simulador.html` +
+  `crm/static/crm_c02_simulador.js` + `crm/static/crm.css`: campo «Número de
+  prueba» (6-15 dígitos; se limpian espacios, guiones, paréntesis y «+»). Fija
+  el teléfono de la conversación en la copia, viaja en cada turno y la pantalla
+  muestra el número activo. Un valor inválido responde 400 `telefono_invalido`
+  sin crear la copia.
+- `scripts/seed_demo_historial.py` (nuevo): 5 pacientes ficticios con 2-3 citas
+  pasadas en los últimos 3 meses y ~2 futuras cada uno; relleno de la agenda
+  dejando exactamente 3 huecos por día laborable (15 días), sábado sin citas y
+  sólo por la mañana, sin pisar 13:00-14:00 ni salir de 09:00-17:00. Reutiliza
+  las doctoras de la instalación (no crea un equipo paralelo), es repetible y
+  `--limpiar` borra sólo `origin='demo-historial'`.
+- `crm/dialogo_estados.py`: clave `nota_conocido` clasificada (la prueba de
+  cobertura de estados lo exige).
+
+Pruebas nuevas:
+- `tests/test_aceptacion_cliente_conocido.py` (4): número conocido → su doctora;
+  número nuevo → primera vez sin suponer historial; doctora pedida por nombre →
+  manda y conserva día/hora; día lleno → no inventa hueco.
+- `tests/test_simulador_numero_prueba.py` (4): el número llega al canal y a la
+  arena, se conserva entre turnos, sin número se usa el del operador y un valor
+  inválido se rechaza.
+- `tests/test_seed_demo_historial.py` (4): 5 pacientes con 2-3 citas pasadas,
+  3 huecos por día laborable, sábado sin citas y repetible.
+- SEL-01 se actualizó de forma deliberada a la política nueva:
+  `test_sel01_servicio_asignado_a_otra_doctora_no_bloquea_la_elegida`.
+
+Datos demo: respaldo previo en
+`backups/demo_comercial-antes-historial-20261110-161810.db` y siembra sobre
+`demo_comercial.db`: 5 pacientes, 12 citas pasadas y 449 citas futuras, con 3
+huecos por día del 11-11 al 1-12. Conversación comprobada sobre una copia:
+«Veo que se atiende con la Dra. Ana Torres…», viernes 13 a las 10:00 ocupado →
+oferta real de las 13:00 → cita creada con la Dra. Ana Torres.
+
+Pruebas reales (PowerShell, .venv-op, `--basetemp` local, sin red): batería
+`test_c02_seleccion_cita + test_bot_eval_01 + test_canal_atencion +
+test_comercio_ventas + test_c02_chat + test_c02_frontend +
+test_c02_config_funcional + test_c02_simulador_vector + test_dialogo_estados +
+test_aceptacion_cliente_conocido + test_simulador_numero_prueba +
+test_seed_demo_historial` → **188 passed, 0 failed, 8 warnings** en 696,71 s
+(`.tmp-verif-1110`). Línea base de `test_c02_seleccion_cita` antes de tocar
+nada: 32 passed / 1 failed (SEL-01), igual que el estado anotado esta mañana.
+Ruff 0.8.6 sobre los archivos nuevos: OK. `crm/canal.py` y `crm/app.py`
+conservan avisos preexistentes (E402/F401/E701/F841/F821), ninguno en el código
+nuevo.
+
+Pendiente: el propietario debe reiniciar el panel (`run_crm.py`) y pulsar
+«Nueva conversación» en el simulador para que la copia tome los datos
+sembrados; la batería `tono_v2` no se re-ejecutó en esta entrega; sin commit,
+push, envíos ni despliegue.
+
+## 2026-11-10 — Acuerdo: números de prueba en el simulador y datos demo
+
+Autorizado por el propietario: añadir al simulador números de prueba, alterar
+los datos actuales (son ficticios) y cargar pacientes con citas pasadas y
+futuras para probar el reconocimiento de historial. Regla adicional: si el
+cliente escribe desde OTRO número, el bot debe preguntar si es su primera vez;
+nunca suponer que ya se atendió.
+
+Plan acordado (ejecutado en la entrada superior del mismo día):
+1. Dejar la suite en verde (hoy 32 passed / 1 failed en test_c02_seleccion_cita).
+2. Campo «número de prueba» al iniciar conversación en el simulador, para poder
+   probar cliente conocido y cliente nuevo con el mismo código.
+3. Base demo: 4-6 pacientes sintéticos con 2-3 citas pasadas repartidas en 3
+   meses y citas futuras, dejando 2-3 huecos libres por día de lunes a viernes y
+   sábado sólo por la mañana, respetando jornada y almuerzo.
+4. Conversación de aceptación como prueba automática: número conocido → «veo
+   que se atiende con la Dra. X»; número nuevo → pregunta si es la primera vez;
+   día lleno → alternativas reales.
+
+Bloqueos de decisión sin resolver: si el campo Profesional del catálogo
+restringe o sólo propone por defecto, y si un tratamiento pertenece a un doctor
+concreto o cualquier doctor puede atender el control.
+
+## 2026-11-10 — Reversión de cambios de texto y estado actual del canal
+
+Se revirtieron dos cambios que rompían pruebas existentes del flujo de reserva:
+la propuesta sin el nombre del servicio (8 pruebas de test_c02_seleccion_cita
+exigían «para Valoración») y el permiso para reservar con una doctora distinta a
+la asignada al servicio (rompía SEL-01). Estado verificado tras la reversión:
+test_c02_seleccion_cita 32 passed, 1 failed
+(test_sel01_reasignacion_servicio_en_pre_escritura, afectada por los cambios de
+lista de profesionales de esta sesión).
+
+Siguen SIN resolver los fallos reportados: al decir «sí» se rechaza a la Dra.
+Sofía Rivera porque el servicio tiene asignada a la Dra. Ana; se vuelve a
+preguntar si es la primera vez; y se pierde día/hora al cambiar de doctora.
+
+Decisión pendiente: para decir «sin Valoración» hay que actualizar 8 pruebas de
+forma deliberada (no se dejan en rojo), y para permitir la doctora nombrada hay
+que rediseñar la validación servicio→profesional (hoy SEL-01) en vez de
+sortearla. Ambas cosas requieren una pasada acotada con la conversación del
+propietario como prueba de aceptación.
+
+## 2026-11-10 — Venta a domicilio: no se pregunta la zona
+
+Pedido del propietario: que no pregunte por la zona, sólo la dirección con un
+punto de referencia, cédula, nombre y teléfono.
+
+Cambio en crm/canal.py (_dialogo_compra): la pregunta de zona sólo aparece si el
+negocio tiene zonas de reparto con tarifa configuradas. Sin zonas se pide
+directamente la dirección con referencia y se cotiza con el precio a domicilio
+de la ficha. Los datos de compra siguen siendo nombre, cédula, teléfono y
+dirección (más referencia).
+
+Pruebas: test_comercio_ventas 11 passed + test_direccion_no_se_toma_como_cantidad
+= 12 passed (incluye retiro, domicilio con zona y datos de entrega);
+py_compile OK.
+
+Pendiente: confirmar con una sonda sin zonas que el turno posterior a la
+dirección cotiza directo (sin preguntar zona) y que el pedido se registra.
+
+## 2026-11-10 — Plantilla de Excel sin zonas: sólo precio local y a domicilio
+
+Pedido del propietario: en lo de zonas, poner sólo lo que ya está en el
+catálogo (costo de venta en el local y a domicilio).
+
+Cambio en crm/comercio_excel.py: la hoja ENTREGAS de
+`plantilla_configuracion()` queda sólo con cabeceras; ya no crea `NORTE` (USD 5)
+ni `SUR`. Importar la plantilla no inventa tarifas que nadie configuró.
+Prueba: tests/test_comercio_excel.py 8 passed (se ajustó la expectativa: antes
+exigía NORTE == 500; ahora exige que no se cree ninguna zona).
+
+Pendiente: el flujo de venta del canal todavía pregunta «¿en qué zona queda esa
+dirección?» y cotiza con zona. Debe cotizar con el precio a domicilio de la
+ficha y no preguntar zona cuando no hay zonas configuradas.
+
+## 2026-11-10 — Reconocer la doctora real del negocio (Dra. Sofía Rivera)
+
+Reporte del propietario: «no reconoce a Dra. Sofía Rivera (General)» y, tras
+proponer un hueco, asignaba a la Dra. Ana. Causas encontradas en crm/canal.py:
+(1) `_extract_professional` y `_profesional_desconocido` comparaban con tildes,
+así que «sofia» no encontraba «Sofía»; (2) usaban sólo la lista de profesionales
+del contexto, que puede venir vieja o incompleta, en vez de la base; (3) los
+candidatos se filtraban por el profesional asignado al servicio, de modo que una
+segunda doctora quedaba descartada aunque el cliente la pidiera.
+
+Cambios: normalización sin tildes (`_sin_acentos`), unión del contexto con la
+base (la base manda) en `_profesional_desconocido` y en `_run_dialog`, y
+`compatibles` incluye a todos los activos cuando el cliente nombra a alguien.
+
+Verificado: la prueba nueva de Sofía Rivera ya no la declara desconocida (antes
+respondía «No tengo a la doctora Sofia»). **Sigue fallando** el caso completo:
+tras una propuesta que ya fijó a la Dra. Ana, el mensaje «a mi me atiende la
+doctora sofia rivera» responde «Te atenderá Dra. Ana» y vuelve a pedir el día.
+No se da por resuelto. Prueba: tests/test_bot_eval_01.py
+`test_doctora_nombrada_gana_al_profesional_del_servicio` (roja, documentada).
+
+Siguiente paso concreto: al recibir un nombre de profesional, sobrescribir
+`pending.profesional_nombre`/`profesional_id` antes de pedir día/hora, y no
+conservar el profesional fijado por una propuesta anterior.
+
+## 2026-11-10 — Sin tarifas de zona inventadas en la respuesta de entrega
+
+Reporte del propietario: «Sí, hacemos entregas a domicilio. Zona norte: USD 5;
+Zona sur: tarifa a confirmar». Él sólo carga precio de local y precio a
+domicilio en el catálogo; esas zonas vienen de la plantilla de ejemplo del
+importador comercial, no de su configuración.
+
+Cambio en crm/chat_adapter.py (bloque 1d3): la respuesta de entrega ya no
+enumera tarifas por zona. Si el artículo del hilo tiene precio a domicilio en la
+ficha, responde ese precio junto al de retiro; si no lo tiene, dice que el costo
+del envío depende de la zona y lo confirma el equipo. Nunca inventa una tarifa.
+
+Pruebas: test_c02_chat + test_comercio_ventas + test_canal_atencion 36 passed.
+La prueba test_chat_atributo_y_domicilio_desde_ficha_y_zonas se ajustó a la
+decisión del negocio: antes exigía «Zona norte: USD 5» y ahora exige que esa
+tarifa NO aparezca y que se afirme la entrega.
+
+Pendiente: las zonas de ejemplo siguen en la base si se importó la plantilla;
+borrarlas es una operación de datos que requiere confirmación del propietario.
+Y sigue pendiente conservar día/hora al cambiar de doctora y la pregunta «¿ya
+se ha atendido antes?» sin mencionar «Valoración».
+
+## 2026-11-10 — Doctor pedido que no está en la lista + propuesta sin «Valoración»
+
+Reporte del propietario: el bot seguía ofreciendo a una sola doctora que no
+está en Negocio y horarios, proponía «Valoración» como si fuera un costo aparte
+y no preguntaba si el paciente ya se había atendido. Sonda reproducible:
+docs/producto/entregas/BOT-EVAL-01/EVIDENCIAS/sonda_doctor_desconocido.py.
+
+Causa encontrada del nombre viejo: el simulador trabaja sobre una COPIA de la
+base (`_arena_simulador`) y sólo se invalidaba al publicar catálogo o
+conocimiento. Editar profesionales o Negocio y horarios NO invalidaba la copia,
+así que el simulador seguía con los doctores anteriores. Ahora también se
+invalida al guardar profesionales (`/professionals`) y al cambiar
+negocio_especialistas, negocio_horarios, negocio_almuerzos, negocio_excepciones
+o negocio_nombre.
+
+Blindaje en crm/canal.py: `_respuesta_disponibilidad` no puede proponer a otra
+persona si el mensaje nombra a una doctora; si no está en el equipo activo
+responde con su nombre, la lista real y una salida (equipo u otra profesional),
+guardando el día/hora ya dicho. Y la propuesta de hueco ya no nombra el servicio
+por defecto si el cliente no lo pidió (antes «para Valoración»).
+
+Verificado con la sonda: «buenas tarde tiene turno par el dia lunes alas 12:
+con la doctora sofia» → «No tengo a la doctora Sofia en el equipo activo.
+Atienden Dr. Luis, Dra. Ana, Dra. Marta…» (ya no propone a Ana), y «tiene turno
+para el jueves a las 9» → «Tengo libre el jueves 10 de enero a las 09:00 con la
+Dra. Marta. ¿Te lo reservo?» (sin «Valoración»).
+
+Pruebas: tests/test_bot_eval_01.py 49 passed (2 nuevas: no ofrecer otra doctora
+al nombrarla, propuesta sin «Valoración»); test_c02_config_funcional +
+test_business_profile + test_c02_frontend 39 passed; py_compile OK.
+
+Pendiente y NO resuelto: en la sonda, tras «con la doctora marta» el bot vuelve
+a pedir el día («¿Qué día te viene bien?») en vez de retomar el lunes 12:00,
+aunque la reserva con Marta y el pedido de venta siguen funcionando en el resto
+del recorrido. Falta también reponer la pregunta «¿ya se ha atendido antes?»
+cuando el cliente da doctor + día/hora, y decidir el texto de esa orientación
+sin mencionar «Valoración». El propietario debe reiniciar el servidor y abrir
+«Nueva conversación» en el simulador para ver los cambios.
+
+## 2026-11-10 — Máquina de estados explícita del diálogo (paso 1)
+
+Pedido del propietario: probar el paso 1 de la propuesta sobre LangGraph, es
+decir, poner el grafo del diálogo por escrito antes de añadir dependencias.
+Documento: docs/producto/DIALOGO_ESTADOS.md. Módulo nuevo:
+crm/dialogo_estados.py; pruebas: tests/test_dialogo_estados.py.
+
+Implementado: 21 estados, 15 eventos y 51 transiciones declaradas que cubren
+reserva, cancelación, reprogramación y venta; `estado_desde_pending()` traduce
+el `pending` real (38 claves) a su estado; toda respuesta del canal lleva ahora
+la clave `estado`, calculada del mismo pending que se persiste; y una prueba de
+cobertura compara las claves que usa crm/canal.py con la tabla, de modo que una
+clave nueva sin clasificar hace fallar la prueba. No se añadió ninguna
+dependencia (ni LangGraph ni LangChain) y el bot responde igual: la sonda
+multiturno devuelve el mismo guion que antes.
+
+Pruebas reales (PowerShell, .venv-op, --basetemp local, sin red):
+tests/test_dialogo_estados.py 28 passed; con test_bot_eval_01.py 75 passed
+(187,88 s); test_canal_atencion + test_c02_seleccion_cita 39 passed (212,26 s).
+
+Pendiente: conectar las transiciones una a una para que `_run_dialog` consulte
+la tabla antes de responder y se puedan borrar ramas duplicadas sin cambiar el
+comportamiento; y seguir sin LangGraph hasta que haya presupuesto de modelo real
+(la respuesta al propietario quedó en DIALOGO_ESTADOS.md §«Siguiente paso»).
+
+## 2026-11-10 — Catálogo: columnas de detalle editables desde el panel (entrega 1)
+
+Pedido del propietario: implementar la propuesta de columnas y que **cualquier
+dato del producto o tratamiento se pueda cambiar desde el frontend**, con
+textos de al menos 80 caracteres y secciones separadas por tipo. Diseño e
+detalle: docs/producto/CATALOGO_COLUMNAS_BOT.md §8.
+
+Implementado: migración 31 en crm/store.py (aliases, brand, presentation,
+attributes_json, allergens, warnings, sessions, prep_notes, aftercare_notes,
+requires_evaluation; aditiva e idempotente); catalog_update acepta los campos
+con su validación y una revisión nueva en el historial (attributes_json exige
+objeto JSON; listas multilínea con _clean_multilinea); el diálogo del catálogo
+tiene bloque «Datos de producto» y bloque «Datos de tratamiento», visibles
+según el tipo, con guardado por los botones existentes («Guardar» y «Guardar y
+publicar»); el bot presenta marca, presentación, atributos («Color: rojo»),
+alérgenos («Contiene: flúor»), advertencias y datos de tratamiento, y la
+búsqueda usa sinónimos y atributos además de nombre y detalle. Los alérgenos
+solo se afirman desde su propio campo.
+
+Pruebas reales (PowerShell, .venv-op, --basetemp local, sin red):
+tests/test_catalogo_detalle.py 7 passed; tests/test_c02_frontend.py 11 passed;
+test_c02_chat + test_catalogo_detalle + test_canal_atencion +
+test_comercio_ventas 43 passed; test_bot_eval_01 + test_c02_frontend +
+test_c02_seleccion_cita 91 passed; py_compile de store/c02_services/
+chat_adapter/canal OK; git diff --check OK. Sonda multiturno con la ficha nueva:
+el bot respondió al sinónimo «cepillo de cerdas blandas» con «Presentación: 1
+unidad. Color: rojo; Dureza: suave. Contiene: flúor. Importante: No apto para
+menores de 6 años», y la reserva y el pedido siguieron creándose igual
+(cita con la Dra. Marta, pedido USD 10).
+
+Pendiente: variantes con stock y precio por color (tabla crm_catalog_variants,
+entrega 2); llevar las columnas nuevas al importador de Excel y a los filtros
+de la tabla; elegir la variante al cotizar; y decidir si el nombre/teléfono se
+pide antes de crear la cita. Batería tono_v2 no re-ejecutada en esta entrega.
+
+## 2026-11-10 — Multiturno: doctor pedido, catálogo en medio de una reserva y venta completa
+Solicitud del propietario (conversación real del 6-11 por la noche): el bot
+preguntaba «¿Ya se ha hecho atender?» aunque el cliente ya daba día y hora,
+asignaba a la Dra. Ana cuando pedía a la Dra. Sofía, repetía «¿le dejo con la
+Dra. Ana?» ante una pregunta de catálogo y no cerraba el ciclo de venta
+(domicilio, envío, datos, pedido). Evidencia reproducible:
+docs/producto/entregas/BOT-EVAL-01/EVIDENCIAS/sonda_multiturno.py →
+multiturno_2026-11-10.json (12 turnos, base sintética, sin red).
+
+Causas y cambios en crm/canal.py: (1) la pregunta de primera vez ya no se
+dispara cuando el mensaje pide disponibilidad con día/hora («¿tiene un turno
+para el jueves a las 4 pm?»); (2) pedir una doctora que no está en el equipo
+responde con su nombre y conserva el hueco ya ofrecido (antes se perdía el
+jueves 16:00); (3) «con la doctora marta» ahora se reconoce por el nombre de
+pila sin exigir el título de la ficha (_claves_profesional) y re-propone el
+mismo hueco; (4) una pregunta de producto durante una reserva pendiente se
+responde desde el catálogo SIN confirmar ni cancelar la cita; (5) una pregunta
+de producto con «¿tiene…?» se responde con precio local/domicilio, color,
+detalles y observaciones publicadas en vez de entrar a pedir cantidad; (6) tras
+una consulta de catálogo, «sí, a domicilio» continúa la venta del mismo
+artículo; (7) la tarifa de envío se responde antes de pedir la dirección;
+(8) «calle 5 casa 12» ya no se interpreta como 5 unidades; (9) los datos
+adelantados sin decir «sí» se guardan y se pide solo la confirmación;
+(10) el cierre de cita usa el trato correcto («Tu cita… ¡Que tengas un buen
+día!») y capitaliza el nombre del paciente. También se corrigió la falta
+frecuente «sepillo/sepillos/suabes» (antes no encontraba el producto).
+
+Pruebas reales (PowerShell, .venv-op, --basetemp local, sin red):
+tests/test_bot_eval_01.py 47 passed; tests/test_c02_seleccion_cita.py 33 passed;
+test_bot_eval_01 + test_c02_seleccion_cita + test_c02_canal +
+test_c02_agenda_y_ficha + test_c02_atencion 116 passed (465,75 s);
+tests/test_comercio_ventas.py + tests/test_canal_atencion.py 17 passed;
+py_compile crm/canal.py OK. Sonda multiturno: cita creada con la Dra. Marta
+(2030-01-10 16:00, America/Caracas, profesional_id 3) y pedido PED-… en
+estado «coordinacion» por USD 10 (1 cepillo a domicilio + envío Centro USD 2);
+después del pedido la conversación queda en manos del equipo y no se envía
+mensaje duplicado. Batería tono_v2 NO re-ejecutada en esta entrega.
+
+Pendiente/decisiones del propietario: (a) pedir nombre y teléfono ANTES de
+crear la cita (hoy se crea y luego se piden; afecta pruebas y el orden que él
+escribió); (b) sin zonas de reparto cargadas el bot solo puede decir «a
+coordinar»: hay que cargar comercio_zonas con tarifas reales; (c) color/stock
+solo se responde si está escrito en «detalle»/«observaciones públicas» del
+catálogo: no hay columna de variantes; (d) falta probar con modelo real (sin
+presupuesto autorizado).
+
+## 2026-11-10 — Propuesta de columnas del catálogo (sin implementar)
+
+Pedido del propietario: el color está en «detalle» y los alérgenos o nombres de
+venta en «observaciones»; analizar cómo deben ser las columnas para que el bot
+tenga todos los detalles. Documento: docs/producto/CATALOGO_COLUMNAS_BOT.md.
+
+Verificado en el código: `crm_catalog_items` solo tiene details/public_notes/
+internal_notes como texto, un stock y un precio (más price_domicilio_cents); la
+búsqueda usa nombre+detalle; los sinónimos son 5 frases fijas en
+c02_services.py; las variantes con stock y precio propio no existen.
+Propuesta en tres niveles: (1) columnas públicas estructuradas (aliases,
+allergens, warnings, presentation, attributes_json; y para tratamientos
+sessions, prep_notes, aftercare_notes, requires_evaluation), (2) tabla
+crm_catalog_variants con sku/atributos/precio/stock por color, (3) interno
+(introducir nada nuevo: internal_notes ya existe y el bot lo excluye).
+Incluye ejemplo del cepillo, cambios por archivo y orden de entrega.
+
+Sin cambios de código, sin migración y sin pruebas: es solo diseño para
+revisión. Batería y pruebas actuales siguen en el estado de la entrada anterior.
+
+
+## 2026-11-09 — Horarios y almuerzos por profesional en el simulador
+
+Solicitud del propietario: comprobar si el bot responde con la jornada y el
+almuerzo de cada doctor, y si al pedir cita revisa el hueco real sin respuestas
+torpes. Informe: docs/producto/SIMULADOR_HORARIOS_2026-11-09.md; evidencia:
+docs/producto/entregas/BOT-EVAL-01/EVIDENCIAS/horarios_2026-11-09.json.
+
+Verificado con tres profesionales de jornadas y almuerzos distintos (Dra. Ana
+lun-mié 09-13, almuerzo 11-12; Dr. Luis jue-vie 14-19, almuerzo 16-17; Dra.
+Marta lun-vie 09-18, almuerzo 13-14). Antes: «¿Ya se ha hecho atender?» antes
+de mirar la agenda, horario del negocio en vez del doctor, y lista con doctores
+que no trabajaban ese día. Ahora: propone la hora libre del doctor, explica su
+pausa de almuerzo y ofrece la hora válida, dice qué días atiende si no trabaja
+ese día, y responde el horario propio del doctor. Cambios en crm/canal.py: _extract_professional (el título «Dra.» ya no se
+toma como nombre; PRO11 asignaba a la primera doctora), _con_articulo/
+_inicio_oracion, _datos_horario_profesional,
+_resumen_horario_profesional, _horario_profesional; se omite la pregunta de
+primera vez cuando el cliente ya nombró doctor y día/hora; se filtra la lista
+sin preferencia a quienes pueden atender. No se inventan jornadas: sin
+horario_json/almuerzo cargado manda el horario del negocio.
+
+Pruebas reales: tests/test_bot_eval_01.py 41 passed (5 de horario/almuerzo);
+tests/test_c02_seleccion_cita.py 30 passed; ambos juntos 71 passed; test_c02_canal +
+test_c02_agenda_y_ficha + test_c02_atencion 38 passed. Sonda de horarios:
+6 recorridos. Batería tono_v2 re-ejecutada con este código: reglas_nov9c, 225 casos,
+215 aprobados, 4 con observaciones, 0 fallidos, 1 bloqueado, 5 omitidos,
+0 fallos críticos.
+
+Pendiente: autoasignar sin preguntar número si el negocio lo autoriza; prueba
+de hueco ocupado por OTRO cliente; cargar horarios/almuerzos por doctor en el
+panel/Excel de cada instalación. Sin commit, push, envíos ni despliegue.
+
+## 2026-11-09 — Simulador: conversaciones multiturno verificadas (BOT-EVAL-01)
+
+Solicitud del propietario: evaluar el bot del canal (sin WhatsApp) en el
+simulador y mejorar la conversación usando como guía el documento de 60
+escenarios. Informe: docs/producto/SIMULADOR_CONVERSACION_2026-11-09.md.
+
+Verificado con bases sintéticas (3 escenarios + variantes): reserva con día
+«por la mañana» y hora posterior, cancelación por día/hora («mañana a las 9»),
+cambio de hora en formato 12 h; se conserva el día, se revalida el hueco y no
+hay preguntas clínicas. Cambios: crm/canal.py (paciente captura nombre+teléfono
+en un mensaje y guarda contact_phone; cancelar selecciona por fecha/hora;
+política de llegada configurada negocio_llegada_min, por defecto 0 = sin aviso;
+«Tengo anotado» sólo cuando ya existe cita_id), crm/business_config.py (clave
+negocio_llegada_min con validación 0-120), fixture de evals (10 minutos),
+pruebas nuevas en tests/test_bot_eval_01.py. Sonda reproducible:
+EVIDENCIAS/sonda_simulador.py → EVIDENCIAS/simulador_2026-11-09.json.
+
+Pruebas reales: tests/test_bot_eval_01.py + tests/test_regresiones_auditoria.py
+52 passed (144,41 s, .venv-op, --basetemp local, sin red). Batería tono_v2
+re-ejecutada con el código del 9-11 en 4 lotes + combinación: 225 casos,
+215 aprobados, 4 con observaciones, 0 fallidos, 1 bloqueado, 5 omitidos,
+0 fallos críticos. Evidencia: docs/producto/entregas/BOT-EVAL-01/EVIDENCIAS/
+reglas_nov9c/ y REPORTE_2026-11-09.md. No se copió
+contenido del documento de 60 escenarios sin aprobación del negocio
+(coberturas, garantías, protocolos clínicos, precios, envíos, pin de ubicación,
+recall proactivo): quedan listados como bloqueados en el informe.
+
+Pendiente: prueba dedicada de hueco ocupado por OTRO cliente; contenido
+aprobado por el negocio para los grupos bloqueados; respuesta de dos precios
+en un mismo turno. Sin commit, push, envíos ni despliegue.
+
+## 2026-11-08 — Revisión del RAG del simulador y consulta de colores
+
+Reporte: saludo + consulta de combo devuelve posoperatorio; color de cepillo
+devuelve garantía. Reproducido con bases temporales: seis pruebas fallaban
+antes del cambio. No era evidencia de falta de conexión a Internet:
+`/api/c02/simulador` fuerza `MotorSimulado` + `AdaptadorSimulado`, sobre copia
+SQLite; no usa el proveedor conversacional remoto ni su prompt público.
+
+- `crm/rag_relevancia.py`: términos temáticos compartidos; elimina saludos
+  completos (incluido «bunos dias») y verbos genéricos de la recuperación.
+- `kb_search`: permisos públicos antes del ranking/límite. Los primeros
+  documentos privados ya no desplazan una respuesta pública.
+- `_kb_pertinente`: valida cada fragmento, descarta los que no tienen ninguna
+  coincidencia temática; una fuente pertinente no valida todo el lote.
+- Canal de compras: preguntas de atributos conservan los artículos ofrecidos
+  y consultan sus fichas, sin saltar al RAG genérico ni inventar colores.
+- Inspección de solo lectura de `demo_comercial.db` y su copia compartida:
+  el combo solicitado existe en catálogo en BORRADOR; no está en los 44
+  documentos publicados. No se publicaron ni modificaron esos datos.
+- `tests/test_rag_relevancia_productos.py`: 8 passed, incluye los cuatro
+  mensajes reportados y visibilidad borrador/publicado. Comando:
+  `.venv-op/Scripts/python.exe -m pytest tests/test_rag_relevancia_productos.py
+  -q --tb=short --basetemp=.tmp-rag-final-1108`.
+- Tras ampliar palabras vacías/saludo «buen día»: 2 passed, 6 deselected
+  con `-k 'validacion or conserva' --basetemp=.tmp-rag-terms-1108`.
+- Regresiones: 76 passed, 19 advertencias de deprecación preexistentes,
+  525.98 s. Comando: `.venv-op/Scripts/python.exe -m pytest
+  tests/test_c02_canal_rag.py tests/test_c02_chat.py
+  tests/test_c02_chat_multi_turno.py tests/test_comercio_ventas.py
+  tests/test_bot_eval_01.py -q --tb=short
+  --basetemp=.tmp-rag-regression-1108`. Compilación de los cuatro módulos
+  modificados y `git diff --check` sin errores.
+
+Validación local aislada, sin red externa ni WhatsApp. Página 8052 accesible,
+pero la sesión del navegador de revisión llega al login: no se certificó
+recarga del servidor ni la conversación en la sesión abierta del propietario.
+Pendiente: reiniciar el proceso correspondiente
+para cargar código y publicar el combo desde el panel si debe ofrecerse.
+No cambiar silenciosamente el simulador a IA remota ni publicar borradores.
+Cambios preexistentes conservados; sin commit, push o despliegue.
+
+## 2026-11-06 (noche) — Datos del negocio, precios por canal, contacto y recordatorios
+
+Reporte del propietario: rubro no editable, horarios/excepciones que no se
+guardan y Jina sin probar. Diagnóstico: el rubro no existía como clave
+editable (sólo perfil de arranque) y el error «lunes» venía de la validación
+del formulario (checkbox «on» contaminaba la lectura y `step=1800` borraba
+horas no múltiplos de 30 min ante el backend).
+
+- Rubro editable (`negocio_rubro` + etiqueta, backend + panel + prueba HTTP).
+- Horarios: el formulario excluye el checkbox, acepta cualquier HH:MM y da
+  errores con el nombre del día; backend valida forma y orden con mensajes
+  con día.
+- Catálogo con dos precios: local y `price_domicilio_cents` (vacío = igual).
+  Cotización, Excel, ficha del panel y respuesta del bot los distinguen.
+- Reserva: tras el nombre se pregunta el teléfono de contacto (por defecto el
+  del chat u otro indicado) y se guarda en la cita (migración v28).
+- Recordatorios: `crm/recordatorios.py` encola 24 h antes por outbox (con nota
+  de 12 h), idempotente por cita; cancelar con <12 h deriva a humano.
+  `recordatorios_cron.py` (legado, Google + envío directo) no se usa.
+- Horarios: pausa de almuerzo por día (nueva fila en el formulario; vacía = sin
+  pausa; debe estar dentro del horario y bloquea reservas que la pisen) y por
+  profesional (ficha del equipo + sección Especialistas; rotan sin cerrar y el
+  bot no agenda en su pausa).
+- Importación: acepta la planilla comercial del cliente tal cual (Hoja1 con
+  columnas Código/Nombre/Tipo/Profesional/.../Vigencia): convierte tipos a
+  `servicio|producto`, decimales a centavos, vigencias seriales a ISO y
+  resuelve profesionales por nombre. El inventario rechaza ese archivo con
+  mensaje que redirige al flujo correcto en vez de errores crípticos.
+- Jina: `.env` no trae `JINA_API_KEY` (verificado sin imprimir secretos); no
+  hay nada que probar. Documentados base/modelo oficiales; sin integración
+  (no es conversacional y el bot no envía datos a buscadores).
+- Identidad: el bot sigue admitiendo que es asistente virtual si preguntan
+  (no finge ser humano); el tono comercial se mantiene profesional y breve.
+
+## 2026-11-06 (tarde) — Recorrido comercial demostrable (en curso, listo para revisión)
+
+Objetivo del día: recorrido completo consulta→cotización→pedido→alerta→pausa IA
+en el simulador, Excel de instalación, proveedores principal/respaldo y resumen
+con incidencias. Diagnóstico inicial en `docs/producto/DIAGNOSTICO_RECORRIDO_COMERCIAL_2026-11-06.md`.
+Sin commit/push/despliegue; sin secretos, bases reales ni servicios externos.
+Búsqueda web usada sólo para documentación oficial (Jina); no incorporada al bot.
+
+- A (cotización/pedidos, `crm/comercio.py` + migración v27): fórmula única
+  determinista en centavos, precedencia explícita, envío pendiente sin total
+  definitivo, regalo con stock, recotización ante cambios, confirmación
+  idempotente, cancelación con reversión, pago pendiente salvo acción
+  autorizada. `tests/test_comercio_cotizacion.py`: 12 passed.
+- B (venta en canal, `crm/canal.py` rama `comprar`): identifica variantes sin
+  confundirlas, cantidad, referencias («ese», «el otro», número), distingue
+  consulta de confirmación, retiro/domicilio, resumen, confirmación explícita,
+  persiste antes de afirmar, alerta `por_revision` + pausa IA, idempotencia,
+  pago contra entrega pendiente. `tests/test_comercio_ventas.py`: 10 passed.
+- C (Excel, `crm/comercio_excel.py` + endpoints): plantillas
+  CONFIGURACION/ACTUALIZAR_INVENTARIO descargables, preview/aplicar atómicos,
+  duplicados/refs/importes/fechas validados, reimportación y concurrencia
+  detectadas, celdas vacías no borran, RAG de FAQ versionado por registro.
+  `tests/test_comercio_excel.py`: 8 passed.
+- D (proveedores): «Meta» = `META_API_KEY` mapeada a OpenAI-compatible (sin
+  adaptador propio). Jina verificada en jina.ai oficial: Reader/Embeddings/
+  Reranker/Search, sin modelo conversacional → no compatible como principal;
+  documentado en `.env.example` y sin integración. `AdaptadorConRespaldo`
+  (principal+respaldo, timeouts/reintentos por adaptador, incidencia operativa,
+  sin repetir acciones). `tests/test_comercio_proveedores.py`: 3 passed.
+- E (resumen): `comercio.resumen()` (pedidos, coordinación, pago pendiente sin
+  presentar como cobrado, alertas, incidencias por categoría, sync/outbox con
+  fallo, compras sin finalizar) en panel + `tests/test_comercio_resumen.py`.
+  Dataset `docs/producto/evals/ventas_v1/` (14 casos multiturno): 14/14 en modo
+  reglas, 0 críticos.
+- BOT-EVAL-01 heredado: batería final tono_v2 con código congelado: 222 casos,
+  211 aprobados + 5 con observaciones, 0 fallidos, 1 bloqueado, 5 omitidos,
+  0 críticos (puerta superada). 5 fallidos/1 crítico de la primera vuelta
+  corregidos en código (eco de documento malicioso, detector de precio,
+  negación en cancelación, fecha en alternativas, intención `comprar` que
+  secuestraba preguntas informativas) + 2 precondiciones de dataset corregidas
+  con trazabilidad. Puerta final de regresiones: 195 passed + 4 skipped; 1
+  fallo preexistente (`hum04`). Baterías tono (225 casos: HUM16/17/SEG16,
+  stock sin conteos) y ventas relanzadas con el código final; ver EVIDENCIAS.
+  `EVIDENCIAS/reglas/RESUMEN.md` + `REPORTE.md` en la entrega.
+- Base demo: `demo_comercial.db` regenerable (`scripts/seed_demo_comercial.py --recrear`, datos ficticios; ignorada por git via `*.db`).
+- Preexistentes conservados: 3 fallos de `test_c02_canal.py` (motor simulado no
+  crea la cita; documentados en ENTREGA_CORRECCIONES_2026-11-06).
+
 ## 2026-10-30 — INSTABOX: CONFIGURACIÓN MÍNIMA AUTORIZADA Y VERIFICADA
 
 El propietario autorizó expresamente transferir sólo WHATSAPP_ACCESS_TOKEN, WHATSAPP_VERIFY_TOKEN y WHATSAPP_APP_SECRET más parámetros de prueba a su máquina chatdental-pruebas. La primera solicitud había sido rechazada por revisión automática por falta de autorización específica; no se ejecutó. Tras autorización se transfirió mediante CLI oficial un archivo temporal mínimo (eliminado localmente después), no el .env completo. No se transfirieron claves IA/Calendar ni bases reales.
@@ -19,6 +632,129 @@ El diagnóstico anterior de token expirado ya no describe el archivo actual. No 
 PRÓXIMA ACCIÓN EXACTA: continuar con el bloqueo de conexión pública ngrok y la validación del webhook. Verificar red/autorizar servicio según corresponda, sin alterar DNS/certificados ni desactivar protecciones. Reutilizar proxy y base ficticia; conservar autorizaciones expresas y no asumir nuevas. No repetir diagnóstico de token por rutina.
 
 # Estado del proyecto — C02
+
+## 2026-11-06 — Correcciones de los nueve hallazgos de la auditoría (R1–R9)
+
+Se corrigieron los hallazgos confirmados del informe `AUDITORIA_REPO_2026-11-05.md`.
+Detalle completo en `ENTREGA_CORRECCIONES_2026-11-06.md`; regresiones en
+`tests/test_regresiones_auditoria.py`.
+
+- R1: la salida humana y de sistema usa la misma marca durable de comienzo
+  (`outbox_mark_sending`) que la IA; una tarea no se reencola con el envío ya
+  iniciado y una diferida libera su marca. Una tarea = una entrega.
+- R2: memoria del chat aislada por usuario (migración v24, `owner`) y rechazo de
+  conversaciones ajenas; el endpoint resuelve el id desde la sesión.
+- R3: revisiones inmutables (`crm_kb_versions`) y puntero `published_version`
+  (migración v23); editar en borrador no retira lo publicado ni de la búsqueda
+  interna; reversión explícita disponible.
+- R4: dependencias de prueba coherentes (`pytest==9.2.0` del lock, runtime sin
+  pytest, extra de Google alineado); resolución verificada con `pip --dry-run`.
+- R5: `tests/conftest.py` aísla Temp por prueba, neutraliza `CRM_CHAT_*`/`META_*`
+  y deniega red externa salvo loopback.
+- R6: baja de profesional transaccional con `row_version`, `sync_status='pending'`
+  y `sync_origin_*` (migración v25); la sincronización crea en el destino y
+  retira del origen, con barrido para destinos locales.
+- R7: el límite de tres se valida también al reactivar, dentro de la misma
+  transacción que escribe.
+- R8: métricas con estados canónicos (`attended`/`cancelled`) sin el filtro
+  heredado `status='active'`.
+- R9: una única zona efectiva (`zona_efectiva()`) para agenda, alta, detalle,
+  resúmenes, simulador, analítica y sync; sin desplazar instantes UTC.
+
+Resultados reales de las suites, fallos preexistentes conservados y pendientes:
+ver la sección «Resultados» de `ENTREGA_CORRECCIONES_2026-11-06.md`. No se
+declaró cerrado C02 ni validado WhatsApp/Google reales.
+
+## 2026-11-06 — Prompt BOT-EVAL-01 preparado para el implementador
+
+Por solicitud del propietario se creó PROMPT_BOT_EVAL_01_CORRECCIONES_Y_CASOS.md.
+Encarga una única entrega revisable: reproducir/corregir R1–R9, exactitud monetaria,
+perfil público/interno y tono, ampliar tono_v1 a tono_v2 (mínimo 200 escenarios,
+40 multiturno), construir ejecutor compartido con servicios reales sobre datos
+ficticios y verificar acciones además de texto. Incluye criterios de aceptación,
+pruebas del propio evaluador, matriz/evidencia y mantenimiento de continuidad.
+Modo offline predeterminado. Modo modelo real preparado pero desactivado sin
+presupuesto explícito. No envíos reales, VM, secretos o bases operativas.
+Sólo se redactó el prompt: ninguna de esas correcciones se implementó en esta
+entrega y no se ejecutaron pruebas nuevas del producto. Siguiente paso: entregar
+ese archivo al agente implementador; Codex revisará código y evidencia resultantes.
+Al comprobar el estado final aparecieron modificaciones en crm/app.py,
+crm/c02_services.py, crm/egress.py y crm/store.py de trabajo concurrente/ajeno a
+esta redacción. No se tocaron ni revisaron aquí. El implementador debe leer el
+diff vigente antes de corregir para no duplicar ni revertir ese trabajo.
+
+## 2026-11-06 — Tono comercial y dataset sintético v1
+
+Solicitud: revisar naturalidad/profesionalidad de respuestas y preparar posibles
+preguntas/respuestas para probar el bot a fondo. Informe guardado en
+REVISION_TONO_COMERCIAL_2026-11-06.md y dataset en evals/tono_v1/ (CSV, JSONL,
+fixture, variantes, muestras observadas, README y VALIDACION.md).
+120 casos únicos, 20 multiturno, 156 mensajes de usuario, 11 categorías. Son
+referencias propuestas para evaluación: NO ejecutadas contra el bot ni entrenamiento.
+Se observaron siete salidas de funciones/heurística y un recorrido de cinco
+mensajes por WorkerCanal con MotorSimulado/AdaptadorSimulado, red bloqueada y
+base ficticia nueva. Precio incorrecto confirmado: price_cents=4500 se presenta
+como 4500 USD. Abstención técnica, tú/usted mezclados, menú rígido y prompt interno
+dental reutilizado en canal público afectan presentación comercial. En el recorrido
+local, petición humana produjo aviso de sistema y el siguiente mensaje no generó
+respuesta IA. No se atribuyen estas salidas a un proveedor real.
+Verificación independiente de CSV/JSONL/fixtures/Unicode/observaciones: OK, salida 0.
+No se asignó puntuación de naturalidad ni conversión. No cambios funcionales,
+llamadas a modelos, envíos, Google, datos operativos, instalaciones o VM.
+Siguiente paso: corregir exactitud/acciones de auditoría y moneda, separar perfil
+público/interno, pulir textos y conectar dataset a un ejecutor por fases. Casos
+clínicos requieren política aprobada por profesional. Respuestas naturales sin
+identidad humana falsa ni mentir si se pregunta si es un asistente virtual.
+
+## 2026-11-06 — Revisión de evaluaciones conversacionales
+
+Solicitud del propietario: viabilidad de ejecutar listas de conversaciones en el
+simulador y confirmar cobertura frente a alucinaciones. Informe guardado en
+REVISION_EVALS_2026-11-06.md. Hay pruebas de reglas/RAG/abstención y un script
+limitado de validación real del chat interno (scripts/validar_ia_real.py); este
+último no se ejecutó. El simulador actual usa motor/adaptador simulados: no
+certifica calidad del modelo remoto. El mapeo de [n] acepta referencias válidas
+sin contrastar el hecho con la fuente; prueba pura ficticia conservó USD 999
+aunque la fuente decía USD 25. No mide tasa real de alucinación.
+Subconjunto ejecutado: test_c02_canal_rag.py, test_c02_simulador_aislado.py y
+test_chat_adapter_clasificador.py, .venv-op, --basetemp local audit-evals-20261106:
+31 passed, 10 warnings en 58.16 s. Avisos deprecación XML c02_docs.py:204.
+No llamadas a proveedores ni mensajes/Google, instalaciones o cambios funcionales.
+Siguiente entrega propuesta: dataset versionado con turnos/reglas/datos/acciones,
+ejecutor aislado de reglas y modo generativo separado con presupuesto acotado,
+resultados por caso y bloqueo por fallos críticos. No implementado ni aceptado.
+Mantener abiertos los hallazgos R1–R9 de la auditoría; no certificar estándares
+altos ni ausencia de alucinaciones por aprobar este subconjunto simulado.
+
+## 2026-11-05 — Auditoría local Codex: errores confirmados
+
+Continuación solicitada por el propietario: R6–R9 añadidos al mismo informe.
+Confirmado mediante POST autenticado que dar de baja un profesional reasigna
+una cita synced sin incrementar versión ni preparar el cambio de calendario;
+la descarga simulada del destino termina cancelándola. Reactivar un cuarto
+profesional supera el límite de tres. Resumen del asistente devuelve cero para
+atendidas/canceladas por estados españoles frente a canónicos ingleses y filtro
+active. Cambio administrativo de negocio_zona afecta altas pero no la agenda:
+10:00 Madrid se guarda 09:00 UTC y el detalle muestra 04:00 Guayaquil.
+Evidencia nueva: evidencias/auditoria-20261105/repro_reservas.py, dotenv bloqueado,
+bases temporales y cuentas/eventos ficticios. Ejecución final: 4 passed en 7.20 s
+con --basetemp=.pytest_cache/audit-reservas-valid-seed-20261105. Estos tests
+comprueban los errores observados; no son aceptación ni correcciones del producto.
+Prioridad actual: R1/R2/R6/R9, luego R3/R4/R7/R8 y aislamiento R5. Siguiente paso:
+encargar correcciones acotadas con regresiones; Codex revisa, DeepSeek implementa.
+No se cambió código funcional, base operativa, secretos, servicios o VM.
+
+Informe `AUDITORIA_REPO_2026-11-05.md`; reproducción aislada en
+`docs/producto/evidencias/auditoria-20261105/repro_local.py`.
+Confirmados: salida humana sin began_at puede duplicarse tras recuperación;
+memoria de chat no aislada por usuario del mismo rol; editar borrador retira
+conocimiento publicado; dependencias pytest incompatibles. Pruebas: 100 passed/
+11 failed iniciales (Temp y HTTP loopback bloqueado); reejecución inventario/chat
+con Temp local 33 passed/1 failed por configuración IA no aislada. No sumar suites
+solapadas. Sin pruebas reales de Meta/Google, ni sesión remota, envíos o cambios
+en base operativa/secretos. Sólo documentación y evidencia de auditoría nuevas.
+Prioridad: corregir R1/R2, luego publicación y dependencias/pruebas. No declarar
+C02 cerrado. El historial de acciones remotas siguiente se conserva sin ejecutarlo.
 
 ## PANEL CRM INICIADO + URL PRIVADA PUBLICADA (2026-10-31 (30)) — ESPERANDO SESIÓN DEL PROPIETARIO PARA CANCELAR OUTBOX ID 1 Y PREFIJAR SALUDO
 
@@ -3664,3 +4400,894 @@ sesión** (punto 7). También corregidas dos pruebas que dependían del día de 
 Pruebas: nueva `tests/test_c02_simulador_aislado.py` (9 casos: adaptador por parámetro, global
 intacto, abstención segura, captura del reclamo, acuse de sistema sin plazo, copia por operador).
 Las pruebas del canal, WhatsApp real, agenda/ficha y selección se ajustaron al turno de confirmación.
+
+## 2026-11-07 — Pulido tono profesional + demo 100% (sin commit)
+
+Objetivo: bot profesional (sólo lo pedido, 1-3 frases + 1 pregunta útil), demo
+completa hasta 31/12/2026 y plantillas oficiales verificadas.
+
+Conversación como cliente (10 escenarios aislados, base demo_comercial.db
+regenerada): precio simple OK; precio+ubicación ahora responde ambas
+("Cuesta USD 45. Estamos en la Av. Principal 123."); horario sábado con semana
+completa lun–vie 09-18 + sáb 09-13; reserva con cambio ("Mejor a las 11" →
+"Anotado: viernes ... a las 11:00..."); "Sin preferencia" ahora asigna libre
+(antes se atascaba en la lista); queja leve deriva con acuse de sistema y pide
+nombre (post-reclamo ya no traga la siguiente pregunta como nombre);
+"¿Tienen parqueadero?" abstención honesta; envío informa tarifas
+("Zona norte: USD 5; Zona sur: a confirmar") antes de pedir dirección;
+despedida sobria; "¿Quién me va a atender?" lista equipo; "Me pasas con una
+persona" deriva a humano.
+
+Cambios (working tree, sin commit):
+- `crm/canal.py`: "me pasas con una persona" → humano_explícito; reclamo por
+  espera ("espere mucho/tardaron/..."); post-reclamo: si no parece dato se
+  libera el pendiente y sigue el flujo; "Anotado:" sólo cuando ya había
+  fecha/hora y cambia; "sin preferencia/me da igual/cualquiera/..." asigna
+  profesional libre; envío: si preguntan costo muestra tarifas por zona.
+- `crm/chat_adapter.py`: rama precio + anexo ubicación (une fragmentos KB por
+  doc, sólo frase de sede); `_respuesta_horario_equipo` combina horario +
+  nombres cuando preguntan por equipo ("¿Qué profesionales atienden?" →
+  horario + "Atienden: ..."); corrige NameError `_normalizar`.
+- `crm/comercio_excel.py`: plantilla HORARIOS completa (lun–vie 09-18, sáb
+  09-13, dom cerrado); plantilla PROFESIONALES añade P3 Sofía activa (P2 pasa
+  a activo); fix crear artículo perdía `duration_min` (reserva quedaba sin
+  servicio).
+- `scripts/seed_demo_completo.py`: inserta profesional si falta (Sofía) + 230
+  citas (~5/día lun–sáb hasta 31/12/2026) + 6 docs (3 públicos/3 privados).
+- `plantillas/`: regeneradas (CONFIGURACION, ACTUALIZAR_INVENTARIO,
+  PLANTILLA_CONOCIMIENTO.docx, LEEME).
+
+Pruebas reales: PRO15 verificado 1/1 tras el fix; ventas_v1 14/14; lote1
+54 aprobados + 3 con observaciones, 0 fallidos; lote4 55/56 (1 bloqueado);
+lote3 50/56 + PRO15 fallido (hecho_faltante "Dra. Ana") → corregido y
+reverificado. `tests/test_c02_canal.py` 4 fallos en puerta5 son de calendario
+(hoy sábado 07-11-2026: "mañana" = domingo cerrado), no regresión: con reloj
+fijo 2030-01-07 reserva confirma citas_creadas=1. Temporales borrados
+(_tmp_*.py). Nada commiteado.
+
+## 2026-11-07 (noche) — Puerta final: 213 ok, 1 fallo de calendario
+
+Batería `puerta-final` (20 suites): 213 passed, 4 skipped, 1 failed en
+1258 s. El fallo (`test_hum04_toma_entre_generacion_y_escritura_cerrada_por_guardia`,
+`lanzado.is_set()` False) es de calendario, no regresión: hoy sábado
+2026-11-07, "mañana" = domingo 2026-11-08 (cerrado), el primer turno no propone
+hueco y el segundo ("sí") nunca alcanza el punto de mutación `pre_escritura`.
+Misma causa que los 4 de `test_c02_canal.py` en puerta5. Con reloj fijo
+2030-01-07 (miércoles) la reserva confirma (`citas_creadas=1`) y PRO15 pasa
+1/1. Pendiente: fijar reloj en esos tests para que no dependan del día real.
+
+## 2026-11-08 — Reloj fijo en tests de canal/control humano + fix ficha
+
+Hecho: `tests/test_c02_canal.py::_seed_ctx` y
+`tests/test_c02_control_humano.py::_ctx` ahora inyectan `'hoy': '2030-01-07'`
+(lunes; "mañana" = martes abierto), igual que ya hacían
+`test_bot_eval_01.py`/`test_comercio_ventas.py`. Sin cambios de producción por
+el reloj.
+
+Bug real encontrado al fijar el reloj: `test_worker_cancelacion_confirmada`
+seguía en `pending`. Causa: la ficha post-reserva ("¿La cita es para ti?")
+secuestraba el "cancelar mi cita" (la rama `paciente` no soltaba el pendiente
+al cambiar de tema, a diferencia de la rama `contacto`). Fix en `crm/canal.py`:
+al detectar cancel/reagendar/humano en plena ficha se limpia el pendiente y se
+reclasifica con el motor.
+
+Pruebas: 4/4 objetivo en 20 s; archivos completos 22/22 en 73 s.
+
+## 2026-11-08 — Auditoría profunda código + lógica (sin cambios)
+
+Alcance: canal reservas/cancelaciones, comercio/stock/Excel, control humano,
+seguridad/RAG, tests con reloj. Método: 3 rastreos paralelos + verificación
+directa de los críticos (lectura de código, sin .env/secretos, sin datos reales).
+
+Confirmados por lectura directa:
+- `crm/canal.py:1924-1928`: `pending['intencion']` reutilizado sin pasar por
+  `motor.intencion` (sólo paciente/contacto/comprar/datos_reclamo liberan).
+- `crm/canal.py:2557-2577` + `2114-2138`: `_confirma_si` mira primera palabra;
+  "sí, quiero cancelar" autoriza el alta (cancelar no está en `_rechaza` ni
+  `_NO_AUTORIZA`).
+- `crm/c02_services.py:1354-1375`: `conversations_list(role,user_id)` ignora
+  ambos en la query (devuelve todo + pending). `conv_messages:1378` sin filtro
+  por rol; rutas `app.py:1435-1449` con `@protected()` genérico.
+- `crm/canal.py:2552-2554`: `_NO_AUTORIZA` no incluye "quiero cancelar".
+
+Resto de hallazgos (severidad del rastreo, pendientes de corrección):
+críticos: reloj no inyectado por defecto (`_extract_datetime` usa sistema),
+`ejecutar_reserva:1215` sin hoy, `<12h` con `datetime.now(utc)` real,
+combinable prometido pero no leído, `_revalidar` no ve tarifa/promo/zona,
+Excel silencia precio/stock inválido en existentes, profesional por código
+falla sin hoja PROFESIONALES, inventario sin `current_revision`,
+`_validar_hechos` con regex estrecha + permitidos globales.
+Mayores/menores: ver detalle en el informe al usuario (alternativas con
+horario fijo 8-17, TOCTOU paciente/contacto fuera de guardia, "el jueves en
+jueves → +7", "a las 5" → 17:00, reagendar sin regla 12h, motivo reclamo para
+<12h, cookie sin Secure, _anexo_ubicacion trunca a 180 y sin Fuente).
+Positivo: doble-reserva serializada (`BEGIN IMMEDIATE` + `_conflict` +
+revalidación al insertar), RAG no pisa catálogo, encubiertas no se obedecen,
+derivas pausan, avisos sin promesas, CSRF/HMAC/rate-limit correctos.
+
+## 2026-11-08 — Corrección total de auditoría (canal/comercio/seguridad)
+
+Tres bloques en paralelo + integración. Sin commit.
+
+Canal (`crm/canal.py`): pending ya no secuestra intención (reclasifica si el
+motor discrepa); "sí, quiero cancelar" en confirmar_reserva deriva a cancelar
+en vez de crear la cita; reloj inyectable (`_reloj_contexto`, `ejecutar_reserva`
+y `<12h` usan hoy/now_local con fallback a sistema; `save_appointment` ya
+aceptaba clock); reagendar con regla `<12h` (motivo operativo `por_revision`,
+ya no `reclamo`); `_alternativas` usa `_cfg_check_window` + duración real;
+paciente/contacto revalidan generación antes del UPDATE (TOCTOU cerrado);
+"jueves en jueves" = hoy; "a las 5" ya no asume 17:00; motor reconoce
+elimina/borra/mueve/cambia-horario.
+Comercio (`comercio.py`, `comercio_excel.py`, `c02_inventory.py`): docstring
+honesto "no combinable, mayor beneficio"; `_revalidar` cubre promo/zona/moneda;
+cancelar respeta `stock_na`/NULL + incidencia; `resumen(dias)` filtra por fecha;
+centavos con Decimal+regex (12.345 = error); precio/stock inválido en existente
+= error de fila; profesional por código del mismo archivo (email o código);
+vínculo auto con advertencia; vigencia cruzada con BD; actualizar conserva
+`publish_state`, crear queda en borrador; duración "30 min/0.5h/45m";
+inventario con `current_revision` + huella con mapeo.
+Seguridad/RAG (`c02_services.py`, `app.py`, `chat_adapter.py`): bandeja y
+atención filtran por rol (user solo asignadas, sin `pending`; 403 si no);
+`mark` exige admin/responsable; take/return/close/reply con 401 JSON;
+`SESSION_COOKIE_SECURE` por env (True salvo localhost) + warning si clave
+efímera; `_validar_hechos` con stocks en ambos órdenes y precios por ítem;
+disponibilidad solo con `stock_consultar` en vivo; `_anexo_ubicacion` con
+Fuente y sin cortar palabras; patrón encubierto ampliado (revela/exfiltra/
+actúa como/descuento/inglés) evaluando todos los fragmentos.
+Tests: reloj `2030-01-07` extendido a deteccion/atención/agenda/revisiones;
+`atencion_panel` en tests con `role='admin'` (comportamiento seguro nuevo);
+avisos del test de detección alineados al tono vigente; `proveedor_ia_caido`
+con mensaje neutro (el "gracias" activaba cierre). Verificación: canal 10/10,
+comercio 34/34 + inventario/resumen 21/21, control_humano+rag 20/20,
+revision+canal 35/35, agenda 7/7. Pendiente al cierre: deteccion+atencion 52/52 en 155 s.
+
+## 2026-11-08 — Endurecimiento seguridad (XXE/bomba ZIP/allowlist) + batería total
+
+- `crm/c02_docs.py`: `_xml_seguro` rechaza DOCTYPE/ENTITY (ParseError, los
+  `except` existentes siguen valiendo); `_zip_descomprimido_ok` rechaza ZIP con
+  >50 MB descomprimidos; verificado: DOCTYPE rechazado, docx/xlsx de
+  `plantillas/` siguen leyendo, bomba detectada. ET de CPython no resuelve
+  entidades externas (sin exfiltración), el riesgo era expansión interna/DoS.
+- `crm/c02_inventory.py`: `_update_fila` con allowlist explícita
+  (`name/details/public_notes/internal_notes/kind/stock/active`); otro campo =
+  ValueError. El f-string de columna deja de ser patrón frágil.
+- `pip-audit` en `.venv-op`: dependencias de la app limpias; sólo `pip 24.3.1`
+  con 12 avisos (PYSEC-2026-*, fix 26.x). No se actualiza pip aquí para no
+  tocar el entorno del propietario; recomendado `python -m pip install -U pip`.
+- Tests docs+inventario: 38/38 en 71 s.
+- Batería total (23 suites, incluye canal/detección/atención) lanzada en
+  segundo plano (`puerta-todo`); resultado pendiente al cierre de esta entrada.
+
+## 2026-11-08 — Cierre batería total 274/276 + 2 fixes
+
+Puerta-todo (23 suites, 707 s): 274 passed, 4 skipped, 2 failed. Causas:
+1. `test_cancelar_con_menos_de_12h_deriva_a_humano`: esperaba `reason='reclamo'`;
+   el cambio intencional a motivo operativo `por_revision` (no contamina
+   métricas) obligaba a actualizar el test. Hecho.
+2. `test_stock_publico_sin_jerga_de_base_de_datos`: "¿Cuántos cepillos quedan?"
+   caía a la rama de precio por el substring "cuánto" (condición puesta en el
+   pulido de tono). Fix en `crm/chat_adapter.py`: la rama de stock sólo cede
+   ante intención de importe genuina (cuesta/precio/vale/cobr/tarifa/catálogo);
+   "¿cuántos quedan?" vuelve a stock, "¿cuánto cuesta... dónde quedan?" sigue
+   en precio + anexo de sede. Verificado 3/3 + recordatorios 2/2.
+Batería final de confirmación (puerta-final2, 23 suites, 672 s): 276 passed, 4 skipped, 0 failed.
+
+## 2026-11-08 — Demo 80 filas + protocolos BPM + plantillas de documentos
+
+Aclaración: las 230 citas (5/día lun–sáb hasta 31/12) SÍ estaban en
+`demo_comercial.db` (se usa con `CRM_DATABASE=demo_comercial.db`); la base
+operativa `analitica.db` no se toca (tiene datos reales del cliente).
+Faltaban catálogo amplio y protocolos: completado.
+- `scripts/seed_demo_completo.py`: 33 servicios + 43 productos ficticios
+  publicados (80 filas: 35 servicios + 45 productos), 12 documentos extra
+  (5 públicos + 7 privados BPM: bioseguridad, esterilización, residuos,
+  atención, apertura/cierre, historia clínica, menores). Total demo: 230
+  citas, 80 filas, 19 documentos (9 públicos + 10 privados). Tras el cambio
+  de no-autopublicar, la semilla publica la base vía `catalog_publish`.
+- `plantillas/`: + `PLANTILLA_PROTOCOLO_INTERNO.docx` (Objetivo, Alcance,
+  Responsables, Procedimiento, Registros, Revisión; uso privado) y
+  `PLANTILLA_INFORMACION_PUBLICA.docx` (un tema, 5 frases, sin precios; uso
+  público). LEEME actualizado. Las 3 docx verificadas con `extraer_documento`.
+- `crm/chat_adapter.py`: "¿Tienen/Hay X?" dispara rama de stock;
+  `_kb_pertinente` descarta lote KB si sólo coincide un verbo genérico
+  ("¿tienen parqueadero?" → abstención honesta); rama 1d de sede sola
+  ("¿dónde quedan?" → sede publicada); precio con nombre exacto en pregunta →
+  respuesta única en vez de lista.
+Verificación: humo manual 8 casos OK (precio único/lista, sede, stock,
+abstención parqueadero y protocolo privado); rag+clasificador 22/22.
+Verificación posterior: bot_eval/ventas/canal 51/51 en 185 s.
+
+## 2026-11-08 — Panel demo verificable por HTTP (80/19/230)
+
+El usuario veía vacío: su servidor del puerto 8050 usa `analitica.db` (base
+operativa real) por defecto; la demo está en `demo_comercial.db` y exige
+`CRM_DATABASE=demo_comercial.db`. Verificado por HTTP contra panel demo en
+puerto 8052: login `admin@demo.local` / `demo1234` OK; `/api/c02/catalog` con
+80 filas, `/api/c02/knowledge` con 19 documentos, `/api/agenda` 200. Servidor
+demo dejado en pie en 8052 para revisión inmediata del usuario.
+
+## 2026-11-08 — Reglas del negocio del propietario (sin despliegue no pedido)
+
+- Catálogo: nunca se despliega sin que lo pidan. Reserva sin servicio →
+  pregunta el tratamiento/molestia; segunda vez sin precisarlo → deriva a
+  humano ("prefiero que lo revise el equipo..."). Lista SÓLO si pide ver la
+  oferta, SIN precios (precio sólo si lo pide para algo concreto).
+  Compra igual: pregunta el producto; variantes sólo si él nombró la familia.
+- Urgencia dental ("se rompió un diente", "hinchado y duele") → "Déjeme revisar
+  su caso con el doctor y me comunico en unos minutos..." + humano (texto del
+  propietario; `peligro_inmediato` conserva texto médico).
+- Confirmación de cita incluye "Esté 15 minutos antes para preparar su ficha".
+- Historial: si ya se atendió, la pregunta de profesional recuerda al último
+  ("La última vez lo atendió X. ¿Quiere con el mismo doctor o prefiere otro?").
+- Reclamos: el profesional se extrae y verifica contra equipo + historial
+  desde el primer mensaje; queda en `crm_claims` + nota interna para el equipo;
+  nombre fuera del equipo → se pide confirmar una vez (lista al equipo).
+- `_extract_professional` con límites de palabra (antes "a" casaba con todo).
+- Chat: rama 1b2 de oferta explícita (+`catalogo_muestra` con hint
+  servicio/producto), rama 1d de sede sola, `_kb_pertinente` anti-fuera-de-tema.
+
+## 2026-11-08 — Test de llegada alineado a regla del propietario
+
+`test_reserva_exitosa_no_inventa_politica_de_llegada` prohibía "15 minutos";
+la regla vigente del negocio lo exige en la confirmación. Renombrado a
+`test_reserva_exitosa_recuerda_llegar_15_min_antes` y afirma que aparece.
+
+## 2026-11-08 — Colisión de dos servidores en 8052 + rescate de sede en remoto
+
+Causa del "vacío": dos Flask en el mismo puerto (el demo mío + el del usuario
+sin saberlo). Las sesiones/CSRF de uno no valen en el otro: catálogo atascado
+en "Cargando..." y chat que deriva o se abstiene. Eliminado el mío; verificado
+que el del usuario sirve la demo (login admin@demo.local OK, 80 filas).
+Chat interno: verificado por HTTP que SÍ usa RAG y BD (precio con cita [1]).
+Sólo fallaba la sede en el adaptador remoto (no comparte el rescate del
+simulado): `_contexto_con_fuentes` ahora sondea
+('sede direccion ubicacion del negocio') cuando la pregunta es de ubicación y
+llega sin fragmentos; verificado en proceso (3 fragmentos de "Horarios y sede"
++ horario). Requiere reiniciar el servidor del usuario para tomar el cambio. Verificación posterior: 62/62 (bot_eval, rag, clasificador, canal).
+
+## 2026-11-08 — Catálogo "Cargando..." eterno: causas y blindaje
+
+Servidor verificado sano (80 filas por API, 10/10). Causas probables del lado
+cliente/servidor: (1) colisión de dos servidores en el 8052 con secretos
+distintos (sesión/CSRF inválida cruzada) — eliminado el mío; (2) JS o HTML
+en caché. Blindaje: `ASSET_V` (mtime de estáticos) como `?v=` en los 10
+scripts del panel; `Cache-Control: no-store` ya existía en HTML y estáticos;
+`json()` con timeout 25 s (antes colgaba infinito), error visible si hay
+redirect a login o JSON inválido; aviso visible si falta el panel con
+?tab=catalog. Requiere reiniciar el 8052 del usuario + Ctrl+F5.
+
+## 2026-11-08 — Causa real del catálogo vacío: JS roto (stateChip)
+
+El "Cargando catálogo..." eterno era un SyntaxError en `crm/static/crm_c02.js`:
+faltaba la cabecera `function stateChip(it) {` (quedó el cuerpo huérfano al
+añadir `vigenciaCell` en una entrega anterior). Con el parseo roto NO se
+ejecutaba nada del archivo: ni tabla ni mensaje de error. Verificado con
+`node --check` (fallaba línea 230; base en HEAD pasaba) y revisados los 13 JS
+del panel (sólo éste estaba roto). Restaurada la cabecera; `node --check` OK
+en los 13. El arreglo de este archivo es inmediato (se sirve de disco, sin
+reiniciar); el resto de cambios sí exige reiniciar el 8052 + Ctrl+F5.
+
+## 2026-11-08 — Columna Activo/Inactivo + fin del "Cargando" eterno
+
+El panel pedía columna explícita: añadida "Activo" (interruptor directo en la
+tabla; al cambiar guarda revisión y el bot lo ignora de inmediato si se
+desactiva). `node --check` OK en el JS. Además: timeout 25 s en `json()` (antes
+podía colgarse en silencio), aviso visible si falta el panel y versión `?v=`
+en scripts. Todo exige reiniciar el 8052 del usuario + Ctrl+F5 (plantilla y
+`ASSET_V` se fijan al arrancar).
+
+## 2026-11-08 — Chat interno: stock con typos, agenda semanal/canceladas
+
+El contexto llegaba bien con ortografía exacta; fallaba con typos y rangos.
+- `_catalog_search`: tolerancia por palabra (difflib ≥0.8, len≥5) + orden
+  exactos-antes-que-aproximados. "cuantos cepilos de dientes quedan" →
+  "Cepillo suave: stock real 10 + precio".
+- `agenda_dia`: entiende semana (actual/próxima), canceladas y
+  reprogramaciones/aplazamientos (vía `crm_appointment_history`), con días en
+  español. "cuantas citas se cancelaron la proxima semana" → lista con día,
+  hora, paciente y profesional.
+- Rama agenda en el simulado (sólo interno; público intacto) y exclusión de
+  agenda en la rama de stock (`cita/sita/cancel/reprogram/aplaz/agenda`).
+- Motor: variantes "canselar/canselaron/..." → intención cancelar.
+Verificación: directa OK (stock_bd, agenda_dia x3); suites en curso.
+
+## 2026-11-08 — Roles: doctor ve lo suyo, admin ve todo
+
+Decisión (pregunta del propietario): no todo simple; control por rol con
+vínculo por correo (la cuenta del doctor usa el mismo correo que su ficha;
+sin tabla nueva). Admin: todo (costos/precios, resúmenes globales, ventas,
+reclamos, edición y publicación de catálogo y documentos). Doctor vinculado:
+sólo SUS citas e historial (agenda, detalle y chat interno filtrados),
+documentación básica = pública, catálogo de lectura (precios de venta, sin
+notas internas). Sin vínculo: sin agenda.
+- `agenda_dia` con `user_id` (semana/canceladas/reprogramaciones filtradas);
+  `_herramientas_chat` y `responder_chat_internal` propagan el usuario.
+- `/api/agenda` y detalle de cita: 403 si no es suya; `/api/c02/catalog`
+  crear/editar/publicar sólo admin; pestaña analytics sólo admin (ruta y
+  menú); vigencia editable en línea (dos fechas) + columna Activo con
+  interruptor.
+- Pruebas: vínculo 8/8, candados 1/1, suites roles+agenda+canal_rag+regresiones 52/52.
+
+## 2026-11-08 — Sin re-despliegue de catálogo en reserva
+
+El pendiente con `servicios_en_espera` (de una lista pedida antes o de código
+viejo) hacía que CUALQUIER mensaje posterior volviera a desplegar los 35
+tratamientos. Unificada la selección: número sólo si vio la lista, si no por
+nombre; si no precisa, se pregunta sin enumerar (y a la segunda, al equipo).
+Verificado el caso del usuario ("turno el lunes a primera hora" → pregunta
+hora → pide tratamiento sin lista → nombra → profesionales).
+
+## 2026-11-08 — Scroll lateral en catálogo e inventario
+
+La tabla se aplastaba (`width:100%` sin mínimo) y Vigencia quedaba cortada.
+`#c02-cat-table` con `min-width:1240px`, fechas con mínimo 132px y
+`.table-wrap > table` con mínimo 720px: si no cabe, aparece la barra lateral
+(en vez de cortar columnas). Requiere Ctrl+F5 por caché del navegador.
+
+## 2026-11-08 — Verificación sin re-despliegue: 52/52
+
+`test_c02_canal.py` + control humano + bot_eval: 52 passed. Sin commits.
+
+## 2026-11-08 — Chequeo/calza/mediodía + sin coincidencias espurias
+
+Fallo del simulador ("chequeo" en bucle): causas y fix.
+- Sinónimos seguros: chequeo/chequeo anual/revisión general/primera vez →
+  Valoración; motor los trata como intención de reserva; catálogo los resuelve
+  (calza→empaste, muela→extracción sólo para responder precios, nunca para
+  reservar solo).
+- Contador de preguntas: un dato NUEVO de fecha/hora lo reinicia; repetir sin
+  aportar nada escala al equipo (antes nunca avanzaba con fechas).
+- "Mediodía/medio día" = 12:00.
+- Búsqueda del catálogo por palabra completa + tildes (adiós "anual"→manual,
+  "bla"→blanqueamiento) y difuso sólo ≥6 letras.
+- Ambigüedad real ("blanqueamiento"→dental+interno, "empaste"→simple+compuesto):
+  pregunta cuál, con nombres y sin precios; jamás reserva el primero.
+Verificación: flujo chequeo propone Valoración con fecha/hora; calza pide el
+tratamiento y su precio se responde aparte. Suites en curso.
+
+## 2026-11-08 — Vigencia visible + 58/58 typo/canales
+
+Batería typos+canal+bot_eval: 58 passed. Vigencia: mínimo de tabla 1320px y
+fechas 150px (el "aaaa" del marcador necesita más que la fecha real).
+
+## 2026-11-08 — Sin re-despliegue verificado 52/52 (puerta nolist2)
+
+Batería final de reglas de negocio: 91/91 (bot_eval + rag + clasificador + canal + ventas + atención + control humano).
+
+## 2026-11-08 — Detalle editable y vigencia sin cortes
+
+Detalle pasa a área de texto editable en la tabla (Enter de Nombre no aplica;
+se guarda con Ctrl+Intro, indicado en el propio campo) para características
+como color. Vigencia con celda ancha (330px) y fechas de 150px: ya no se corta
+el año. Tabla con mínimo 1320px y barra lateral obligatoria si no cabe.
+
+## 2026-11-08 — Sin volcado de horarios + cierre con recapitulación
+
+Del transcript del propietario: (1) hora fuera de horario volcaba toda la
+semana; (2) al confirmar alternativa preguntaba el día ya dado; (3) faltaba
+cierre con nombre.
+- Rama `horario` ahora ofrece lo más cercano EL MISMO DÍA ("A las 08:00 no
+  alcanzamos. Tengo libre el lunes a las 09:00... ¿Te sirve?") y propone
+  directo (el "sí" reserva); sólo pide otro día si no hay nada ese día.
+  La fecha nunca se borra al ofrecer alternativa.
+- Tras registrar el contacto: "Listo, [Nombre]. Su cita de [servicio] queda
+  agendada para [día] a las [hora] con [Dr]. Recuerde estar 15 minutos antes...
+  ¡Que tenga un buen día!" (sin pedir más datos).
+- Nota: se mantiene que el bot admite ser asistente virtual si se lo preguntan
+  (regla vigente del propietario) y no promete plazos ("en unos minutos" sólo
+  en urgencias dentales según guion aprobado).
+Cierre y alternativas mismo-día verificados: 47/47 (canal, control humano, reservas, servicio).
+
+## 2026-11-08 — Traspaso invisible + honestidad intacta
+
+Aclaración del propietario: que "no se note" es para el traspaso a humano
+(sin cortes ni avisos robóticos), NO para fingir ser humano: si preguntan si
+es bot/IA, lo admite (regla vigente + test de honestidad), y si prefieren
+humano, se deriva.
+- Primer mensaje sin respuesta del equipo → "Gracias por su paciencia, el
+  equipo ya está con su caso." (una sola vez); después, silencio para no
+  interrumpir al humano. Sin cambios de esquema (se lee la cola de mensajes).
+- La toma y la devolución a IA siguen sin anunciar nada al cliente.
+Verificación manual OK (aviso → sostén 1x → silencio); batería en curso.
+Holding verificado 28/28 (pausa + control humano + atención); test de pausa actualizado a la conducta intencionada (cero IA, como mucho un aviso sistema).
+
+## 2026-11-08 — Trato de usted por defecto (profesional y cálido)
+
+El bot ahora trata de usted salvo que el cliente pida tutearlo o tutee
+(tienes/dime/quieres...). Si pregunta si es bot/IA, lo admite (sin cambios).
+- Defaults a 'usted': `business_config` (instalaciones nuevas), canal
+  (detección y fallback), `chat_adapter`, plantilla CONFIGURACION/ESTILO y
+  fixtures de evals tono_v2/ventas_v1. Demo regenerada en trato usted
+  (UPDATE directo pues el 8052 la tenía abierta).
+- `analitica.db` (real) conserva 'tu': cambiarlo es decisión del negocio en
+  panel (Negocio → trato), no se toca dato real sin orden.
+- Verificación en curso (canal, control humano, contacto, recordatorios, bot_eval).
+
+## 2026-11-08 — Vigencia apilada (visible sin depender del scroll)
+
+Las dos fechas ahora van una debajo de otra a ancho completo de su celda:
+se ven enteras en cualquier pantalla, con o sin barra lateral.
+
+## 2026-11-08 — Barra horizontal superior sincronizada
+
+Ya no hay que bajar a la última fila: sobre cada tabla ancha hay una barra
+superior que mueve la tabla (sincronizada en ambos sentidos, se ajusta al
+cambiar el contenido o la ventana). Vale para catálogo e inventario.
+
+## 2026-11-08 — Bug real: faltaba asignar servicio_id (variable local)
+
+El flujo "sin tratamiento nombrado → Valoración" guardaba el id en `pend`
+pero no en la variable local `servicio_id`, así que caía a la rama de
+"preguntar de nuevo" (bucle del simulador). Corregido con una línea; el
+diagnóstico quedó documentado (copias con shutil sobre SQLite+WAL en caliente
+dan fotos viejas: usar siempre `sqlite3.backup`).
+
+## 2026-11-08 — "En la mañana" no es "tomorrow" + S1 republicado
+
+"Para el lunes en la mañana" se parseaba como martes (mañana=siguiente día).
+Ahora el día explícito manda y "mañana" sólo es "tomorrow" sin día nombrado.
+De paso: S1-Valoración había quedado en borrador+inactivo por una edición en
+el panel (flujo correcto: editar despublica hasta revisar); republicado en la
+demo. Las copias de prueba con shutil sobre SQLite+WAL en caliente dan fotos
+viejas: usar siempre `sqlite3.backup`.
+
+## 2026-11-08 — Usted por defecto + catálogo con palabra completa
+
+Trato profesional y cálido: default 'usted' (instalaciones, canal, adaptador,
+plantillas, fixtures de eval). Si el cliente tutea o lo pide, cambia a 'tú'.
+La demo ya está en usted; analitica.db conserva 'tu' (decisión del negocio).
+Catálogo: coincidencias por palabra completa (adiós "anual"→funda,
+"bla"→blanqueamiento), difuso sólo ≥6 letras, y desambiguación con nombres
+cuando nombran una familia con variantes. Verificación en curso.
+
+## 2026-11-08 — Usted por defecto (en curso)
+
+Trato profesional: default 'usted' en configuración, canal, adaptador,
+plantillas y fixtures de evals; demo actualizada; analitica.db conserva 'tu'
+(decisión del negocio). Tuteo del cliente o petición explícita cambian a 'tú'.
+Textos del bot pasados a _frase tu/usted (reserva, compra, cancelación,
+reclamos, catálogo, agenda, validación, pausa). Batería completa en curso.
+
+## 2026-11-08 — Anti-ruido B2B/RRHH/número equivocado + identidad intacta
+
+El playbook de 60 escenarios del propietario: la identidad se mantiene como
+está ("Soy el asistente virtual de ...; si prefiere, le paso con una persona":
+honesto y natural, sin "modelo de lenguaje" ni fingir ser humano).
+Nuevo en `crm/canal.py` (sin derivar al humano, sin alertas):
+- Proveedores/distribuidoras → canal de administración por otro medio.
+- Empleo/CV/pasantías → CV en PDF al correo de la clínica.
+- Número equivocado ("Hola Mario, ¿traes el pan?": saludo + nombre propio sin
+  "soy/me llamo" y sin señales del negocio) → cierre cortés con nombre del
+  negocio. "Hola, soy María, quiero una cita" NO cae aquí (tiene "soy" y cita).
+No implementado (requiere integraciones/consentimiento fuera de alcance):
+envío de pins de WhatsApp, links de Typeform/DocuSign, triggers proactivos
+(cumpleaños, recall, post-operatorio, carrito), coberturas de obras sociales
+específicas (van en documentos del negocio cuando existan), inglés.
+Verificación en curso.
+
+## 2026-11-08 — Usted por defecto verificado + batería total CI en curso
+
+Trato profesional y cálido en todo el bot (reserva, compra, cancelación,
+reclamos, catálogo, agenda, validaciones, pausa); el cliente que tutea o lo
+pide vuelve a "tú"; la identidad sigue honesta ("asistente virtual" + oferta
+de humano). Fixture de evals en usted (hechos sin trato, salvo 1 ya alineado).
+Batería total `tests/` (igual que CI, menos legados excluidos) en curso.
+
+## 2026-11-08 — Catálogo: desplazamiento horizontal sin subir/bajar
+
+Problema: tabla de 1320px con 80 filas; la barra inferior quedaba al fondo y la
+superior era fina y no siempre se recalculaba al cargar.
+Cambios solo frontend (`crm/static/crm.css`, `theme.js`, `crm_c02.js`):
+- `.table-wrap` ahora tiene su propio scroll vertical+horizontal
+  (`max-height: min(68vh,660px)`): la barra inferior siempre está a la vista,
+  sin ir al final de la página; cabecera fija (`thead th` sticky).
+- Barra superior más gruesa (18px) con riel visible y aviso al pasar el cursor;
+  se recalcula al cargar filas (`crm:tabla-actualizada` + ResizeObserver en
+  tbody + reancho ante mutaciones internas).
+- Rueda con Mayús mueve la tabla a los lados sin tocar barras.
+Verificado: `node --check` OK; `test_c02_frontend` + `rediseno` 8 passed,
+4 skipped. Recargar la página basta (`?v=` cambia solo por mtime de los JS).
+
+## 2026-11-08 — Ruido "." + batería: 6/7 fallos corregidos
+
+- Ruido («.», «??», espacios): ya no avanza ni confirma la reserva; pide
+  aclaración humana con el pendiente intacto (`_es_ruido` + `_aclaracion_ruido`
+  en `crm/canal.py`; también en la rama de consulta). Verificado turno por
+  turno: 0 citas creadas con puros ".".
+- Batería total (549 passed, 7 failed): causa raíz en 6, ya corregidos —
+  KB desviada a agenda/config antes del RAG (1c horario y 1b3 agenda_día ahora
+  no pisan preguntas de horario sin intención de citas en chat interno;
+  el canal público conserva la config como autoridad), motivo de fecha
+  cerrada/horario que perdió la palabra («cerrado»/«cierre» otra vez en el
+  mensaje) y `#id` internos mostrados al cliente (fuera de lista y
+  confirmaciones; tests de selección ahora verifican por hora, no por id).
+- `test_c01_previews` agenda: fallo previo en HEAD por borde de domingo
+  (la cita de «mañana» cae en la semana siguiente y la vista por defecto no
+  la trae); el test ahora pide `/api/agenda?date=` de la cita.
+- Grupo verificado: 42 passed (previews + chat + config_func + 1 bot_eval + seleccion).
+- Batería total final en curso.
+
+## 2026-11-08 — Turno vs horario + pack 60 escenarios + RAG por palabra
+
+- Turno concreto: el rechazo ya no vuelca el horario (`_motivo_corto` en
+  `crm/canal.py`: corta el sufijo "Horario: ..."). "¿Turno lunes 10?" →
+  propone/confirma ese hueco o el más cercano el mismo día; "¿abren los
+  sábados?" → horario completo. Verificado turno por turno (sin "Horario:"
+  en respuestas de turno).
+- Pack demo (`scripts/pack_conocimiento_demo.py`, idempotente, con respaldo
+  previo en `backups/`): 25 documentos públicos nuevos en
+  `demo_comercial.db` (44 publicados), alineados al catálogo demo
+  (Valoración USD 20, Blanqueamiento USD 120, Implante USD 1200, etc.) y
+  marcados [DATO DEMO] donde el negocio debe poner los reales. Sólo demo:
+  `analitica.db` no se toca.
+- RAG (`kb_search`): peso IDF por rareza + coincidencia por palabra con
+  tolerancia a plural + nombre como tema (guion bajo partido). «rampa»,
+  «blanqueamiento», «brackets», «obra social» recuperan su ficha (antes
+  ganaba «tienen»/«cuesta»/«sale»⊂«oclusales»).
+- Batería anterior (árbol previo a estos 3 cambios): 556 passed, 4 skipped,
+  0 failed. Batería definitiva con el árbol final en curso.
+
+## 2026-11-08 — Retorno antes que valoración + mañana propone apertura + datos de compra
+
+Pedidos del propietario verificados con pruebas nuevas:
+- Sin tratamiento nombrado ya NO se asume valoración: se pregunta si ya se
+  hizo atender (recurrente → dice a qué va; primera vez → valoración como
+  puerta de entrada). `_pregunta_retorno` en `crm/canal.py`.
+- «Por la mañana» propone la apertura verificada (09:00) o el hueco real, y
+  «por la tarde» las 15:00 si cae en ventana; fuera de ventana (p. ej. 20:00
+  con cierre 17:00) se rechaza sin proponer ni volcar el horario
+  (`_ventana_dia`, `_parte_dia`; parser ya trataba «el lunes en la mañana»
+  como momento del día, ahora también con fecha ISO).
+- Compra: antes de registrar pide nombre, teléfono, cédula (+ dirección con
+  referencia a domicilio) en un mensaje; se guarda en el snapshot del pedido
+  y en la alerta al equipo (`comercio.confirmar(..., datos=...)`).
+- Batería anterior (sin estos cambios): 556 passed. Batería final en curso.
+
+## 2026-11-08 — Sin valoración asumida + datos de compra + guardado visible
+
+- Valoración: el bot ya NO la asigna ni la propone por iniciativa (ni siquiera
+  con «es mi primera vez»: se quitó ese sinónimo). Primera vez sin
+  tratamiento → se pregunta qué necesita indicando que el costo se confirma
+  con la valoración médica. Solo se agenda si el cliente la nombra.
+- Compra: «sí» sin datos ya no registra; pide nombre, teléfono, cédula (+
+  dirección/referencia a domicilio), lo guarda en el snapshot del pedido y en
+  la alerta al equipo. Captura robusta (rechazo/duda/ruido/pregunta no se
+  tragan como datos).
+- Turno por la mañana/tarde: propone la apertura verificada (09:00) o el
+  hueco real; parser ya no lee «mañana» como tomorrow si hay día o fecha
+  explícita (incluida ISO). Fuera de ventana no se propone.
+- Panel catálogo: tras Guardar/Enter el aviso dice «Guardado como borrador.
+  Pulse Publicar para que el bot lo vea» (editar deja en borrador por diseño;
+  el bot solo lee publicado+activo).
+- Verificación amplia en curso.
+
+## 2026-11-08 — Batería total final-todo6: 560 passed, 0 failed
+
+`tests/` como CI (legado excluido + 1 deselect): 560 passed, 4 skipped,
+1 deselected en ~30 min. Cubre retorno/mañana/datos/ISO/pack/IDF. Quedan
+fuera de esa corrida los últimos 4 archivos (quitar valoración ofrecida,
+sinónimo «primera vez», aviso de guardado en panel, test de mañana v2):
+van en la tanda amplia en curso + batería final posterior.
+
+## 2026-11-08 — Tanda amplia: 222 passed, 0 failed
+
+16 suites (selección, canal, control humano, comercio, bot_eval, canal_rag,
+atención, remoto, docs, chat, config, agenda, detección, previews,
+inventario). No incluye los 4 archivos de hoy (valoración, sinónimo, panel,
+test mañana v2): batería total definitiva en curso.
+
+## 2026-11-08 — Batería total definitiva: 560 passed, 0 failed
+
+Árbol final completo (quitar valoración ofrecida, sinónimo «primera vez»,
+guardado visible en panel, retorno/mañana/datos/ISO, pack 25 docs, RAG por
+palabra+IDF, domicilio/observaciones/vigencia en chat interno).
+`tests/` como CI: 560 passed, 4 skipped, 1 deselected, ~21 min.
+Nada commiteado (solo working tree); no hacer push sin orden.
+
+## 2026-11-08 — Guardar/Publicar visibles + simulador siempre fresco
+
+- Diálogo de artículo: nuevo botón «Guardar y publicar» (guarda todo y
+  publica: el bot lo ve en chat y simulador). Fila: nuevo botón «Guardar»
+  que confirma las celdas editadas de una vez; Enter/Ctrl+Intro siguen
+  funcionando. Tras guardar: aviso «borrador → pulse Publicar»; tras
+  publicar: «el bot ya lo ve en el chat y el simulador».
+- Publicar (catálogo/conocimiento), desactivar/restaurar, importar inventario
+  y aplicar configuración invalidan las copias del simulador
+  (`_invalidar_arenas_simulador`): antes el simulador reutilizaba su copia
+  vieja hasta «Nueva conversación» y parecía que el bot ignoraba los cambios.
+  El chat interno y WhatsApp leen la base viva (inmediato tras publicar).
+- Prueba nueva: guardar→borrador, publicar→arena borrada y chat interno ve el
+  detalle. Frontend 9/9; inventario+contacto+docs 41/41.
+
+## 2026-11-08 — Calidad conversacional: memoria, precio mid-reserva, 2 fallos, matriz 63
+
+Diagnóstico reproducido turno por turno (ya no es código viejo): repetía la
+pregunta de retorno, no recordaba «con el doctor» y «1 pm» se parseaba 01:00.
+Cambios en `crm/canal.py`:
+- `es_recurrente` persistente + «con el doctor/la doctora» como evidencia;
+  eco de lo anotado (`_eco_pendiente`) en preguntas de retorno/tratamiento/
+  profesional/hora; regla am/pm («a la 1 pm»→13:00, «3:30pm»→15:30).
+- Precio en mitad de la reserva: importe del catálogo + nota de valoración
+  médica + pregunta vigente (`_precio_y_sigue`, `_siguiente_pregunta`,
+  `propuesta_texto` guardada).
+- 2 aclaraciones fallidas seguidas → derivación honesta a persona
+  (`_es_confusion`, `fallos_seguidos`, `_derivar_por_bloqueo`); se reinicia
+  con cualquier dato accionable.
+- Matriz de 63 escenarios en `docs/producto/evals/matriz_63.md` (alcance real
+  por caso; sin promesas fuera del básico).
+- Pruebas nuevas en `tests/test_c02_conversacion.py` (4/4).
+Verificación amplia en curso.
+
+## 2026-11-08 — Selector de tipo nuevo + aviso anti-pérdida + batería 561
+
+- «Tipo de artículo nuevo» no surtía efecto (`openCreate` forzaba servicio):
+  el diálogo ahora respeta el tipo elegido. Prueba de render que lo fija.
+- Aviso `beforeunload` si hay celdas editadas sin guardar: un F5 ya no borra
+  en silencio. Botón «Guardar» por fila + «Guardar y publicar» en diálogo
+  (verificados en código servido por el propio servidor).
+- Batería total anterior (sin estos 3 archivos): 561 passed, 0 failed.
+  Definitiva en curso.
+
+## 2026-11-08 — Tanda conversacional amplia: 174 passed, 0 failed
+
+13 suites (conversación nueva, selección, canal, bot_eval, detección,
+agenda, whatsapp, control humano, comercio, canal_rag, atención, chat).
+Cubre memoria/eco, precio mid-reserva, 2 fallos, am/pm, arena simulador y
+Guardar del panel. Batería total definitiva en curso.
+
+## 2026-11-08 — Caso real jueves 14:00: parte pegada, horas en palabras y am/pm
+
+Queja verificada turno por turno («jueves alas dos de la tarde» → pedía la
+hora dos veces): `_parte_dia` tolera escritura pegada («lunes latarde»);
+`mtarde` acepta horas en palabras («dos de la tarde»→14:00); am/pm manda
+sobre «a las N» («a la 1 pm»→13:00, «3:30pm»→15:30); hora bare en palabras
+(«a las dos») y «a la tarde» con tarde anotada va a la tarde. 7/7 en
+`test_c02_conversacion.py`. Regresión amplia en curso.
+
+## 2026-11-08 — Atributos y domicilio desde datos verificados
+
+Quejas del chat interno verificadas con la demo: «hace entregas» no tenía
+ruta (sin zonas no respondía nada útil), «color/sabor» caía en documentos
+ajenos y el detalle no se mostraba. En `crm/chat_adapter.py` (+ herramienta
+`zonas_con_tarifa` en `crm/c02_services.py`):
+- Rama de atributo (color/sabor/tamaño/material/marca/modelo): responde desde
+  detalle/observaciones; si la ficha trae el dato sin nombrar el atributo,
+  la cita; si no hay nada, lo dice nombrando el artículo. Sin producto
+  identificado pregunta cuál (no trae otro documento).
+- Rama de domicilio (tolera «domisilio»): zonas y tarifas publicadas; sin
+  zonas, pide zona/dirección para confirmar (no inventa).
+- `_kb_pertinente` ignora palabras vacías («que» impedía descartar lotes).
+- Stock ahora incluye detalle + observaciones públicas (ambos perfiles) e
+  internas (solo admin); validación de importes acepta domicilio.
+- Prueba nueva en `test_c02_chat.py`. Regresión amplia en curso.
+
+## 2026-11-08 — Tanda amplia (atributos/domicilio/pertinencia): 188 passed
+
+14 suites incl. chat interno con fichas, zonas de entrega, selector de tipo
+y aviso anti-pérdida verificados por render. Batería total definitiva en curso.
+
+## 2026-11-08 — RAG vectorial local (Qdrant + FastEmbed) + híbrido + simulador real
+
+- Instalado en el venv: `qdrant-client 1.20.0`, `fastembed 0.9.1`
+  (+ dependencias); `requirements-crm.txt` y `requirements.txt` actualizados.
+  Modelo: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+  (multilingüe ~50 idiomas incl. español, 384 dim, ~0.2 GB).
+- Nuevo `crm/rag_vector.py`: índice por base (`<base>.qdrant/`, Qdrant local
+  sin servidor), colección `crm_contenido`, puntos → fuente (kind/ref_id/
+  revisión). Solo publica+vigente; borradores, privados y datos de
+  pacientes excluidos. `reconstruir` / `sincronizar_catalogo` /
+  `sincronizar_documento` / `verificar` (revalida contra la ficha actual) /
+  `buscar` con umbral 0.30. Sin índice: se sigue con texto y se deja
+  constancia en `crm_audit` + log.
+- Búsqueda híbrida en `_catalog_search` y `kb_search`: exacta de nombre/
+  código primero; vectorial después (solo texto antes). En el adaptador, si
+  solo hay coincidencia vectorial débil (< 0.55) se pide aclaración
+  («¿Se refiere al X o al Y?»), nunca se afirma.
+- Simulador: modo «reglas» (MotorSimulado, por defecto, pruebas aisladas) y
+  modo «real» (MotorIA + adaptador configurado del servidor; sin
+  configuración responde el error honesto, sin red). Muestra modo y modelo.
+  Todo ocurre sobre la copia de la base: sin WhatsApps ni datos reales.
+- Producto fijado entre turnos (`pending.producto_id`): referencias
+  («¿viene en azul?», «el que trae un vaso») se resuelven contra lo que se
+  consultaba; ambigüedad real («el cepillo del combo») pregunta antes de
+  responder. Stock/detalle/observaciones/vigencia/precio domicilio visibles
+  para el equipo y el canal según permisos.
+- Prueba `tests/test_c02_simulador_vector.py`: Combo Sonrisa Feliz (vaso +
+  cepillo) con typo «bunos dias todabia», conserva tema, color ausente se
+  dice, con azul registrado se confirma, borrador no se ofrece, sin índice
+  sigue con texto + constancia, modo real sin proveedor es explícito.
+- Verificación del motor conversacional real con proveedor: pendiente (requiere
+  credenciales del servidor; en pruebas no se llama a la red).
+
+## 2026-11-08 — Batería vectorial + pertinencia reconciliada
+
+- `tests/test_c02_simulador_vector.py`: 8/8 ( Combo con typo, conservación
+  de tema, color ausente/registrado, borrador excluido, sin índice con
+  constancia, reapertura del índice, modo real sin proveedor explícito,
+  modo reglas por defecto).
+- `test_chat_adapter_remoto.py` + `test_rag_relevancia_productos.py`: 27/27.
+  La otra sesión endureció `_kb_pertinente` (rompía 10 remoto); se añadió
+  carve-out para consultas sin palabras temáticas + hilos vectoriales
+  exentos (ya verificados contra la ficha). Batería total en curso.
+
+## 2026-11-08 — Batería vectorial 8/8 + pertinencia reconciliada 27/27
+
+- `tests/test_c02_simulador_vector.py`: 8/8 ( Combo con typo, conservación de
+  tema, color ausente/registrado, borrador excluido, sin índice con
+  constancia, reapertura del índice, modo real sin proveedor explícito,
+  modo reglas por defecto).
+- `test_chat_adapter_remoto.py` + `test_rag_relevancia_productos.py`: 27/27
+  (carve-out para consultas sin palabras temáticas + hits vectoriales
+  exentos de coincidencia literal).
+- Diálogo del Combo verificado turno por turno en base temporal.
+- Batería total definitiva en curso.
+
+## 2026-11-08 — Pertinencia compatible remoto+interno (27+8 en verde)
+
+La otra tanda endureció `_kb_pertinente` y rompía 10 tests del adaptador
+remoto (lote sin coincidencia temática se vaciaba incluso con seguimientos
+«¿y ese?» o preguntas genéricas de prueba). Carve-out: sin palabras
+temáticas (tras quitar interrogativas/deícticas y de precio) no se filtra;
+los hits vectoriales verificados están exentos de coincidencia literal.
+Verificado: `test_chat_adapter_remoto` + `test_rag_relevancia_productos`
+27/27. Batería total en curso.
+
+## 2026-11-08 — Tandem con RAG paralelo: pertinencia compatible (27+8)
+
+La otra sesión endureció `_kb_pertinente` (por fragmento) y rompía 10 tests
+del adaptador remoto. Carve-out: sin palabras temáticas (seguimiento
+deíctico «¿y ese?», «pregunta», «¿cuánto cuesta?») no se filtra; los hits
+vectoriales verificados están exentos de coincidencia literal.
+Verificado: `test_chat_adapter_remoto` + `test_rag_relevancia_productos`
+27/27 en verde, sin tocar la semántica del otro frente.
+
+## 2026-11-08 — Vectorial E2E 11/11 (incl. modo real con proveedor ficticio)
+
+`tests/test_c02_simulador_vector.py`: 11/11 — combo con typo, conservación
+de tema, color ausente/registrado, ambigüedad explícita, referencia sin
+nombre, borrador excluido, sin índice con constancia, reapertura del
+índice, modo reglas por defecto, modo real sin proveedor (error honesto) y
+modo real E2E con proveedor local ficticio (clasifica + recupera + redacta
+con cita). Batería total definitiva en curso.
+
+## 2026-11-09 — Cierre entrega vectorial (Qdrant local + FastEmbed) — verificado, sin commit
+
+- Instalado en venv: `qdrant-client 1.20.0`, `fastembed 0.9.1` (+ onnxruntime, numpy 2.5.4). Deps en `requirements-crm.txt` y `requirements.txt`. Modelo: `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` (multilingüe ~50 idiomas incl. español, 384 dim). Índice demo `demo_comercial.db.qdrant/`: 113 puntos, colección `crm_contenido` (ignorado por git vía `*.qdrant/`).
+- Nuevo `crm/rag_vector.py` (local, un índice por base), híbrido texto+vector en `_catalog_search`/`kb_search` (exacta nombre/código primero), umbral débil 0.30 / aclaración < 0.55, `verificar()` contra ficha vigente, constancia `rag_vector_no_disponible` en `crm_audit` sin índice. Producto fijado entre turnos (`pending.producto_id`), rama atributo/domicilio/1d4, simulador con modo reglas (defecto) / real con modo+modelo visibles, sincronización al publicar/retirar/importar (completa en fondo).
+- Pruebas reales (comandos con `.venv-op/Scripts/python.exe -m pytest ... -p no:cacheprovider`):
+  - `tests/test_c02_simulador_vector.py`: 11 passed in 206.69s (`.pytest_cache/simvecFINAL.log`; el ruido `ImportError sys.meta_path` y `PermissionError storage.sqlite` al cierre en Windows es teardown, 0 failed). Cubre diálogo Combo (typos, vaso, cepillo, color ausente/registrado, ambigüedad, borrador, sin índice, reapertura, modo reglas, modo real sin proveedor y E2E con proveedor ficticio loopback).
+  - `tests/test_chat_adapter_remoto.py` + `tests/test_rag_relevancia_productos.py`: 27 passed in 81.38s (`.pytest_cache/final-check2.log`).
+  - `tests/test_c02_canal_rag.py` + `tests/test_c02_chat.py` + `tests/test_c02_chat_multi_turno.py`: 35 passed in 345.05s (`.pytest_cache/final-check3.log`).
+  - `py_compile` de `crm/rag_vector.py`, `chat_adapter.py`, `c02_services.py`, `canal.py`, `app.py`, `scripts/reconstruir_indice.py`, `tests/test_c02_simulador_vector.py`: OK; `node --check crm/static/crm_c02_simulador.js`: OK.
+- Bloqueos / no afirmado: batería total definitiva quedó interrumpida (`.pytest_cache/final-todo10.log`, `final-wiki.log` truncados sin resumen; no se sustituye por conteos históricos). Validación del motor conversacional real contra proveedor verdadero separada a propósito (en pruebas solo proveedor ficticio loopback o error `ia_no_configurada`; sin red ni secretos; `.env` no leído ni impreso).
+- Preexistentes conservados; otra sesión edita el mismo árbol (relevancia): no se tocó su semántica. Sin commit/push (hay ~50 archivos modificados + índice derivado). Siguiente paso: correr batería total completa cuando haya ventana (~25 min) y, en servidor con proveedor configurado, validar modo real contra matriz 63. Usuario: reiniciar su 8052 + Ctrl+F5 (cambios de código/JS/plantillas); no tocar `analitica.db`.
+
+## 2026-11-09 — Valoración ofrecida en primera vez (encargo del propietario) + 2 rojos corregidos
+
+- Encargo (ejemplos 1-3 y casos 9/12/56 del propietario): primera vez + día/hora anotados → el bot OFRECE la valoración de revisión del catálogo con propuesta y confirmación («Tengo libre el martes 10 a las 11:00 para Valoración con Dra. Ana. ¿Se lo reservo?»), en vez de preguntar el tratamiento. Implementado en `crm/canal.py` (`_servicio_valoracion` + rama primera-vez; cae al flujo normal profesional→hueco→propuesta→datos→alta). Sin valoración en catálogo, o sin día+hora, pregunta el tratamiento como antes; recurrentes sin cambios. No diagnostica ni receta: la valoración la hace el doctor en persona. Urgencias/humano ya existían (motivos `emergencia`/`peligro_inmediato`, alerta `por_revision`, pausa de egress): sin cambios.
+- Diálogo del propietario verificado turno por turno (base temporal, MotorSimulado, 1 profesional): mañana→09:00 ofrecida; «a las 11»→anota + pregunta retorno; «es la primera vez»→propone Valoración 11:00; «sí»→crea `Reserva: Valoración` 2026-11-10T16:00Z con confirmación.
+- Batería total 2026-11-09 (`final-cont-1109`): 2 failed, 593 passed, 4 skipped, 1 deselected, 1663.74s. Los 2 rojos eran tests vectoriales propios desalineados, corregidos sin debilitar cobertura: (a) `test_conversacion_combo_vaso_cepillo_color` → el bot ahora repite el valor pedido (`_valor_pedido` en `chat_adapter.py`: «No tengo registrado el color azul en su ficha»); (b) `test_sin_indice_solo_texto_con_constancia` → aserción LIKE alineada con el test nuevo y el código real.
+- Dirigidos: `test_c02_seleccion_cita.py` 18/18 (15 previos + 3 nuevos: ofrece valoración, fallback sin valoración, cambio a tratamiento nombrado); `rag_vector`+`conversacion`+`agenda_y_ficha` verdes. `py_compile` OK.
+- Batería total relanzada (`final-val-1109`, en curso). Sin commit/push. Usuario: reiniciar 8052 + Ctrl+F5 para ver el cambio (la demo trae `Valoración` publicada y activa).
+
+## 2026-11-09 — Reglas de oro de recepción (encargo del propietario, en verificación)
+
+- Reporte del propietario sobre el 8052 (código viejo: aún no reiniciaba; la pregunta de tratamiento que vio ya estaba corregida): además trajo fallos reales que se corrigen aquí: (b) aceptar alternativa borraba el día, (d) «si falta 24 horas» recitaba garantía, (e) «sí» a la oferta del equipo entraba en bucle, (f) «quiero cancelar...» con historial de consulta iba al RAG en vez de actuar. El «No encontré ninguna cita» tras reservar se explica por arena reiniciada con «Nueva conversación» (la copia se reconstruye sin la cita); con todo, el flujo ya no se cierra en falso.
+- Cambios (`crm/canal.py`, `crm/chat_adapter.py`, `crm/rag_relevancia.py`): alternativas del mismo día conservan la fecha (F1); cancelar/reprogramar manda siempre al flujo de acción aunque haya hilo previo (F2); sin cita a la vista se pide nombre/teléfono, se ubica y si no aparece deriva al equipo sin recitar (F3, también reagendar); «sí» a la oferta del equipo deriva a humano con alerta+pausa (F4); toda cita nueva sin tratamiento nombrado se asume revisión/valoración, primera vez o recurrente (F5, regla de oro: nunca se pregunta el motivo); el eco «Tengo anotado...» sale una sola vez por hilo (R2); 'falta/faltan/...' a vacías para que la garantía no gane a la política de cancelación (revisar con frente RAG).
+- Batería total previa (código valoración): 598 passed, 0 failed (`final-val-1109`, 1489.86s). Dirigidos Reglas: 9/9 (`fix-val5`). Relevancia 8/8 con VACIAS. Batería total del paquete en curso (`final-reglas-1109`). Sin commit/push. Usuario: reiniciar 8052 + Ctrl+F5; la demo trae `Valoración` publicada.
+
+## 2026-11-09 — Motor conversacional compuesto (anti-secuestros + continuación)
+
+- Diagnóstico del fallo del jueves (verificado en código): el hilo `consulta` era pegajoso (la reclasificación sólo corría desde reservar/cancelar/reagendar) y la rama de horarios del RAG disparaba con solo ver un día. En modo real el LLM además redactaba el volcado y su "¿Quiere que revise disponibilidad?" no tenía maquinaria detrás: cada «sí» era un RAG suelto que repetía.
+- Cambios (`crm/canal.py`, `crm/chat_adapter.py`, `crm/rag_relevancia.py`): (A) verbo de reserva rompe el hilo de consulta y conserva día/hora (simétrico a cancelar); (B) la rama de horarios (1c y `_respuesta_horario_equipo`) no dispara ante verbo de reserva; (C) «sí» a oferta de disponibilidad continúa a reserva con el día anotado (vale para texto fijo y redacción del modelo real); oferta al equipo aceptada deriva a humano (F4); cancelar/reprogramar sin cita pide datos, ubica y si no deriva (F3); fecha conservada al aceptar alternativa (F1); cita nueva = revisión/valoración por defecto sin preguntar motivo (F5); eco «Tengo anotado» una sola vez (R2); 'falta/faltan/...' a vacías para que garantía no gane a la política de cancelación (revisar con frente RAG).
+- Verificación por turnos (base temporal, MotorSimulado): reserva directa propone y agenda Valoración; «¿los jueves?»+«sí» continúa a reserva con el día (verificado también con redacción real del LLM en el historial del reporte).
+- Dirigidos: `seleccion_cita`+`conversacion`+`agenda_y_ficha`+`control_humano`+`c02_canal`: 62/62. Batería total del motor en curso (`final-motor-1109`). Sin commit/push. Usuario: reiniciar 8052 + Ctrl+F5 sólo con mi luz verde final.
+
+## 2026-11-09 — Motor conversacional VERDE: 605 passed, 0 failed
+
+- Batería total definitiva (`final-motor-1109`): 605 passed, 4 skipped, 1 deselected, 34 warnings, 1568.26s. Cero rojos con todo el paquete: valoración por defecto, eco único, anti-secuestros reserva/cancelar/reprogramar, continuación de oferta, cancelación que ubica o deriva, fecha conservada, color con valor, VACIAS con falta/familia.
+- Diálogos verificados turno por turno (base temporal, MotorSimulado): reserva directa propone y agenda Valoración; «¿los jueves?»+«sí» continúa a reserva con el día; «tiene turno mañana»+vaso+cepillo+azul identifica el combo y dice el color con honestidad.
+- Pendiente separado: redacción del proveedor real (requiere credenciales del servidor; en pruebas solo ficticio loopback o error explícito); desempate fino de ranking textual (garantía vs póliza en preguntas ambiguas sueltas) para el frente RAG, con repro documentado. Sin commit/push.
+- Luz verde al usuario: reiniciar su 8052 + Ctrl+F5 y probar los flujos (reserva jueves, primera vez, cancelar sin cita a la vista, «sí» a ofertas del equipo/disponibilidad).
+
+## 2026-11-09 — Turno del doctor + día correcto (reporte del propietario, en validación)
+
+- Reporte sobre 8052 (ya con código nuevo): (a) «para el lunes la mañana» se iba a martes: «la mañana» caía en la regla de tomorrow (guardia sólo cubría «en/por/de la mañana»); ampliada a «la mañana» con día nombrado. (b) «el doctor» ignorado: nuevo `_genero_mencionado/_profesional_por_genero_unico/_cambio_profesional`; «el doctor» con un solo doctor activo lo fija en silencio, pregunta si hay varios, y sobre propuesta cambia de profesional conservando el hueco («no con el doctor» ya no borra el día; si ya era ese, reafirma). (c) «dos de latarde» (sin espacio) no daba hora: tolerancia `\s*` en el parseo de horas con palabras. Verificado turno por turno en repro temporal (lunes 9, Dr. Luis Mendoza, 14:00, propuesta y alta intactas).
+- Dirigidos: `seleccion_cita` 30/30; `conversacion`+`agenda_y_ficha`+`control_humano`+`c02_canal` 37/37. Batería total del paquete en curso (`final-doctor-1109`). Sin commit/push.
+
+## 2026-11-09 — Motor conversacional TERMINADO y verde: 610 passed, 0 failed
+
+- Batería total definitiva (`final-doctor-1109`): 610 passed, 4 skipped, 1 deselected, 34 warnings, 1511.26s. Cubre: RAG vectorial híbrido + simulador (reglas/real) + producto fijado + conversación Combo + valoración por defecto + Reglas de oro (anti-secuestros, continuación de ofertas, cancelación que ubica o deriva, fecha conservada, eco único) + turno del doctor (género, cambio sin perder hueco, reafirmación) + día correcto («lunes la mañana») + horas pegadas («latarde»).
+- Diálogos verificados turno por turno (bases temporales, MotorSimulado): jueves 9am con propuesta y alta; lunes 9 con Dr. Luis Mendoza a las 14:00; «no con el doctor» no borra; combo vaso+cepillo+azul honesto.
+- Pendiente separado (no bloquea): redacción del proveedor real con credenciales del servidor; desempate fino de ranking textual para preguntas ambiguas sueltas (frente RAG, con repro). Sin commit/push.
+- Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los flujos reportados.
+
+## 2026-11-09 — Documentación al día (MAPA + motor conversacional)
+
+- `MAPA.md`: apartado Infraestructura actualizado a 9 de noviembre (RAG híbrido texto+vectorial con Qdrant local por base; el Qdrant antiguo de `tools/` queda marcado como legado, el vigente es `crm/rag_vector.py`; canal apunta al comportamiento del bot).
+- Nuevo `docs/producto/MOTOR_CONVERSACIONAL.md`: precedencia por turno, embudo de reserva, gestión de citas, handoff, reglas del RAG en canal, modos del simulador y pendientes. `RAG_VECTORIAL.md` sigue vigente para instalación/índice/demo.
+
+## 2026-11-09 — Panel: horario semanal visible por doctor
+
+- A pedido del negocio: la grilla de 7 días (palomita por día + apertura/cierre) ahora se muestra directamente debajo de cada doctor en «Especialistas y disponibilidad», sin botón intermedio. Sin marcar = no trabaja ese día; horas vacías = sigue el horario del negocio.
+
+## 2026-11-09 — Batería 605 verde + horarios por doctor + convergencia de eco
+
+- Batería total `final-motor-1109`: 605 passed, 0 failed (motor conversacional completo).
+- Panel horarios: 00:00 = casilla sin usar (semanal y por doctor, frontend + backend + formulario de equipo); migración v30 `horario_json`; validación de horario propio (dentro del horario del negocio, día abierto); respeto en propuesta/alternativas/auto-asignación/quién-atiende/alta definitiva (panel, canal/API e integraciones vía `save_appointment`); grilla de 7 días con palomita visible por doctor.
+- Convergencia con la otra sesión: `_eco_pendiente` ahora sólo con cita creada (cero repeticiones pre-reserva); mis 3 tests adaptados sin perder cobertura (hueco verificado en estado + propuesta final).
+- Batería total con todo en curso (`final-todo2-1109`). Sin commit/push.
+
+## 2026-11-09 — VERDE TOTAL: 623 passed, 0 failed (batería `final-todo2-1109`)
+
+Batería total CI-equivalente (excluye legado + 1 deselect): 623 passed, 4 skipped, 1 deselected, 1656.36s. Incluye: motor conversacional (anti-secuestros, continuación de ofertas, cancelar/reprogramar con ubicación o deriva, valoración por defecto, género profesional, día/hora en lenguaje natural), horarios por doctor con validación y respeto en propuesta/alternativas/auto-asignación/alta, 00:00 como casilla sin usar (semanal, por doctor y formulario de equipo), RAG híbrido + simulador en ambos modos, grilla de 7 días visible por doctor. Sin commit/push.
+Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los casos reportados (lunes, «el doctor», 00:00, horarios por doctor).
+
+## 2026-11-09 — Horas visibles completas en el panel
+
+- A pedido del negocio: los campos de hora del panel (semana general, almuerzos y grilla por doctor) se ensanchan a 104-108px para que se lean HH:MM completos. Solo CSS (`crm/static/crm.css`), sin lógica: no requiere revalidación de batería. Ver con Ctrl+F5.
+
+## 2026-11-09 — Paridad simulador↔WhatsApp: índice en la arena
+
+- Hallazgo: la arena del simulador nunca tenía `.qdrant` (sólo se copiaba el .db), así que el simulador caía siempre a texto; además el índice está ignorado por git y nunca viajó al servidor. Explica la falta de progreso visible en el simulador.
+- Corrección: al crear (o reiniciar) la arena se copia `<base>.qdrant` → `<arena>.qdrant`; al invalidar arenas se borran también sus índices. Nuevo `rag_vector.cerrar()` para soltar el bloqueo de `storage.sqlite` en Windows antes de copiar/borrar. El arranque registra en el log si falta el índice base (`scripts/reconstruir_indice.py`).
+- Pruebas nuevas `tests/test_c02_simulador_paridad.py`: copia de índice, limpieza en invalidación, vectores sobre la arena copiada, y crear+cancelar cita por el mismo motor (paridad con WhatsApp).
+
+## 2026-11-09 — Paridad simulador↔WhatsApp verificada (batería en curso)
+
+- La arena del simulador ahora recibe copia del índice vectorial al crearse (antes caía siempre a texto) y se limpia al invalidar; nuevo `rag_vector.cerrar()` para el bloqueo de archivos en Windows; el arranque avisa en el log si falta el índice base (hay que construirlo una vez por servidor: `scripts/reconstruir_indice.py`, el `.qdrant` está ignorado por git y no viaja).
+- `tests/test_c02_simulador_paridad.py` (4/4): copia/invalidación del índice, vectores sobre la arena copiada, y crear+cancelar cita por el mismo motor (paridad con WhatsApp).
+- Batería total con todo en curso (`final-todo2-1109`). Sin commit/push.
+
+## 2026-11-09 — VERDE TOTAL: 632 passed, 0 failed (batería `final-todo2-1109`)
+
+- 632 passed, 4 skipped, 1 deselected, 1748.55s. Incluye: motor conversacional (anti-secuestros, continuación de ofertas, cancelar/reprogramar que ubica o deriva, valoración por defecto, género profesional, día/hora en lenguaje natural), horarios por doctor con validación y respeto en agenda/alta, 00:00 como casilla sin usar, RAG híbrido con índice en la arena del simulador, crear+cancelar por el mismo motor (paridad WhatsApp), grilla de días visible por doctor.
+- Pendiente no bloqueante: validación del motor real contra proveedor verdadero (requiere credenciales en el servidor); ranking fino residual (frente RAG, con repro). Sin commit/push.
+- Luz verde al usuario: reiniciar 8052 + Ctrl+F5; construir el índice una vez en el servidor (`scripts/reconstruir_indice.py demo_comercial.db`); probar reserva con día/hora, «el doctor», cancelación y modo real si configura proveedor.
+
+## 2026-11-09 (tarde) — Motor: primera/última hora, otro día al rechazar, colega alternativo
+
+- «A primera/última hora» ahora resuelve la apertura/cierre real del negocio (antes caía a pregunta de motivo). «¿No tiene uno para mañana?» cambia el hueco pedido y vuelve a proponer conservando servicio y profesional. Si el profesional elegido no tiene nada ese día, se ofrece un colega verificado el mismo día (nombrado) antes de pedir otro día.
+- Corregido falso positivo: «primera hora» ya no se lee como «primera vez» (no salta la pregunta de retorno).
+- Dirigidos conversación+selección: 40/40. Batería total en curso (`final-motor2-1109`). Sin commit/push.
+
+## 2026-11-09 (noche) — Colegas verificados + batería total en curso
+
+- Ante profesional sin hueco el bot ofrece un colega verificado el mismo día (nombrado, con confirmación) en vez de pedir otro día a ciegas. Aplica a motivo de horario y a solapamiento sin alternativas.
+- Los 2 rojos de la batería anterior eran tests con la expectativa vieja (solo informar/rechazar): actualizados al nuevo contrato, sin perder cobertura (sigue verificando que no se inventa ni se agenda solo).
+- Batería total definitiva en curso (`final-todo3-1109`). Sin commit/push.
+
+## 2026-11-10 — Luz verde: batería total final-todo3-1109
+
+- Resultado real: 635 passed, 4 skipped, 1 deselected, 0 failed (~30 min). Comando: pytest tests/ con ignores de legado (test_g01_reservas, test_p01b, test_p02, test_p02c, test_p03, test_qdrant, test_database, test_g01_handoff, test_agent, test_api, test_rag_tool) + 1 deselect de migraciones.
+- Incluye: primera/última hora, otro día al rechazar, colega verificado mismo día, horarios por doctor, paridad simulador, vectorial/remoto+relevancia, conversación y evals.
+- Sin commit/push (pendiente de orden). Siguiente paso del usuario: reiniciar su 8052, `python scripts/reconstruir_indice.py demo_comercial.db`, Ctrl+F5, y probar la lista de flujos.
+
+## 2026-11-10 (noche) — Motor comercial del simulador: recepción, sin bucles, embudo de venta
+
+- Saludo según la hora (buenos días/tardes/noches) y pregunta «¿ya se atendió antes o es su primera vez?»; número con citas previas se reconoce y se ofrece su doctora. El saludo ya no secuestra el hilo (pending `saludo`).
+- Corregido bucle: la lista de profesionales se repetía sin fin ante «mañana a las 10», «sí» o un nombre. Ahora solo ofrece a quienes atienden a esa hora y, con «sí»/segunda vuelta/nadie libre, asigna al libre y propone el hueco real.
+- Despedida con hora (buen día / buena tarde / bonita noche) y «¿se le ofrece algo más?» tras reservar.
+- Tratamientos: la respuesta de precio incluye duración (`duration_min`).
+- Venta: «lo voy a retirar» continúa la venta; con envío por confirmar ya no se queda en un resumen repetido: se toman nombre, teléfono, cédula y dirección con referencia y se enciende alerta `por_revision` con mensaje «VENTA: preparar factura y artículo». Retiro: nombre, teléfono, cédula y misma alerta.
+- Pruebas: 173 passed (grupo canal/chat/comercio/agenda) + 94 passed (conversación, bot_eval, estados) + `tests/test_c02_recepcion_comercial.py` 4/4. Batería total NO ejecutada tras estos cambios. Sin commit/push.
+- Pendiente: probar en el simulador real (reiniciar 8052 + Ctrl+F5) y revisar el flujo de zonas si el negocio no usa tarifas por zona.
+
+## 2026-11-10 (noche, 2) — Pulido del motor comercial + batería total
+
+- Sin pregunta de zona en domicilio (`canal._PREGUNTAR_ZONA = False`): se pide dirección con referencia, nombre, teléfono y cédula, y la venta pasa a una persona (alerta «VENTA»). Los tests de zona activan la constante con monkeypatch.
+- Sin saludo repetido: la recepción ya saluda; el saludo configurado solo se antepone si la respuesta no es el saludo de recepción.
+- «¿De qué marca y color?» se resuelve contra el producto del hilo; se quita la etiqueta interna `[Etiqueta]:` de respuestas de conocimiento (carillas); listas de tratamientos muestran duración.
+- Sin bucles: tratamiento y día se preguntan una sola vez (después: consulta general / primer hueco de mañana).
+- Batería total (con ignores de legado): 695 passed, 4 skipped, 2 failed (los 2 de zona, ya ajustados y re-ejecutados junto a recepción). Sin commit/push.
+
+## 2026-11-10 (noche, 3) — Recepción directa (pedido del negocio en el simulador)
+
+- `canal.RECEPCION_DIRECTA = True`: no se lista a los doctores. Pregunta corta «¿Ya se ha atendido antes con nosotros?». Sí → «¿Con qué doctor?». No o «no recuerdo» → pide día y hora, y asigna a quien esté libre. No se pregunta el tratamiento (consulta general).
+- «No es la primera ves» = ya es paciente. «La doctora Sofía me atiende» fija su doctora (antes abría el horario de la doctora). Si ella no tiene espacio ese día, se ofrece otro día con ELLA antes que un colega.
+- Una sola propuesta, la más cercana, buscando en todo el día cada 30 min (antes ±3 h en horas enteras; no veía huecos libres). «Para las 9» ya se entiende como hora.
+- Ficha tras reservar: una pregunta («¿cuál es el horario?») ya no se guarda como nombre del paciente.
+- Producto: el nombre exacto manda (kit vs cera). El precio a domicilio sale del producto del hilo.
+- Pruebas del flujo clásico: fixture autouse `_flujo_clasico_recepcion` (RECEPCION_DIRECTA=False) en 7 módulos. El flujo nuevo se prueba en `test_c02_recepcion_comercial.py` (6/6).
+- Batería total: 698 passed, 4 skipped, 1 failed (prueba propia sin servicio sembrado; corregida y re-ejecutada 6/6). Sin commit/push.
+- Datos: en `demo_comercial.db` los doctores tienen `horario_json` vacío, así que atienden en el horario del negocio (solo cuenta el almuerzo). «Kit de ortodoncia» está en borrador.

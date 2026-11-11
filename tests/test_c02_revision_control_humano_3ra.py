@@ -50,7 +50,8 @@ def _ctx(path):
     with connect(path) as conn:
         p = conn.execute('SELECT id, name FROM crm_professionals LIMIT 1').fetchone()
     return {'professionals': [{'id': p['id'], 'name': p['name']}],
-            'zonas': ['America/Guayaquil'], 'now_local': None}
+            'zonas': ['America/Guayaquil'], 'now_local': None,
+            'hoy': '2030-01-07'}
 
 
 _SEQ_EXTERNO = [0]

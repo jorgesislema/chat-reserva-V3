@@ -146,7 +146,6 @@ dialog.detail-dialog ::backdrop{background:rgba(10,18,15,.45)}
 .preview-table td select{background:#fff;color:var(--ink)}
 [data-theme="dark"] .preview-table td select{background:#141c18;color:var(--ink);border-color:#3b4f45}
 .cell-kind{min-width:170px}
-#c02-cat-table td:nth-child(2){min-width:400px;width:42%}
 .cell-col button,.cell-col .button{display:block;margin:8px 0 0;width:100%;white-space:normal}
 .cell-col button:first-child,.cell-col .button:first-child{margin-top:0}
 
@@ -250,8 +249,8 @@ input:disabled,select:disabled,textarea:disabled{background:#eef2ef;color:#7a8e8
 /* Acciones superiores de cada pantalla (catálogo, biblioteca...). */
 .topbar-actions{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
 .topbar-actions .inline-select{margin:0}
-.topbar-actions select{width:auto;margin:0;min-width:180px}
-@media(max-width:700px){.topbar-actions{width:100%}.topbar-actions .button,.topbar-actions select{flex:1 1 100%}}
+.topbar-actions select,.topbar-actions input{width:auto;margin:0;min-width:180px}
+@media(max-width:700px){.topbar-actions{width:100%}.topbar-actions .button,.topbar-actions select,.topbar-actions input{flex:1 1 100%}}
 
 /* ============================ CAMPANA DE ATENCIÓN HUMANA ============================ */
 .demo-banner{background:#fff3d6;color:#7a5a12;border-bottom:1px solid #e8d9a8;
@@ -367,9 +366,24 @@ input:disabled,select:disabled,textarea:disabled{background:#eef2ef;color:#7a8e8
 /* Especialistas: fila con nombre a la izquierda y casilla a la derecha */
 .c02-esp-item{justify-content:space-between;padding:10px 14px;border:1px solid var(--line);
   border-radius:9px;margin:0 0 8px;background:#fff}
-.c02-esp-item input{width:18px;height:18px;margin:0;flex:0 0 auto}
+.c02-esp-item input[type=checkbox]{width:18px;height:18px;margin:0;flex:0 0 auto}
+.c02-week-table td input[type=time]{min-width:104px;width:104px}
+.c02-esp-item input[type=time]{width:108px;height:30px;margin:0 2px;flex:0 0 auto}
+.c02-esp-item .muted.tiny{display:flex;align-items:center;gap:2px}
+/* Horario semanal por doctor: 7 filas (palomita + apertura-cierre) */
+.c02-esp-horario{display:flex;flex-direction:column;gap:2px;margin:2px 0 8px 26px;font-size:12px}
+.c02-esp-horario input[type=checkbox]{width:16px;height:16px;margin-right:4px;vertical-align:middle}
+.c02-esp-horario input[type=time]{width:108px;height:28px;margin:0 2px}
 /* Catálogo: la tabla ancha se desplaza en horizontal */
-#c02-cat-table{min-width:940px}
+#c02-cat-table{min-width:1080px}
+#c02-cat-table th{white-space:nowrap}
+#c02-cat-table td{min-width:0;padding:7px 8px;vertical-align:middle}
+#c02-cat-table td:nth-child(2){min-width:180px;width:auto}
+#c02-cat-table td:nth-child(4){max-width:280px}
+#c02-cat-table .cell-edit,.c02-cat-table td input[type=number],#c02-cat-table td select{font:13px var(--font);margin:0;padding:6px 8px}
+#c02-cat-table td input[type=number]{min-width:0;width:88px}
+#c02-cat-table .c02-precio{width:76px}
+#c02-cat-table td:nth-child(1),#c02-cat-table td:nth-child(8){white-space:nowrap}
 
 /* Catálogo: barra horizontal visible y cabeceras sin cortar */
 .table-wrap::-webkit-scrollbar{height:12px}
@@ -377,3 +391,25 @@ input:disabled,select:disabled,textarea:disabled{background:#eef2ef;color:#7a8e8
 .table-wrap::-webkit-scrollbar-track{background:#eef2ed;border-radius:6px}
 #c02-cat-table th{white-space:nowrap}
 #c02-cat-table td{min-width:96px}
+
+/* Catálogo e inventario: la tabla no se aplasta; si no cabe, desplaza lateral */
+#c02-cat-table{min-width:1320px}
+#c02-cat-table td input[type=date]{min-width:150px}
+#c02-cat-table td input[type=checkbox]{width:18px;height:18px}
+.table-wrap > table{min-width:720px}
+.table-wrap{overflow:auto;scrollbar-gutter:stable;max-height:min(68vh,660px);border:1px solid var(--line);border-radius:10px;background:var(--white)}
+.table-wrap thead th{position:sticky;top:0;z-index:5;background:var(--paper)}
+#c02-cat-table td:nth-child(4){min-width:260px;max-width:340px}
+#c02-cat-table td:nth-child(4) textarea{width:100%;min-height:56px}
+#c02-cat-table td:nth-child(8){min-width:330px;white-space:normal}
+#c02-cat-table td:nth-child(8) input[type=date]{min-width:150px}
+#c02-cat-table td.cell-vigencia{min-width:170px}
+#c02-cat-table .vig-label{display:block;font-size:10px;color:#8b9a92;margin:0 0 6px}
+#c02-cat-table .vig-label input{width:100%;margin-top:2px}
+.table-scroll-top{overflow-x:auto;overflow-y:hidden;height:18px;margin-bottom:6px;border-radius:6px;cursor:grab}
+.table-scroll-top:active{cursor:grabbing}
+.table-scroll-top::-webkit-scrollbar{height:14px}
+.table-scroll-top::-webkit-scrollbar-thumb{background:#9db8a9;border-radius:7px}
+.table-scroll-top::-webkit-scrollbar-track{background:#eef2ed;border-radius:7px}
+.table-scroll-spacer{height:1px}
+.table-scroll-top{position:sticky;top:0;z-index:30;background:var(--paper);padding:2px 0 4px}

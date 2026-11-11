@@ -20,6 +20,7 @@ langchain-openai>=1.7.0,<2.0
 
 # --- Bases de Datos Vectoriales ---
 qdrant-client>=1.19.1,<2.0
+fastembed>=0.9,<1.0
 
 # --- Google APIs ---
 google-api-python-client>=2.201.0,<3.0

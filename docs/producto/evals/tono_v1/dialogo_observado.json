@@ -1,0 +1,81 @@
+{
+  "modo": "motor_y_rag_simulados_sin_egress",
+  "datos": "ficticios",
+  "turnos": [
+    {
+      "turno": 1,
+      "usuario": "Hola",
+      "salidas_encoladas": [
+        {
+          "texto": "Hola, gracias por escribir a Centro Sonrisa Demo. ¿En qué te ayudo?",
+          "origin": "ia"
+        }
+      ],
+      "worker": {
+        "procesadas": 1,
+        "outbox_agregado": true,
+        "citas_creadas": 0
+      },
+      "estado": "ia_activa"
+    },
+    {
+      "turno": 2,
+      "usuario": "¿Cuánto cuesta la limpieza?",
+      "salidas_encoladas": [
+        {
+          "texto": "Limpieza (servicio): . Precio: 4500 USD. Estado: activo.",
+          "origin": "ia"
+        }
+      ],
+      "worker": {
+        "procesadas": 1,
+        "outbox_agregado": true,
+        "citas_creadas": 0
+      },
+      "estado": "ia_activa"
+    },
+    {
+      "turno": 3,
+      "usuario": "¿Hay parqueadero?",
+      "salidas_encoladas": [
+        {
+          "texto": "No encontré información suficiente en el conocimiento publicado, el catálogo ni la agenda para responder con certeza. ¿Puede reformular la consulta o añadir más detalle?",
+          "origin": "ia"
+        }
+      ],
+      "worker": {
+        "procesadas": 1,
+        "outbox_agregado": true,
+        "citas_creadas": 0
+      },
+      "estado": "ia_activa"
+    },
+    {
+      "turno": 4,
+      "usuario": "Quiero hablar con una persona",
+      "salidas_encoladas": [
+        {
+          "texto": "He avisado al equipo. Te responderemos por aquí en cuanto alguien quede libre.",
+          "origin": "sistema"
+        }
+      ],
+      "worker": {
+        "procesadas": 1,
+        "outbox_agregado": true,
+        "citas_creadas": 0
+      },
+      "estado": "esperando_humano"
+    },
+    {
+      "turno": 5,
+      "usuario": "¿Sigues ahí?",
+      "salidas_encoladas": [],
+      "worker": {
+        "procesadas": 1,
+        "outbox_agregado": true,
+        "citas_creadas": 0
+      },
+      "estado": "esperando_humano"
+    }
+  ]
+}

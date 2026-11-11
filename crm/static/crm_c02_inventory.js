@@ -228,7 +228,10 @@
     var map = { nueva: ['nueva', 'Nueva'], actualizacion: ['actualizacion', 'Actualización'],
                 duplicado: ['duplicado', 'Duplicado'], error: ['error', 'Error'] };
     var b = map[r.estado] || ['', r.estado];
-    return '<span class="inv-badge ' + b[0] + '">' + b[1] + '</span>';
+    var s = document.createElement('span');
+    s.className = 'inv-badge ' + b[0];
+    s.textContent = b[1];
+    return s;
   }
 
   function paso3() {
@@ -261,7 +264,9 @@
           return k + '=' + (r.campos[k] || '');
         }).join(', ');
         tr.appendChild(el('td', '', campos));
-        tr.appendChild(el('td', '', badgeEstado(r)));
+        var tdEstado = el('td', '', '');
+        tdEstado.appendChild(badgeEstado(r));
+        tr.appendChild(tdEstado);
         tr.appendChild(el('td', '', (r.errores || []).join('; ') +
                                 (r.avisos && r.avisos.length ? ' [' + r.avisos.join('; ') + ']' : '')));
         tbody.appendChild(tr);

@@ -1,5 +1,5 @@
 {% extends 'base.html' %}{% block content %}
-{% set titles={'overview':'Tu negocio, de un vistazo','leads':'Relaciones que se convierten en clientes','agenda':'Cada cita, en su lugar','catalog':'Catálogo e inventario','docs':'Conocimiento para la IA','chat':'Asistente IA interno','biblioteca':'Biblioteca de recursos','envios':'Historial de envíos','negocio':'Negocio y horarios','inbox':'Conversaciones de WhatsApp','simulador':'Simula la conversación del bot','analytics':'Entiende tus oportunidades','team':'Un equipo que crece contigo','accounts':'Conecta tus calendarios','users':'Acceso para tu equipo','audit':'Actividad del espacio','profile':'Tu cuenta'} %}
+{% set titles={'overview':'Tu negocio, de un vistazo','leads':'Relaciones que se convierten en clientes','agenda':'Cada cita, en su lugar','catalog':'Catálogo e inventario','docs':'Información del negocio','chat':'Asistente IA interno','biblioteca':'Archivos para enviar','envios':'Mensajes enviados','negocio':'Negocio y horarios','inbox':'Conversaciones de WhatsApp','simulador':'Simula la conversación del bot','analytics':'Ventas y reportes','team':'Equipo','users':'Acceso para tu equipo','audit':'Auditoría','profile':'Tu cuenta'} %}
 <header class="topbar"><div><div class="eyebrow">{{ business }} / {{ 'ADMINISTRACIÓN' if tab in ['team','users','audit'] else 'MiOrquestador' }}</div><h1>{{ titles.get(tab,'Resumen') }}</h1><p class="muted">{{ today }} · {{ zone }} <span class="local-label">● Local</span></p></div><div class="topbar-actions"><div class="atencion-bell" id="atencion-bell" data-csrf="{{ csrf }}"></div><a class="button" href="/?tab=leads#new-lead">+ Nuevo lead</a></div></header>
 {% if tab=='overview' %}
 <div class="metrics"><article><span>Leads registrados</span><strong>{{ total }}</strong><small>Contactos únicos en el CRM</small></article><article><span>Conversión a cliente</span><strong>{{ conversion }}<em>%</em></strong><small>Ganados / total de leads</small></article><article><span>Valor de oportunidades</span><strong>{{ '%.2f'|format(pipeline) }}</strong><small>Valor estimado · moneda del negocio</small></article><article><span>Seguimientos por atender</span><strong>{{ overdue }}</strong><small>Hoy o vencidos, aún abiertos</small></article></div>
@@ -19,7 +19,7 @@
 <section class="card"><h2>Usuarios del espacio</h2><p class="muted">Los usuarios gestionan contactos y citas. Los administradores también gestionan accesos, profesionales, cuentas y sincronización.</p><div class="table-wrap"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Gestionar</th></tr></thead><tbody>{% for u in users %}<tr><td>{{ u.name }}</td><td>{{ u.email }}</td><td>{{ u.role }}</td><td>{{ 'Activo' if u.active else 'Inactivo' }}</td><td>{% if u.id!=user.id %}<form action="/users/{{ u.id }}" method="post">{{ token() }}<button class="secondary">{{ 'Desactivar' if u.active else 'Activar' }}</button></form>{% endif %}<details><summary>Restablecer contraseña</summary><form action="/users/{{ u.id }}" method="post">{{ token() }}<input type="hidden" name="action" value="password"><label>Nueva contraseña<input name="password" type="password" minlength="12" maxlength="256" required autocomplete="new-password"></label><button>Restablecer e invalidar sesiones</button></form></details></td></tr>{% endfor %}</tbody></table></div></section>
 <section class="card"><h2>Crear usuario</h2><form action="/users" method="post">{{ token() }}<div class="form-grid"><label>Nombre<input name="name" required></label><label>Correo<input type="email" name="email" required></label><label>Rol<select name="role"><option value="user">Usuario</option><option value="admin">Administrador</option></select></label><label>Contraseña inicial<input name="password" type="password" minlength="12" maxlength="256" required autocomplete="new-password"></label></div><p class="muted">Usa al menos 12 caracteres. Cada persona puede cambiar su contraseña desde su cuenta.</p><button>Crear usuario</button></form></section>
 {% elif tab=='audit' %}<section class="card"><h2>Últimas 100 acciones</h2><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Usuario</th><th>Acción</th></tr></thead><tbody>{% for a in logs %}<tr><td>{{ a.created_at|localtime }}</td><td>{{ a.name }}</td><td>{{ a.action }}</td></tr>{% endfor %}</tbody></table></div></section>
-{% elif tab=='catalog' %}{% include 'catalog.html' %}<script src="{{ url_for('static', filename='crm_c02.js') }}"></script><script src="{{ url_for('static', filename='crm_c02_inventory.js') }}"></script>
+{% elif tab=='catalog' %}{% include 'catalog.html' %}<script src="{{ url_for('static', filename='crm_c02.js') }}?v={{ asset_v }}"></script><script src="{{ url_for('static', filename='crm_c02_inventory.js') }}?v={{ asset_v }}"></script><script src="{{ url_for('static', filename='crm_c02_comercio.js') }}?v={{ asset_v }}"></script>
 {% elif tab=='analytics' %}
 <section class="card">
   <div class="section-title"><h2>Análisis comercial ({{ analitica.dias }} días)</h2>
@@ -87,12 +87,64 @@
   <p class="muted">Todavía no hay citas en este periodo.</p>
   {% endif %}
 </section>
-{% elif tab=='docs' %}{% include 'docs.html' %}<script src="{{ url_for('static', filename='crm_c02_docs.js') }}"></script>
-{% elif tab=='chat' %}{% include 'chat.html' %}<script src="{{ url_for('static', filename='crm_c02_chat.js') }}"></script>
-{% elif tab=='biblioteca' %}{% include 'biblioteca.html' %}<script src="{{ url_for('static', filename='crm_c02_biblioteca.js') }}"></script>
-{% elif tab=='envios' %}{% include 'envios.html' %}<script src="{{ url_for('static', filename='crm_c02_envios.js') }}"></script>
-{% elif tab=='negocio' %}{% if user.role=='admin' %}{% include 'config.html' %}<script src="{{ url_for('static', filename='crm_c02_config.js') }}"></script>{% else %}<section class="card"><h2>Negocio y horarios</h2><p class="notice">Sólo un administrador edita la configuración del negocio y los horarios.</p></section>{% endif %}
-{% elif tab=='simulador' %}{% include 'simulador.html' %}<script src="{{ url_for('static', filename='crm_c02_simulador.js') }}"></script>
-{% elif tab=='inbox' %}{% include 'inbox.html' %}<script src="{{ url_for('static', filename='crm_c02_inbox.js') }}"></script>
+<section>
+  <h2>Ventas y coordinación</h2>
+  {% set com = analitica.comercio %}
+  {% if com and com.disponible %}
+  <div class="two-columns">
+    <section>
+      <h3>Pedidos y cotizaciones</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Dato</th><th>Valor</th></tr></thead>
+        <tbody>
+          <tr><td>Cotizaciones pendientes de confirmar</td><td>{{ com.cotizaciones_pendientes|length }}</td></tr>
+          <tr><td>Pedidos en coordinación o entrega</td><td>{{ com.pedidos_coordinacion|length }}</td></tr>
+          <tr><td>Pedidos pendientes de pago (no es ingreso cobrado)</td><td>{{ com.pedidos_pendientes_pago }}</td></tr>
+          <tr><td>Compras sin finalizar en el chat</td><td>{{ com.compras_sin_finalizar }}</td></tr>
+        </tbody>
+      </table></div>
+      {% if com.pedidos_coordinacion %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Pedido</th><th>Total</th><th>Pago</th></tr></thead>
+        <tbody>{% for p in com.pedidos_coordinacion %}
+          <tr><td>{{ p.codigo }}</td><td>{{ p.total_cents }}</td><td>{{ p.pago_estado }}</td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+      {% endif %}
+    </section>
+    <section>
+      <h3>Atención e incidencias</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Dato</th><th>Valor</th></tr></thead>
+        <tbody>
+          <tr><td>Conversaciones esperando atención humana</td><td>{{ com.conversaciones_esperando_humano }}</td></tr>
+          <tr><td>Alertas activas del equipo</td><td>{{ com.alertas_activas }}</td></tr>
+          <tr><td>Sincronizaciones con error o revisión</td><td>{{ com.sincronizaciones_con_error }}</td></tr>
+          <tr><td>Envíos con fallo o inciertos</td><td>{{ com.envios_con_fallo }}</td></tr>
+        </tbody>
+      </table></div>
+      {% if com.incidencias_abiertas %}
+      <div class="table-wrap"><table>
+        <thead><tr><th>Incidencia</th><th>Abiertas</th></tr></thead>
+        <tbody>{% for i in com.incidencias_abiertas %}
+          <tr><td>{{ i.categoria }}</td><td>{{ i.n }}</td></tr>
+        {% endfor %}</tbody>
+      </table></div>
+      {% else %}
+      <p class="muted">Sin incidencias abiertas.</p>
+      {% endif %}
+    </section>
+  </div>
+  {% else %}
+  <p class="muted">Resumen comercial no disponible (se requiere la migración v27).</p>
+  {% endif %}
+</section>
+{% elif tab=='docs' %}{% include 'docs.html' %}<script src="{{ url_for('static', filename='crm_c02_docs.js') }}?v={{ asset_v }}"></script>
+{% elif tab=='chat' %}{% include 'chat.html' %}<script src="{{ url_for('static', filename='crm_c02_chat.js') }}?v={{ asset_v }}"></script>
+{% elif tab=='biblioteca' %}{% include 'biblioteca.html' %}<script src="{{ url_for('static', filename='crm_c02_biblioteca.js') }}?v={{ asset_v }}"></script>
+{% elif tab=='envios' %}{% include 'envios.html' %}<script src="{{ url_for('static', filename='crm_c02_envios.js') }}?v={{ asset_v }}"></script>
+{% elif tab=='negocio' %}{% if user.role=='admin' %}{% include 'config.html' %}<script src="{{ url_for('static', filename='crm_c02_config.js') }}?v={{ asset_v }}"></script>{% else %}<section class="card"><h2>Negocio y horarios</h2><p class="notice">Sólo un administrador edita la configuración del negocio y los horarios.</p></section>{% endif %}
+{% elif tab=='simulador' %}{% include 'simulador.html' %}<script src="{{ url_for('static', filename='crm_c02_simulador.js') }}?v={{ asset_v }}"></script>
+{% elif tab=='inbox' %}{% include 'inbox.html' %}<script src="{{ url_for('static', filename='crm_c02_inbox.js') }}?v={{ asset_v }}"></script>
 {% elif tab=='profile' %}<section class="card narrow"><h2>Cambiar contraseña</h2><form action="/password" method="post">{{ token() }}<label>Contraseña actual<input type="password" name="current_password" required autocomplete="current-password"></label><label>Nueva contraseña<input type="password" name="password" minlength="12" maxlength="256" required autocomplete="new-password"></label><p class="muted">Al guardar se cerrarán tus sesiones. Vuelve a ingresar con la nueva contraseña.</p><button>Guardar contraseña</button></form></section>{% endif %}
 {% endblock %}

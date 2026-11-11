@@ -183,8 +183,13 @@ def test_horario_semanal_misma_regla_panel_y_canal(crm):
     out = worker.paso(contexto={'professionals': [{'id': 1, 'name': 'Dra. Ana'}]})
     assert out['citas_creadas'] == 0
     textos = _outbox_texts(db)
+    # Fuera de ventana: o rechazo con el motivo (cerrado/no atiende/abre/
+    # cierre) o propuesta del hueco más cercano EL MISMO DÍA; en ningún caso
+    # se crea la cita.
     assert textos and any('no atiende' in t or 'abre' in t or 'cierre' in t
-                          or 'fuera' in t for t in textos)
+                          or 'fuera' in t or 'cerrado' in t
+                          or 'no alcanzamos' in t or 'Tengo libre' in t
+                          for t in textos)
 
     # Panel: misma ventana rechaza el mismo horario.
     client = crm.test_client()

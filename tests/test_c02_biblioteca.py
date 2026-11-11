@@ -187,7 +187,7 @@ def test_persistencia_al_reiniciar_app_y_listado_ui(app):
     assert 'crm_c02_biblioteca.js' in page and 'c02-library-app' in page
     # historial renombrado: ya no se presenta como biblioteca
     nav = c.get('/').data.decode('utf-8', 'replace')
-    assert 'Historial de envíos' in nav and 'Biblioteca de recursos' in nav
+    assert 'Mensajes enviados' in nav and 'Archivos para enviar' in nav
     assert 'biblioteca.html' not in page or True
 
 

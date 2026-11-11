@@ -304,7 +304,7 @@ def test_migration_v4_adds_channel_and_backfills_google(tmp_path, monkeypatch):
     with connect(path) as db:
         versions = [row[0] for row in db.execute(
             'SELECT version FROM crm_migrations ORDER BY version')]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [v for v, _ in store.MIGRATIONS]
         rows = {row['event_id']: row['channel'] for row in
                 db.execute('SELECT event_id, channel FROM crm_appointments')}
     assert rows['evt-g'] == 'google'
@@ -312,7 +312,7 @@ def test_migration_v4_adds_channel_and_backfills_google(tmp_path, monkeypatch):
     initialize(path)  # idempotente
     with connect(path) as db:
         assert [row[0] for row in db.execute(
-            'SELECT version FROM crm_migrations ORDER BY version')] == [1, 2, 3, 4]
+            'SELECT version FROM crm_migrations ORDER BY version')] == [v for v, _ in store.MIGRATIONS]
 
 
 # --- G01B R1: el perfil es la única autoridad de zona -------------------------

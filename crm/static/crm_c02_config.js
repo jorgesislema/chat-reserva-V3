@@ -17,6 +17,7 @@
   var el = function (id) { return document.getElementById(id); };
   var nombre = el('c02-cfg-nombre');
   var rubro = el('c02-cfg-rubro');
+  var rubroEtiqueta = el('c02-cfg-rubro-etiqueta');
   var zona = el('c02-cfg-zona');
   var moneda = el('c02-cfg-moneda');
   var saludo = el('c02-cfg-saludo');
@@ -63,11 +64,12 @@
     if (saveBtn) saveBtn.disabled = false;
   }
 
-  function buildWeek(horarios) {
+  function buildWeek(horarios, almuerzos) {
     if (!weekBody) return;
     weekBody.innerHTML = '';
     for (var d = 0; d < 7; d++) {
       var win = horarios && horarios[String(d)];
+      var alm = almuerzos && almuerzos[String(d)];
       var tr = document.createElement('tr');
       var td1 = document.createElement('td'); td1.textContent = DIAS[d];
       var td2 = document.createElement('td');
@@ -77,32 +79,54 @@
       td2.appendChild(chk);
       var td3 = document.createElement('td');
       var inpA = document.createElement('input');
-      inpA.type = 'time'; inpA.step = '1800'; inpA.dataset.dia = d; inpA.dataset.lado = 'a';
+      inpA.type = 'time'; inpA.step = '60'; inpA.dataset.dia = d; inpA.dataset.lado = 'a';
       var td4 = document.createElement('td');
       var inpC = document.createElement('input');
-      inpC.type = 'time'; inpC.step = '1800'; inpC.dataset.dia = d; inpC.dataset.lado = 'c';
+      inpC.type = 'time'; inpC.step = '60'; inpC.dataset.dia = d; inpC.dataset.lado = 'c';
       if (win && win[0]) inpA.value = win[0];
       if (win && win[1]) inpC.value = win[1];
       td3.appendChild(inpA); td4.appendChild(inpC);
+      var td5 = document.createElement('td');
+      var inpA2 = document.createElement('input');
+      inpA2.type = 'time'; inpA2.step = '60'; inpA2.dataset.dia = d; inpA2.dataset.lado = 'a2';
+      var td6 = document.createElement('td');
+      var inpC2 = document.createElement('input');
+      inpC2.type = 'time'; inpC2.step = '60'; inpC2.dataset.dia = d; inpC2.dataset.lado = 'c2';
+      if (alm && alm[0]) inpA2.value = alm[0];
+      if (alm && alm[1]) inpC2.value = alm[1];
+      td5.appendChild(inpA2); td6.appendChild(inpC2);
       tr.appendChild(td1); tr.appendChild(td2);
       tr.appendChild(td3); tr.appendChild(td4);
+      tr.appendChild(td5); tr.appendChild(td6);
       weekBody.appendChild(tr);
     }
   }
 
   function horariosFromDom() {
     var out = {};
-    if (!weekBody) return out;
+    var almuerzos = {};
+    if (!weekBody) return { horarios: out, almuerzos: almuerzos };
     var checks = weekBody.querySelectorAll('input.c02-dia-lab');
     var labels = {};
     for (var i = 0; i < checks.length; i++) labels[checks[i].dataset.dia] = checks[i].checked;
-    var inputs = weekBody.querySelectorAll('input[data-dia]');
+    // Sólo entradas de hora (con data-lado): el checkbox tiene data-dia pero
+    // su value ("on") no es una hora y antes contaminaba la lectura.
+    var inputs = weekBody.querySelectorAll('input[data-dia][data-lado]');
     for (var j = 0; j < inputs.length; j++) {
       var inp = inputs[j];
       var d = inp.dataset.dia;
       if (labels[d] === false) continue;
-      if (!out[d]) out[d] = [];
-      out[d][inp.dataset.lado === 'a' ? 0 : 1] = inp.value || null;
+      if (inp.validity && inp.validity.badInput) {
+        throw new Error('El día ' + DIAS[Number(d)] + ' tiene una hora no válida');
+      }
+      var lado = inp.dataset.lado;
+      var destino = (lado === 'a2' || lado === 'c2') ? almuerzos : out;
+      if (!destino[d]) destino[d] = [];
+      var idx = (lado === 'a' || lado === 'a2') ? 0 : 1;
+      var val = inp.value || null;
+      // 00:00 = casilla sin usar (el reloj queda en 00:00 al limpiar).
+      if (val === '00:00' && (lado === 'a2' || lado === 'c2')) val = null;
+      destino[d][idx] = val;
     }
     Object.keys(out).forEach(function (d) {
       var w = out[d];
@@ -110,7 +134,13 @@
       if (!w[0] || !w[1]) throw new Error('El día ' + DIAS[Number(d)] + ' debe tener apertura y cierre');
       if (w[0] >= w[1]) throw new Error('En ' + DIAS[Number(d)] + ' la apertura debe ser anterior al cierre');
     });
-    return out;
+    Object.keys(almuerzos).forEach(function (d) {
+      var w = almuerzos[d];
+      if (!w[0] && !w[1]) { delete almuerzos[d]; return; }
+      if (!w[0] || !w[1]) throw new Error('El almuerzo del ' + DIAS[Number(d)] + ' debe tener inicio y fin');
+      if (w[0] >= w[1]) throw new Error('En el almuerzo del ' + DIAS[Number(d)] + ' el inicio debe ser anterior al fin');
+    });
+    return { horarios: out, almuerzos: almuerzos };
   }
 
   function renderExcs() {
@@ -160,8 +190,67 @@
       });
       var txt = document.createElement('span');
       txt.textContent = esp.nombre + (esp.especialidad ? ' (' + esp.especialidad + ')' : '');
-      lab.appendChild(txt); lab.appendChild(chk);
+      var alm = document.createElement('span');
+      alm.className = 'muted tiny';
+      alm.textContent = ' Almuerzo: ';
+      var inpA = document.createElement('input');
+      inpA.type = 'time'; inpA.step = '60'; inpA.value = esp.almuerzo_inicio || '';
+      inpA.setAttribute('aria-label', 'Almuerzo desde de ' + esp.nombre);
+      inpA.addEventListener('change', function () {
+        // 00:00 = casilla sin usar.
+        esp.almuerzo_inicio = (inpA.value === '00:00') ? null : (inpA.value || null);
+        ok('Cambios pendientes de guardar.');
+      });
+      var inpC = document.createElement('input');
+      inpC.type = 'time'; inpC.step = '60'; inpC.value = esp.almuerzo_fin || '';
+      inpC.setAttribute('aria-label', 'Almuerzo hasta de ' + esp.nombre);
+      inpC.addEventListener('change', function () {
+        esp.almuerzo_fin = (inpC.value === '00:00') ? null : (inpC.value || null);
+        ok('Cambios pendientes de guardar.');
+      });
+      alm.appendChild(inpA); alm.appendChild(document.createTextNode('–')); alm.appendChild(inpC);
+      lab.appendChild(txt); lab.appendChild(chk); lab.appendChild(alm);
       espBox.appendChild(lab);
+      // Horario semanal por doctor, visible debajo de su nombre:
+      // palomita por día (sin marcar = no trabaja ese día),
+      // horas vacías = sigue el horario del negocio.
+      if (!esp.horario || typeof esp.horario !== 'object') esp.horario = {};
+      var grid = document.createElement('div');
+      grid.className = 'c02-esp-horario';
+      for (var d = 0; d < 7; d++) (function (dd) {
+        var fila = document.createElement('div');
+        var on = document.createElement('input');
+        on.type = 'checkbox';
+        var cur = esp.horario[String(dd)];
+        on.checked = !!cur || cur instanceof Array;
+        var nom = document.createElement('span');
+        nom.className = 'muted tiny';
+        nom.textContent = ' ' + DIAS[dd] + ' ';
+        var ia = document.createElement('input');
+        ia.type = 'time'; ia.step = '60';
+        var ic = document.createElement('input');
+        ic.type = 'time'; ic.step = '60';
+        if (cur instanceof Array && cur[0]) ia.value = cur[0];
+        if (cur instanceof Array && cur[1]) ic.value = cur[1];
+        var leer = function () {
+          if (!on.checked) { delete esp.horario[String(dd)]; return; }
+          var a = (ia.value === '00:00') ? '' : ia.value;
+          var c = (ic.value === '00:00') ? '' : ic.value;
+          if (!a && !c) { esp.horario[String(dd)] = []; return; }
+          esp.horario[String(dd)] = [a || null, c || null];
+        };
+        var cambio = function () {
+          leer();
+          ok('Cambios pendientes de guardar.');
+        };
+        on.addEventListener('change', cambio);
+        ia.addEventListener('change', cambio);
+        ic.addEventListener('change', cambio);
+        fila.appendChild(on); fila.appendChild(nom);
+        fila.appendChild(ia); fila.appendChild(document.createTextNode('–')); fila.appendChild(ic);
+        grid.appendChild(fila);
+      })(d);
+      espBox.appendChild(grid);
     });
   }
 
@@ -170,16 +259,38 @@
     saveBtn.disabled = true;
     if (msgEl) msgEl.textContent = 'Guardando…';
     var horarios;
-    try { horarios = horariosFromDom(); }
+    var almuerzos;
+    try {
+      var semana = horariosFromDom();
+      horarios = semana.horarios;
+      almuerzos = semana.almuerzos;
+      // Horario propio por doctor: día marcado con horas exige inicio < fin.
+      especialistas.forEach(function (esp) {
+        var h = esp.horario || {};
+        Object.keys(h).forEach(function (d) {
+          var w = h[d];
+          if (w instanceof Array && w.length === 0) return;
+          if (!w || w.length !== 2 || !w[0] || !w[1]) {
+            throw new Error('Horario de ' + esp.nombre + ' el ' + DIAS[Number(d)] + ': apertura y cierre (HH:MM) o casilla vacía');
+          }
+          if (w[0] >= w[1]) {
+            throw new Error('Horario de ' + esp.nombre + ' el ' + DIAS[Number(d)] + ': la apertura debe ser anterior al cierre');
+          }
+        });
+      });
+    }
     catch (e) { saveBtn.disabled = false; fail(e); return; }
 
     var claves = [
       ['negocio_nombre', nombre && nombre.value.trim()],
+      ['negocio_rubro', rubro && rubro.value.trim()],
+      ['negocio_rubro_etiqueta', rubroEtiqueta && rubroEtiqueta.value.trim()],
       ['negocio_zona', zona && zona.value.trim()],
       ['negocio_moneda', moneda && moneda.value.trim().toUpperCase()],
       ['saludo', saludo && saludo.value],
       ['mensaje_fuera', fuera && fuera.value],
       ['negocio_horarios', JSON.stringify(horarios)],
+      ['negocio_almuerzos', JSON.stringify(almuerzos)],
       ['negocio_excepciones', JSON.stringify(excs)],
       ['negocio_especialistas', JSON.stringify(especialistas)]
     ];
@@ -217,7 +328,8 @@
     var p = j.perfil || {};
     var s = j.settings || {};
     if (nombre) nombre.value = s.negocio_nombre || p.nombre || '';
-    if (rubro) rubro.value = p.rubro_etiqueta || p.rubro || '';
+    if (rubro) rubro.value = s.negocio_rubro || p.rubro || '';
+    if (rubroEtiqueta) rubroEtiqueta.value = s.negocio_rubro_etiqueta || p.rubro_etiqueta || '';
     if (zona) zona.value = s.negocio_zona || p.zona || '';
     if (moneda) moneda.value = s.negocio_moneda || p.moneda || '';
     if (saludo) saludo.value = s.saludo || '';
@@ -226,11 +338,15 @@
     if (typeof s.negocio_horarios === 'string' && s.negocio_horarios) {
       try { var parsed = JSON.parse(s.negocio_horarios); if (parsed && typeof parsed === 'object') horarios = parsed; } catch (e) {}
     }
-    buildWeek(horarios);
+    var almuerzos = {};
+    if (typeof s.negocio_almuerzos === 'string' && s.negocio_almuerzos) {
+      try { var parsedA = JSON.parse(s.negocio_almuerzos); if (parsedA && typeof parsedA === 'object') almuerzos = parsedA; } catch (e) {}
+    }
+    buildWeek(horarios, almuerzos);
     excs = (s.negocio_excepciones && typeof s.negocio_excepciones === 'object')
       ? s.negocio_excepciones : {};
     renderExcs();
-    especialistas = (s.negocio_especialistas || []).map(function (e) { return { id: e.id, nombre: e.nombre, especialidad: e.especialidad || '', activo: !!e.activo }; });
+    especialistas = (s.negocio_especialistas || []).map(function (e) { return { id: e.id, nombre: e.nombre, especialidad: e.especialidad || '', activo: !!e.activo, almuerzo_inicio: e.almuerzo_inicio || null, almuerzo_fin: e.almuerzo_fin || null, horario: (e.horario && typeof e.horario === 'object') ? e.horario : {} }; });
     renderEspecialistas();
     if (msgEl) msgEl.textContent = '';
   }).catch(function (e) {

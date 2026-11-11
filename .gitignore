@@ -41,3 +41,17 @@ credenciales*.json
 .mypy_cache/
 radar.py
 test_apis.py
+
+# Índices vectoriales locales (derivados; se reconstruyen con scripts/reconstruir_indice.py)
+*.qdrant/
+
+# Binarios y temporales locales (no versionar)
+cloudflared.exe
+.tmp-*/
+.zwork/
+*.pyc
+CONFIGURACION-*.xlsx
+*.qdrant/
+
+docs/producto/entregas/BOT-EVAL-01/EVIDENCIAS/**/resultados.json
+

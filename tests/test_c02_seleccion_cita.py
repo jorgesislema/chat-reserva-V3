@@ -102,6 +102,15 @@ def _si(crm, ex_id):
     return _paso(crm, 'sí', ex_id)
 
 
+def _pendiente_sel(db, telefono='59170000111'):
+    """Pending guardado de la conversación (para afirmar estado, no texto)."""
+    with connect(db) as conn:
+        row = conn.execute(
+            'SELECT pending FROM crm_conversations WHERE client_key=?',
+            (telefono,)).fetchone()
+    return json.loads(row['pending']) if row and row['pending'] else {}
+
+
 def _citas(crm, lead_id=None):
     with connect(crm.config['DATABASE']) as conn:
         q = 'SELECT * FROM crm_appointments'
@@ -131,21 +140,19 @@ def test_duracion_procede_del_servicio_seleccionado(crm):
     _seed_servicio(db, 'Blanqueamiento', 45, 1)
     f = _dias_util().isoformat()
 
-    out = _paso(crm, 'quiero reservar %s a las 10:30' % f, 'e1')
+    out = _paso(crm, 'quiero reservar blanqueamiento %s a las 10:30' % f, 'e1')
     assert out['citas_creadas'] == 0
-    assert any('¿Qué necesitas' in t for t in _textos(db))
-    _paso(crm, '2', 'e2')
     assert any('¿Con qué profesional' in t for t in _textos(db))
+    _paso(crm, 'blanqueamiento', 'e2')
     out = _paso(crm, '1', 'e3')  # Dra. Ana
     assert out['citas_creadas'] == 0            # primero se propone el hueco
-    assert any('¿Te lo reservo?' in t for t in _textos(db))
+    assert any('¿Se lo reservo?' in t for t in _textos(db))
     out = _si(crm, 'e4')
     assert out['citas_creadas'] == 1
     c = _citas(crm)[0]
     s = datetime.fromisoformat(c['start']); e = datetime.fromisoformat(c['end'])
     assert (e - s).total_seconds() // 60 == 45
-    assert any('Blanqueamiento' in t
-               for t in _textos(db) if 'Tu cita' in t)
+    assert any('Blanqueamiento' in t and 'Se lo reservo' in t for t in _textos(db))
 
 
 def test_profesional_seleccionado_por_numero_en_bd(crm):
@@ -170,9 +177,9 @@ def test_cancelar_segunda_cita_y_primera_intacta(crm):
 
     _paso(crm, 'quiero cancelar', 'cb1')
     texts = _textos(db)
-    assert any('Tiene varias citas' in t and '#%d' % id2 in t for t in texts)
+    assert any('Tiene varias citas' in t and '11:00' in t for t in texts)
     _paso(crm, '2', 'cb2')
-    assert any('#%d' % id2 in t and '¿Confirma' in t for t in _textos(db))
+    assert any('11:00' in t and '¿Confirma' in t for t in _textos(db))
     _paso(crm, 'sí, cancela', 'cb3')
     by_id = {c['id']: c for c in _citas(crm)}
     assert by_id[id2]['operational_status'] == 'cancelled'
@@ -205,16 +212,20 @@ def test_seleccion_ambigua_inexistente_o_ajena_no_muta(crm):
     _seed_servicio(db, 'Blanqueamiento', 45, 1)
     f = _dias_util().isoformat()
 
-    # Ambigua: dos servicios sin elegir ninguno no crea nada y pide lista.
+    # Sin nombrar tratamiento no se asume nada: primero se confirma si ya
+    # es paciente; el "masajes" ajeno al catálogo repite la pregunta.
     o1 = _paso(crm, 'quiero reservar %s a las 10:30' % f, 'am1')
     assert o1['citas_creadas'] == 0
-    assert any('¿Qué necesitas' in t for t in _textos(db))
-    # Inexistente: respuesta fuera de la lista.
-    _paso(crm, '99', 'am2')
-    assert any('nombre o el número' in t for t in _textos(db))
+    assert any('Es su primera vez' in t for t in _textos(db))
+    # Inexistente: respuesta fuera del catálogo no crea nada y repite.
+    _paso(crm, 'masajes', 'am2')
+    assert any('Es su primera vez' in t for t in _textos(db))
     assert len(_citas(crm)) == 0
-    # Completar la reserva (servicio 1, profesional 1).
-    _paso(crm, '1', 'am3')
+    # Paciente recurrente: sigue el flujo sin volver a preguntar.
+    _paso(crm, 'sí, ya me atendieron antes', 'am2b')
+    assert any('¿Con qué profesional' in t for t in _textos(db))
+    # Completar la reserva nombrando el servicio (blanqueamiento).
+    _paso(crm, 'blanqueamiento', 'am3')
     assert any('¿Con qué profesional' in t for t in _textos(db))
     _paso(crm, '1', 'am4')
     assert len(_citas(crm)) == 0                # nada se crea antes del «sí»
@@ -222,10 +233,12 @@ def test_seleccion_ambigua_inexistente_o_ajena_no_muta(crm):
     assert len(_citas(crm)) == 1
 
     # Ajena: otro teléfono no ve ni modifica la cita del primer cliente.
+    # Sin cita a la vista se piden los datos para ubicarla (regla de oro),
+    # nunca se afirma ni se toca nada ajeno.
     wa_ingest(db, external_id='am5', phone='59170000222',
               body='quiero cancelar mi cita')
     canal.WorkerCanal(db, worker='w-am5').paso(contexto=_ctx())
-    assert any('No encontré ninguna cita tuya' in t for t in _textos(db))
+    assert any('Para ubicar su turno' in t for t in _textos(db))
     assert len(_citas(crm)) == 1
     assert _citas(crm)[0]['operational_status'] in ('pending', 'confirmed')
 
@@ -239,11 +252,13 @@ def test_selecciones_conservadas_entre_mensajes(crm):
     f = _dias_util().isoformat()
 
     o1 = _paso(crm, 'quiero reservar', 'm1')
-    assert o1['citas_creadas'] == 0 and any('¿Qué necesitas' in t for t in _textos(db))
-    o2 = _paso(crm, '2', 'm2')
+    assert o1['citas_creadas'] == 0 and any('Es su primera vez' in t for t in _textos(db))
+    o1b = _paso(crm, 'es mi primera vez', 'm1b')
+    assert o1b['citas_creadas'] == 0 and any('Qué tratamiento' in t for t in _textos(db))
+    o2 = _paso(crm, 'blanqueamiento', 'm2')
     assert o2['citas_creadas'] == 0 and any('¿Con qué profesional' in t for t in _textos(db))
     o3 = _paso(crm, '1', 'm3')
-    assert o3['citas_creadas'] == 0 and any('¿Qué día te viene bien' in t for t in _textos(db))
+    assert o3['citas_creadas'] == 0 and any('¿Qué día le viene bien' in t for t in _textos(db))
     o4 = _paso(crm, '%s 10:30' % f, 'm4')
     assert o4['citas_creadas'] == 0
     o4 = _si(crm, 'm5')
@@ -295,9 +310,9 @@ def test_horario_cerrado_y_conflicto_respetan_dominio(crm):
     config_set(db, key='negocio_excepciones',
                value='{"%s":{"estado":"cerrado"}}' % f, actor=1)
     _paso(crm, 'quiero reservar %s a las 10:30' % f, 'hc1')
-    out = _paso(crm, '1', 'hc2')  # elige profesional 1 ⇒ guarda ⇒ rechaza
+    out = _paso(crm, '1', 'hc2')  # elige profesional 1 ⇒ rechaza sin proponer
     assert out['citas_creadas'] == 0
-    assert any('cerrado' in t.lower() or 'cierre' in t.lower()
+    assert any('cerrado' in t.lower() or 'no atiende' in t.lower()
                for t in _textos(db))
     assert len(_citas(crm)) == 0
     config_set(db, key='negocio_excepciones', value='{}', actor=1)
@@ -308,7 +323,7 @@ def test_horario_cerrado_y_conflicto_respetan_dominio(crm):
     _si(crm, 'hc4b')
     assert len(_citas(crm)) == 1
     _paso(crm, 'quiero reservar %s a las 10:30' % f, 'hc5')
-    out = _paso(crm, '1', 'hc6')
+    _paso(crm, '1', 'hc6')
     assert out['citas_creadas'] == 0
     assert len(_citas(crm)) == 1
 
@@ -372,19 +387,20 @@ def test_recorrido_http_canal_y_misma_cita_desde_panel(crm):
     assert data['lead_id'] == expected['lead_id']
 
 
-def test_sel01_reasignacion_servicio_en_pre_escritura(crm):
-    """SEL-01 — regresión de la reproducción del revisor (repro_compatibilidad.py).
+def test_sel01_servicio_asignado_a_otra_doctora_no_bloquea_la_elegida(crm):
+    """SEL-01 con la política del 2026-11-10: el «Profesional» del catálogo
+    solo PROPONE; cualquier doctora activa puede atender el servicio.
 
-    El cliente selecciona al profesional 1; justo antes de guardar, el servicio
-    pasa a estar asignado al profesional 2 (hook pre_escritura). El canal debe:
-    1) NO crear la cita con el profesional 1 ni emitir confirmación;
-    2) pedir al cliente que elija otra opción (mensaje claro);
-    3) permitir completar con el profesional 2 sin reiniciar la conversación;
-    4) conservar fecha, hora y duración (45 min del servicio);
-    5) no romper el caso de servicio sin restricción con profesional compatible.
+    El cliente elige a la Dra. Ana; justo antes de guardar, el servicio pasa a
+    estar asignado al Dr. Luis (hook pre_escritura), igual que la reproducción
+    del revisor. El canal debe:
+    1) crear la cita con la profesional ELEGIDA, sin cambiarla en silencio;
+    2) no decir que «ya no atiende ese servicio» ni pedir otra selección;
+    3) conservar fecha, hora y duración (45 min del servicio);
+    4) dejar la asignación del catálogo como sugerencia, no como restricción.
     """
     db = crm.config['DATABASE']
-    sid, _ = _seed_servicio(db, 'Servicio Fixture', 45, 1)  # sin restricción
+    sid, _ = _seed_servicio(db, 'Servicio Fixture', 45, 1)  # sin asignación
     f = _dias_util().isoformat()
 
     # El cliente reserva; el canal pregunta el profesional (2 activos).
@@ -393,11 +409,10 @@ def test_sel01_reasignacion_servicio_en_pre_escritura(crm):
 
     # Elección del profesional: el canal PROPONE el hueco (aún no escribe).
     _paso(crm, '1', 'sel2')
-    assert any('¿Te lo reservo?' in t for t in _textos(db))
+    assert any('¿Se lo reservo?' in t for t in _textos(db))
     assert len(_citas(crm)) == 0
 
-    # Cambio de asociación justo antes de la escritura del turno que confirma
-    # (igual que la reproducción del revisor).
+    # Cambio de sugerencia justo antes de la escritura del turno que confirma.
     def reassign():
         with connect(db) as c:
             c.execute('UPDATE crm_catalog_items SET professional_id=2 WHERE id=?',
@@ -407,28 +422,17 @@ def test_sel01_reasignacion_servicio_en_pre_escritura(crm):
     out = canal.WorkerCanal(db, worker='w-sel2b',
                             hooks={'pre_escritura': reassign}).paso(contexto=_ctx())
 
-    # 1) Sin cita incompatible ni confirmación.
-    assert out['citas_creadas'] == 0
-    with connect(db) as c:
-        n = c.execute('SELECT COUNT(*) AS n FROM crm_appointments').fetchone()['n']
-    assert n == 0
-    textos = _textos(db)
-    assert not any('Tu cita de' in t for t in textos)
-
-    # 2) El cliente recibe una solicitud clara de elegir otra opción.
-    assert any('profesional' in t.lower() and 'otra opción' in t.lower()
-               for t in textos)
-
-    # 3)-4) Responder con la nueva opción válida completa la reserva sin
-    # reiniciar la conversación, conservando servicio/fecha/hora/duración.
-    out = _paso(crm, '1', 'sel3')  # Dr. Luis, posición 1 en la lista refrescada
-    assert out['citas_creadas'] == 0            # se propone y se pide confirmar
-    out = _paso(crm, 'sí', 'sel4')
+    # 1)-2) Se reserva con la doctora elegida y no se le pide otra selección.
     assert out['citas_creadas'] == 1
+    textos = _textos(db)
+    assert not any('ya no atiende ese servicio' in t.lower() for t in textos), textos
+    assert not any('otra opción' in t.lower() for t in textos), textos
+
+    # 3)-4) Cita con la profesional elegida, servicio/fecha/hora/duración iguales.
     citas = _citas(crm)
     assert len(citas) == 1
     c = citas[0]
-    assert c['professional_id'] == 2
+    assert c['professional_id'] == 1
     assert c['title'] == 'Reserva: Servicio Fixture'
     s = datetime.fromisoformat(c['start'])
     e = datetime.fromisoformat(c['end'])
@@ -450,3 +454,492 @@ def test_sel01_servicio_sin_restriccion_conserva_flujo(crm):
     out = _si(crm, 'ns3')
     assert out['citas_creadas'] == 1
     assert _citas(crm)[0]['professional_id'] == 2
+
+
+def test_turno_por_la_manana_propone_apertura(crm):
+    """«Por la mañana» propone la apertura (09:00) verificada, no repregunta
+    la hora a ciegas: dice que abre a las 9, revisa y propone."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    f = _dias_util().isoformat()
+
+    _paso(crm, 'quiero reservar %s por la mañana' % f, 'mm1')
+    textos = _textos(db)
+    assert any('Es su primera vez' in t for t in textos), textos
+    assert not any('¿Se lo reservo?' in t for t in textos)
+    _paso(crm, 'es mi primera vez', 'mm2')
+    assert any('¿Con qué profesional' in t for t in _textos(db))
+    out = _paso(crm, '1', 'mm3')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert any('09:00' in t and '¿Se lo reservo?' in t for t in textos), textos
+    assert any('para Consulta' in t for t in textos), textos
+    assert not any('para Valoración' in t for t in textos), textos
+    assert not any('Horario:' in t for t in textos)
+    out = _si(crm, 'mm4')
+    assert out['citas_creadas'] == 1
+    c = _citas(crm)[0]
+    assert c['start'].startswith(f + 'T14:00')  # 09:00 local (UTC-5)
+
+
+def test_paciente_recurrente_reserva_consulta_sin_valoracion(crm):
+    """Sin tratamiento nombrado y con día/hora, la cita queda como CONSULTA
+    (30 min); nunca se ofrece ni se nombra «Valoración» (2026-11-10)."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    f = _dias_util().isoformat()
+
+    _paso(crm, 'quiero reservar %s a las 10:30' % f, 'rc1')
+    assert any('Es su primera vez' in t for t in _textos(db))
+    assert _citas(crm) == []
+    _paso(crm, 'sí, ya me atendieron antes', 'rc2')
+    textos = _textos(db)
+    assert not any('valoración' in t.lower() for t in textos), textos
+    assert any('¿Con qué profesional' in t for t in textos), textos
+    out = _paso(crm, '2', 'rc3')  # Dr. Luis
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert any('para Consulta' in t and '¿Se lo reservo?' in t
+               for t in textos), textos
+    out = _si(crm, 'rc4')
+    assert out['citas_creadas'] == 1
+    assert _citas(crm)[0]['professional_id'] == 2
+    assert _citas(crm)[0]['title'] == 'Consulta'
+
+
+def test_horario_fuera_de_ventana_no_se_propone(crm):
+    """A las 20:00 (cierre 17:00) no se propone ni se crea nada: se rechaza
+    con el motivo corto, sin volcar el horario."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Limpieza dental', 30, 1, professional_id=1)
+    f = _dias_util().isoformat()
+
+    out = _paso(crm, 'quiero reservar %s a las 20:00' % f, 'fz1')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert textos, 'el rechazo responde algo'
+    assert any('cierre' in t for t in textos), textos
+    assert not any('¿Se lo reservo?' in t or '¿Le reservo?' in t for t in textos)
+    assert not any('Horario:' in t for t in textos)
+    assert _citas(crm) == []
+
+
+def test_primera_vez_reserva_consulta_sin_mencionar_valoracion(crm):
+    """Primera vez + día/hora ya anotados: consulta genérica de 30 min; la
+    palabra «valoración» no aparece nunca (decisión 2026-11-10)."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    f = _dias_util().isoformat()
+
+    _paso(crm, 'quiero reservar %s a las 10:30' % f, 'pv1')
+    assert any('Es su primera vez' in t for t in _textos(db))
+    out = _paso(crm, 'es mi primera vez', 'pv2')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert not any('valoración' in t.lower() for t in textos), textos
+    assert any('¿Con qué profesional' in t for t in textos), textos
+    _paso(crm, '1', 'pv3')
+    assert any('para Consulta' in t and '¿Se lo reservo?' in t
+               for t in _textos(db))
+    out = _si(crm, 'pv4')
+    assert out['citas_creadas'] == 1
+    assert _citas(crm)[0]['title'] == 'Consulta'
+
+
+def test_sin_valoracion_en_catalogo_la_consulta_sigue_siendo_consulta(crm):
+    """Aunque el catálogo no tenga valoración, la consulta genérica no se
+    inventa como servicio: título «Consulta» y sin mencionar valoración."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    _seed_servicio(db, 'Blanqueamiento', 45, 1)
+    f = _dias_util().isoformat()
+
+    _paso(crm, 'quiero reservar %s a las 10:30' % f, 'sv1')
+    out = _paso(crm, 'es mi primera vez', 'sv2')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert not any('valoración' in t.lower() for t in textos), textos
+    assert any('¿Con qué profesional' in t for t in textos), textos
+    _paso(crm, '1', 'sv3')
+    out = _si(crm, 'sv4')
+    assert out['citas_creadas'] == 1
+    assert _citas(crm)[0]['title'] == 'Consulta'
+
+
+def test_propuesta_cambia_a_tratamiento_nombrado(crm):
+    """Sobre una propuesta, nombrar otro tratamiento cambia el servicio y se
+    vuelve a proponer (maquinaria existente de cambio sobre propuesta)."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    _seed_servicio(db, 'Blanqueamiento', 45, 1)
+    f = _dias_util().isoformat()
+
+    _paso(crm, 'quiero reservar limpieza %s a las 10:30' % f, 'ct1')
+    assert any('¿Con qué profesional' in t for t in _textos(db))
+    _paso(crm, '1', 'ct2')
+    assert any('para Limpieza dental' in t for t in _textos(db))
+    out = _paso(crm, 'mejor blanqueamiento', 'ct3')
+    assert out['citas_creadas'] == 0
+    assert any('¿Con qué profesional' in t for t in _textos(db))
+    _paso(crm, '1', 'ct4b')
+    textos = _textos(db)
+    assert any('para Blanqueamiento' in t and '¿Se lo reservo?' in t
+               for t in textos), textos
+    out = _si(crm, 'ct5')
+    assert out['citas_creadas'] == 1
+    assert 'Blanqueamiento' in _citas(crm)[0]['title']
+
+
+def test_aceptar_alternativa_conserva_el_dia(crm):
+    """Regla de oro 2026-11-09: al aceptar una hora alternativa del MISMO día
+    no se vuelve a preguntar el día (antes se borraba la fecha)."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Limpieza dental', 30, 1, professional_id=1)
+    f = _dias_util().isoformat()
+    _crear_cita(crm, 1, f, '10:30')
+
+    out = _paso(crm, 'quiero reservar limpieza %s a las 10:30' % f, 'alt1')
+    assert out['citas_creadas'] == 0
+    assert any('puedo ofrecer' in t for t in _textos(db))
+    out = _paso(crm, 'a las 11:00', 'alt2')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert not any('¿Para qué día' in t for t in textos), textos
+    assert any('para Limpieza dental' in t for t in textos), textos
+
+
+def test_cancelar_sin_cita_pide_datos_ubica_o_deriva(crm):
+    """Regla de oro 2026-11-09: sin cita a la vista no se recita ni se cierra
+    en falso; se piden nombre/teléfono para ubicarla y, si ni así aparece,
+    la gestiona el equipo."""
+    from crm import c02_services as _svc
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    f = _dias_util().isoformat()
+    _crear_cita(crm, 1, f, '10:30')
+    otro, tercero = '59170000222', '59170000333'
+
+    # Datos desconocidos: deriva al equipo sin tocar la cita.
+    wa_ingest(db, external_id='cx1', phone=tercero, body='quiero cancelar mi cita')
+    canal.WorkerCanal(db, worker='w-cx1').paso(contexto=_ctx())
+    assert any('Para ubicar su turno' in t for t in _textos(db))
+    wa_ingest(db, external_id='cx2', phone=tercero, body='Fulano Desconocido')
+    canal.WorkerCanal(db, worker='w-cx2').paso(contexto=_ctx())
+    textos = _textos(db)
+    assert any('recepción' in t for t in textos), textos
+    conv = _svc.conv_by_key(db, tercero)
+    assert conv['state'] == 'esperando_humano'
+    assert _citas(crm)[0]['operational_status'] in ('pending', 'confirmed')
+
+    # Nombre del lead con cita: la ubica, confirma y cancela.
+    wa_ingest(db, external_id='cx3', phone=otro, body='quiero cancelar mi cita')
+    canal.WorkerCanal(db, worker='w-cx3').paso(contexto=_ctx())
+    assert any('Para ubicar su turno' in t for t in _textos(db))
+    wa_ingest(db, external_id='cx4', phone=otro, body='Cliente')
+    canal.WorkerCanal(db, worker='w-cx4').paso(contexto=_ctx())
+    assert any('Confirma que desea cancelar' in t for t in _textos(db))
+    wa_ingest(db, external_id='cx5', phone=otro, body='sí')
+    canal.WorkerCanal(db, worker='w-cx5').paso(contexto=_ctx())
+    assert any('quedó cancelada' in t for t in _textos(db))
+    assert _citas(crm)[0]['operational_status'] == 'cancelled'
+
+
+def test_aceptar_oferta_del_equipo_deriva_a_humano(crm):
+    """«¿Quiere que lo consulte con el equipo?» + «sí» deriva a una persona
+    con alerta y pausa (nunca bucle de abstención)."""
+    from crm import chat_adapter as _ad
+    from crm import c02_services as _svc
+    db = crm.config['DATABASE']
+    tel = '59170000111'
+
+    def _turno(body, ex):
+        wa_ingest(db, external_id=ex, phone=tel, body=body)
+        return canal.WorkerCanal(db, worker='w-' + ex).paso(
+            contexto=_ctx(), adaptador_rag=_ad.AdaptadorSimulado())
+
+    _turno('¿tienen parqueadero techado?', 'eq1')
+    assert any('No tengo confirmado ese dato' in t for t in _textos(db))
+    _turno('sí', 'eq2')
+    textos = _textos(db)
+    assert any('ya le pasé su caso al equipo' in t for t in textos), textos
+    conv = _svc.conv_by_key(db, tel)
+    assert conv['state'] == 'esperando_humano'
+    assert _svc.conv_egress_paused(db, conv['id']) is True
+    alertas = _svc.conv_alerts(db, include_resolved=False)
+    assert any(a['reason'] == 'humano_explicito' for a in alertas)
+    assert _citas(crm) == []
+
+
+def test_cancelar_tras_consulta_no_queda_atrapado_en_hilo(crm):
+    """Regla de oro 2026-11-09: un verbo de gestión (cancelar) manda al flujo
+    de acción aunque el turno anterior fuera consulta/abstención (nunca RAG)."""
+    from crm import chat_adapter as _ad
+    db = crm.config['DATABASE']
+    tel = '59170000111'
+
+    def _turno(body, ex):
+        wa_ingest(db, external_id=ex, phone=tel, body=body)
+        return canal.WorkerCanal(db, worker='w-' + ex).paso(
+            contexto=_ctx(), adaptador_rag=_ad.AdaptadorSimulado())
+
+    _turno('¿tienen parqueadero techado?', 'hj1')
+    assert any('No tengo confirmado ese dato' in t for t in _textos(db))
+    _turno('quiero cancelar la cita que reserve para manana alas 9', 'hj2')
+    textos = _textos(db)
+    assert any('Para ubicar su turno' in t for t in textos), textos
+    assert not any('12 horas de anticipación' in t for t in textos), textos
+
+
+def test_reserva_rompe_hilo_consulta_sin_volcar_horario(crm):
+    """Motor conversacional: un verbo de reserva rompe el hilo de consulta
+    (antes quedaba atrapado y volcaba la semana)."""
+    from crm import chat_adapter as _ad
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    tel = '59170000111'
+
+    def _turno(body, ex):
+        wa_ingest(db, external_id=ex, phone=tel, body=body)
+        return canal.WorkerCanal(db, worker='w-' + ex).paso(
+            contexto=_ctx(), adaptador_rag=_ad.AdaptadorSimulado())
+
+    _turno('¿abren?', 'hj1')
+    assert any('revise' in t for t in _textos(db))
+    _turno('quiero reservar el jueves a las 9', 'hj2')
+    textos = _textos(db)
+    assert any('Es su primera vez' in t for t in textos), textos
+    assert not any('revise' in t for t in textos[-1:]), textos[-1:]
+
+
+def test_si_a_oferta_disponibilidad_continua_la_reserva(crm):
+    """«¿Quiere que revise horarios?» + «sí» continúa la tarea entrando
+    a reserva con el día anotado, en vez de repetir el volcado."""
+    from crm import chat_adapter as _ad
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    tel = '59170000111'
+
+    def _turno(body, ex):
+        wa_ingest(db, external_id=ex, phone=tel, body=body)
+        return canal.WorkerCanal(db, worker='w-' + ex).paso(
+            contexto=_ctx(), adaptador_rag=_ad.AdaptadorSimulado())
+
+    _turno('¿los jueves?', 'od1')
+    assert any('revise horarios' in t or 'revise disponibilidad' in t for t in _textos(db))
+    _turno('sí', 'od2')
+    textos = _textos(db)
+    # Continúa la tarea entrando a reserva (pregunta profesional con el día
+    # anotado en el estado), en vez de repetir la oferta o el volcado.
+    assert any('¿Con qué profesional' in t for t in textos), textos
+    assert not any('revise' in t for t in textos[-1:]), textos[-1:]
+    import datetime as _dt
+    _f = _pendiente_sel(db).get('fecha')
+    assert _f and _dt.date.fromisoformat(str(_f)[:10]).weekday() == 3, _f
+
+
+def test_rama_horario_no_dispara_ante_verbo_de_reserva():
+    """Guardia del adaptador: «quiero reservar el jueves a las 9» no recibe
+    el volcado semanal (eso lo atiende el embudo de reserva)."""
+    from crm import chat_adapter as _ad
+    ad = _ad.AdaptadorSimulado()
+    herramientas = {
+        'kb_buscar': lambda q: [],
+        'catalogo_buscar': lambda q: [],
+        'catalogo_buscar_stock': lambda q: [],
+        'catalogo_muestra': lambda kind=None: [],
+        'agenda_resumen': lambda: {},
+        'stock_consultar': lambda item_id: None,
+        'horario_negocio': lambda: 'Lunes a viernes de 09:00 a 18:00.',
+        'agenda_dia': lambda q: None,
+    }
+    res = ad.consultar('quiero reservar el jueves a las 9', herramientas=herramientas,
+                       rol='admin', perfil='publico',
+                       negocio={'trato': 'usted'})
+    assert 'horario_negocio' not in (res.resumen or ''), res.resumen
+    assert 'Lunes a viernes' not in res.answer, res.answer
+
+
+def test_lunes_la_manana_no_es_tomorrow():
+    """«para el lunes la mañana» nombra el día: no es «mañana» (tomorrow)."""
+    from datetime import date
+    from crm import canal as _canal
+    f, h = _canal._extract_datetime(
+        'buenos dias dispone de turno para el lunes la mañana', date(2026, 11, 9))
+    assert (f, h) == ('2026-11-09', None), (f, h)
+
+
+def test_hora_junta_latarde_se_entiende():
+    """«hoy dos de latarde» (sin espacio) son las 14:00 del mismo día."""
+    from datetime import date
+    from crm import canal as _canal
+    f, h = _canal._extract_datetime('hoy dos de latarde con el doctor', date(2026, 11, 9))
+    assert (f, h) == ('2026-11-09', '14:00'), (f, h)
+
+
+def test_cambia_a_el_doctor_sin_perder_hueco(crm):
+    """«no con el doctor» ante propuesta con Dra. Ana: cambia a Dr. Luis,
+    conserva día/hora y vuelve a proponer (no borra nada)."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    f = _dias_util().isoformat()
+
+    _paso(crm, 'quiero reservar %s a las 10:30' % f, 'gd1')
+    _paso(crm, 'es mi primera vez', 'gd2')
+    _paso(crm, '1', 'gd3')
+    assert any('para Consulta' in t and 'Dra. Ana' in t for t in _textos(db))
+    out = _paso(crm, 'no con el doctor', 'gd4')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert any('Dr. Luis' in t and '¿Se lo reservo?' in t for t in textos), textos
+    assert not any('¿Qué otro día' in t for t in textos[-1:]), textos[-1:]
+    out = _si(crm, 'gd5')
+    assert out['citas_creadas'] == 1
+    assert _citas(crm)[0]['professional_id'] == 2
+
+
+def test_no_con_el_doctor_ya_siendolo_reafirma(crm):
+    """«no con el doctor» cuando la propuesta YA es con él: la reafirma,
+    no reinicia el hilo."""
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    f = _dias_util().isoformat()
+
+    _paso(crm, 'quiero reservar %s a las 10:30' % f, 'ra1')
+    _paso(crm, 'es mi primera vez', 'ra2')
+    _paso(crm, '2', 'ra3')
+    assert any('Dr. Luis' in t for t in _textos(db))
+    out = _paso(crm, 'no con el doctor', 'ra4')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert any('Dr. Luis' in t and '¿Se lo reservo?' in t for t in textos[-1:]), textos[-1:]
+    assert not any('Sin problema' in t for t in textos[-1:]), textos[-1:]
+
+
+def test_genero_ambiguo_pregunta_cual(crm):
+    """«la doctora» con dos doctoras: pregunta cuál (filtrada), sin adivinar
+    y sin perder el hueco."""
+    import json as _json
+    from crm.store import connect as _connect
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    f = _dias_util().isoformat()
+    with _connect(db) as conn:
+        conn.execute("INSERT INTO crm_professionals(name,specialty,email,active)"
+                     " VALUES ('Dra. Sofia','General','sof@local',1)")
+    ctx3 = {'professionals': [{'id': 1, 'name': 'Dra. Ana'},
+                              {'id': 2, 'name': 'Dr. Luis'},
+                              {'id': 3, 'name': 'Dra. Sofia'}]}
+
+    def _turno(body, ex):
+        wa_ingest(db, external_id=ex, phone='59170000111', body=body)
+        return canal.WorkerCanal(db, worker='w-' + ex).paso(contexto=dict(ctx3))
+
+    _turno('quiero reservar %s a las 10:30' % f, 'ga1')
+    _turno('es mi primera vez', 'ga2')
+    _turno('1', 'ga3')
+    assert any('Dra. Ana' in t for t in _textos(db))
+    _turno('no, mejor con la doctora', 'ga4')
+    textos = [t for t in _textos(db)]
+    assert any('Dra. Ana' in t and 'Dra. Sofia' in t for t in textos[-1:]), textos[-1:]
+    assert not any('Dr. Luis' in t for t in textos[-1:]), textos[-1:]
+    assert not any('¿Qué otro día' in t for t in textos[-1:]), textos[-1:]
+
+
+def test_primera_hora_abre_con_apertura(crm):
+    """«Mañana a primera hora» resuelve la apertura del negocio y reserva."""
+    from crm import canal as _canal
+    assert _canal._hora_extremo('quiero reservar mañana a primera hora') == 'apertura'
+    assert _canal._hora_extremo('para el lunes a última hora') == 'cierre'
+    assert _canal._hora_extremo('mañana por la tarde') is None
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    _seed_servicio(db, 'Blanqueamiento', 45, 1)
+    f = _dias_util().isoformat()
+
+    out = _paso(crm, 'quiero reservar %s a primera hora' % f, 'ph1')
+    assert out['citas_creadas'] == 0
+    # Sin tratamiento nombrado se pregunta si ya es paciente (no se inventa).
+    assert any('Es su primera vez' in t for t in _textos(db))
+    out = _paso(crm, 'es mi primera vez', 'ph2')
+    assert out['citas_creadas'] == 0
+    assert any('¿Con qué profesional' in t for t in _textos(db)), _textos(db)
+    out = _paso(crm, 'sin preferencia', 'ph3')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert any('09:00' in t and '¿Se lo reservo?' in t for t in textos), textos
+
+
+def test_rechazo_con_otro_dia_repropone_sin_repreguntar(crm):
+    """«No, ¿tiene uno para mañana?» cambia el hueco y vuelve a proponer,
+    conservando servicio y profesional (regla de oro: no repetir lo dado)."""
+    from datetime import timedelta
+    db = crm.config['DATABASE']
+    _seed_servicio(db, 'Valoración', 30, 1)
+    _seed_servicio(db, 'Limpieza dental', 30, 1)
+    f1 = _dias_util().isoformat()
+    d2 = datetime.now().date() + timedelta(days=3)
+    while d2.weekday() >= 5:
+        d2 += timedelta(days=1)
+    f2 = d2.isoformat()
+
+    _paso(crm, 'quiero reservar %s a las 10:30' % f1, 'nd1')
+    _paso(crm, 'es mi primera vez', 'nd2')
+    _paso(crm, 'sin preferencia', 'nd3')
+    assert any('¿Se lo reservo?' in t for t in _textos(db))
+    out = _paso(crm, 'no, ¿tiene uno para %s a las 09:00?' % f2, 'nd4')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert not any('¿Qué otro día' in t for t in textos[-1:]), textos[-1:]
+    assert any('¿Se lo reservo?' in t for t in textos[-1:]), textos[-1:]
+    assert any('09:00' in t for t in textos[-1:]), textos[-1:]
+    out = _si(crm, 'nd5')
+    assert out['citas_creadas'] == 1
+    assert _citas(crm)[0]['start'].startswith(f2 + 'T')
+
+
+def test_colega_mismo_dia_cuando_propio_ocupado(crm):
+    """Si la doctora elegida no tiene nada ese día, se ofrece un colega
+    con hueco verificado (nombrándolo), en vez de pedir otro día."""
+    import json as _j
+    import json as _jj
+    db = crm.config['DATABASE']
+    _hor = config_set(db, key='negocio_horarios', actor=1, value=_jj.dumps(
+        {str(d): ['08:00', '18:00'] for d in range(7)}))
+    assert _hor['ok'], _hor
+    sid = _seed_servicio(db, 'Limpieza dental', 30, 1)
+    assert sid
+    from datetime import date as _d
+    _base = _d.today() + timedelta(days=1)
+    while _base.weekday() != 0:
+        _base = _base + timedelta(days=1)
+    f = _base.isoformat()
+    # Dra. Ana sólo lunes 09:00-10:00; se ocupa 09:00-09:30 por panel.
+    r = config_set(db, key='negocio_especialistas', actor=1, value=_j.dumps(
+        [{'id': 1, 'nombre': 'Dra. Ana', 'activo': True,
+          'horario': {'0': ['09:00', '10:00']}}]))
+    assert r['ok'], r
+    _crear_cita(crm, 1, f, '09:00', 30, title='Reserva: Limpieza dental')
+    out = _paso(crm, 'quiero reservar limpieza %s a las 09:00 con Dra. Ana' % f, 'cg1')
+    assert out['citas_creadas'] == 0
+    textos = _textos(db)
+    assert any('Dr. Luis' in t and '¿Se lo reservo?' in t for t in textos), textos
+    assert not any('¿Qué otro día' in t for t in textos), textos
+    out = _si(crm, 'cg2')
+    assert out['citas_creadas'] == 1
+    assert _citas(crm)[-1]['professional_id'] == 2
+
+
+@__import__('pytest').fixture(autouse=True)
+def _flujo_clasico_recepcion(monkeypatch):
+    """Estas pruebas cubren el flujo clásico (lista de profesionales, varias
+    alternativas, colega el mismo día). La recepción directa por defecto se
+    cubre en tests/test_c02_recepcion_comercial.py."""
+    from crm import canal as _canal
+    monkeypatch.setattr(_canal, 'RECEPCION_DIRECTA', False)

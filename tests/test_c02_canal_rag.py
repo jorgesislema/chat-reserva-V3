@@ -154,7 +154,10 @@ def test_canal_rag_sin_dato_no_inventa(path):
     _base_negocio(path)
     _procesar(path, '¿Cuál es el correo de facturación?', 'm1')
     fila1, texto1 = _outbox_ultima(path)
-    assert 'No encontré información' in texto1
+    # BOT-EVAL-01: la abstención pública es natural y ofrece al equipo; ya no
+    # pide «reformular» ni habla de «conocimiento publicado» o «catálogo».
+    assert 'No tengo confirmado' in texto1
+    assert '¿Quiere que lo consulte con el equipo?' in texto1
     assert '@' not in texto1
     conv = svc.conv_by_key(path, PHONE)
     mem1 = _memoria(path, conv)
@@ -217,7 +220,7 @@ def test_canal_rag_privado_inaccesible_para_remitente(path):
     fila1, texto1 = _outbox_ultima(path)
     assert '12345' not in texto1
     assert 'Manual interno' not in texto1
-    assert 'No encontré información' in texto1  # abstención honesta
+    assert 'No tengo confirmado' in texto1  # abstención honesta y natural
     conv = svc.conv_by_key(path, PHONE)
     mem1 = _memoria(path, conv)
     assert mem1[0]['abstencion'] and mem1[0]['fuentes'] == []
@@ -250,8 +253,14 @@ def test_canal_rag_fallo_proveedor_deriva_a_humano(path, monkeypatch):
     canal.WorkerCanal(path, worker='w-rag').paso(contexto={})
 
     assert conv_alert_active_count(path) >= 1
+    # BOT-EVAL-01: el fallo del proveedor no deja al cliente en silencio. Se
+    # emite UN aviso de sistema (nunca una respuesta IA fabricada) y se pausa.
     pend = svc.outbox_next(path)
-    assert pend['pending'] == [], pend  # nada que emitir: no se fabrica respuesta
+    assert len(pend['pending']) == 1, pend
+    fila = pend['pending'][0]
+    assert fila['origin'] == 'sistema'
+    assert 'no puedo responder' in json.loads(fila['payload'])['text']
+    assert all(item['origin'] != 'ia' for item in pend['pending'])
     conv = svc.conv_by_key(path, PHONE)
     msgs = svc.conv_messages(path, conv['id'])
     assert any('RAG para consulta no disponible' in (m['body'] or '')

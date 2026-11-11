@@ -107,9 +107,10 @@ if (-not (Test-Path -LiteralPath .env)) { Copy-Item .env.example .env }
 .\.venv-crm\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-`requirements-crm.txt` es la instalación mínima: Flask, SQLite y zona horaria. **No** instala
-IA, Qdrant, Dash, Streamlit ni Google. Si va a sincronizar Google Calendar, instale el extra
-opcional sobre el mismo entorno:
+`requirements-crm.txt` es la instalación mínima: Flask, SQLite, zona horaria y
+búsqueda vectorial local (Qdrant + FastEmbed, multilingüe). **No** instala IA
+remota, Dash, Streamlit, Google ni pytest (las pruebas tienen su propio archivo). Si va a
+sincronizar Google Calendar, instale el extra opcional sobre el mismo entorno:
 
 ```powershell
 .\.venv-crm\Scripts\python.exe -m pip install -r requirements-crm-sync.txt
@@ -358,8 +359,9 @@ El conjunto anterior con Dash/Streamlit y el bot conserva `requirements.txt`. La
 instalación desde cero para Python 3.12 detectó conflictos entre sus dependencias: **ese archivo
 todavía requiere ajustes antes de considerarlo reproducible**. No lo instale encima del entorno
 del CRM nuevo. El CRM mínimo usa `requirements-crm.txt` (Flask, python-dotenv, tzdata),
-`requirements-crm-test.txt` (pruebas) y `requirements-crm-sync.txt` (Google opcional); su
-resolución se verificó en un entorno nuevo para Python 3.13 sin modificar los paquetes instalados.
+`requirements-crm-test.txt` (runtime + `pytest==9.2.0` fijado) y `requirements-crm-sync.txt`
+(Google opcional, con los mismos rangos que el runtime); su resolución se verificó con
+`pip install --dry-run` para Python 3.13 sin conflictos.
 La configuración y límites del bot se detallan en [el diagnóstico](docs/AUDITORIA.md);
 el arranque del CRM no inicia ni expone ese backend.
 
@@ -480,6 +482,80 @@ P02B incluye horas 05–06, 21–22, 23–01, evento previo al rango, profesiona
 Mes, detalle/historial y carrera de vistas. P02C cubre intervalos de 49 h/24 h, medianoche,
 fin inválido y el payload real del formulario. Playwright es una
 herramienta de verificación, **no** una dependencia del producto; no se instala en `.venv-crm`.
+
+### Evaluaciones conversacionales (BOT-EVAL-01)
+
+El dataset versionado vive en `docs/producto/evals/tono_v2` (225 casos: 120
+históricos de `tono_v1` + 105 nuevos, 44 conversaciones multiturno, 50 casos en
+el split reservado). El ejecutor está en `tools/evals` y **usa el flujo real**
+(`WorkerCanal` + servicios de dominio + SQLite sintético), no un bot paralelo.
+
+Modo reglas (predeterminado, sin red ni API), con una base nueva por caso:
+
+```powershell
+.\.venv-op\Scripts\python.exe -m tools.evals.cli --modo reglas `
+  --dataset docs/producto/evals/tono_v2/casos.jsonl `
+  --fixture docs/producto/evals/tono_v2/fixture.json `
+  --out docs/producto/entregas/BOT-EVAL-01/EVIDENCIAS/reglas
+```
+
+Opciones útiles: `--caso ID` (repetible), `--categoria`, `--split
+desarrollo|reservado|todos`, `--limite N`, `--solo-ejecutables`. El código de
+salida es 1 si hay algún fallo crítico (fuga, precio/stock falso, commit falso,
+doble efecto o IA tras pausa). Los casos bloqueados u omitidos se cuentan
+aparte y no cuentan como aprobados.
+
+Modo modelo real: `--modo modelo --presupuesto-autorizado --max-llamadas N
+--max-tokens N`. Exige credenciales en el entorno del servidor y **consume
+API**; esta entrega no lo ejecutó porque no había presupuesto autorizado.
+
+Regenerar el dataset desde su fuente:
+
+```powershell
+.\.venv-op\Scripts\python.exe docs\producto\evals\tono_v2\generar.py
+```
+
+### Recorrido comercial: venta en el simulador
+
+El bot vende productos del catálogo sin inventar precios: toda cifra sale de
+`crm/comercio.py` (centavos enteros, una fórmula y precedencia explícita, sin
+sumar descuentos no combinables). Flujo en el simulador (`/api/c02/simulador`):
+producto → cantidad → retiro/domicilio → resumen con total → confirmación
+explícita → pedido persistido → alerta al equipo + pausa de IA. «Pago contra
+entrega» queda pendiente; sólo una acción autorizada registra el pago.
+Confirmar dos veces no duplica; cancelar libera el stock.
+El catálogo admite **precio local y precio a domicilio** (vacío = igual al
+local); la cotización, Excel, ficha del panel y bot los distinguen.
+En reservas, tras el nombre se pregunta el **teléfono de contacto** (el del
+chat u otro) y queda guardado en la cita. Con menos de **12 h** no se
+auto-cancela: deriva al equipo. `crm/recordatorios.py` encola el aviso **24 h
+antes** con la nota de 12 h (idempotente por cita).
+El almuerzo se configura por día (negocio) y por profesional (rotan sin
+cerrar): el bot no propone ni confirma citas que lo pisen.
+
+```powershell
+.\.venv-op\Scripts\python.exe -m pytest tests/test_comercio_cotizacion.py tests/test_comercio_ventas.py -q
+.\.venv-op\Scripts\python.exe -m tools.evals.cli --modo reglas --sin-umbral-minimo `
+  --dataset docs/producto/evals/ventas_v1/casos.jsonl `
+  --fixture docs/producto/evals/ventas_v1/fixture.json `
+  --out docs/producto/entregas/RECORRIDO-COMERCIAL/EVIDENCIAS/ventas
+```
+
+Plantillas Excel (sólo `.xlsx`, sin macros ni fórmulas) en el panel de
+administración: `GET /api/comercio/plantilla/configuracion` y
+`/api/comercio/plantilla/inventario`. Importación con vista previa y
+confirmación explícita:
+
+```powershell
+.\.venv-op\Scripts\python.exe -m pytest tests/test_comercio_excel.py -q
+```
+
+Proveedores IA: el principal se configura con `CRM_CHAT_*` (ver
+`.env.example`); el respaldo opcional con `CRM_CHAT_RESPALDO_*` entra sólo ante
+fallo técnico (clase `AdaptadorConRespaldo`, con incidencia operativa). Jina no
+es un modelo conversacional y **no** se usa en el bot; la búsqueda web queda
+fuera del bot: precios, stock y promociones salen de la BD y del conocimiento
+aprobado.
 
 ### E2E de la agenda en navegador (entrega C01)
 

@@ -12,8 +12,10 @@
       <div class="form-grid" id="c02-cfg-perfil">
         <label>Nombre del negocio
           <input type="text" id="c02-cfg-nombre" maxlength="200"></label>
-        <label>Rubro (informativo)
-          <input type="text" id="c02-cfg-rubro" disabled></label>
+        <label>Rubro (editable)
+          <input type="text" id="c02-cfg-rubro" maxlength="80"></label>
+        <label>Etiqueta pública del rubro
+          <input type="text" id="c02-cfg-rubro-etiqueta" maxlength="120" placeholder="Igual que el rubro si se deja vacío"></label>
         <label>Zona horaria (IANA)
           <input type="text" id="c02-cfg-zona" placeholder="America/Guayaquil"></label>
         <label>Moneda
@@ -36,9 +38,10 @@
       una reserva. Marque los días laborables y elija apertura y cierre; los días
       sin marcar quedan cerrados.</p>
     <table class="c02-week-table" id="c02-cfg-week">
-      <thead><tr><th>Día</th><th>Laborable</th><th>Apertura</th><th>Cierre</th></tr></thead>
+      <thead><tr><th>Día</th><th>Laborable</th><th>Apertura</th><th>Cierre</th><th>Almuerzo desde</th><th>Almuerzo hasta</th></tr></thead>
       <tbody></tbody>
     </table>
+    <p class="muted tiny">Horas en formato de 24 horas (ej.: 13:00 es la 1 p. m., 17:00 son las 5 p. m.). Si escribes solo «5» el navegador lo lee como 5 a. m.: escribe siempre «17:00» para la tarde.</p>
   </section>
 
   <section class="card">
@@ -50,8 +53,8 @@
           <option value="cerrado">Cerrado todo el día</option>
           <option value="horario">Horario especial</option>
         </select></label>
-      <label>Apertura <input type="time" id="c02-cfg-exc-a" step="1800"></label>
-      <label>Cierre <input type="time" id="c02-cfg-exc-c" step="1800"></label>
+      <label>Apertura <input type="time" id="c02-cfg-exc-a" step="60"></label>
+      <label>Cierre <input type="time" id="c02-cfg-exc-c" step="60"></label>
       <button type="button" class="button secondary" id="c02-cfg-exc-add">Añadir</button>
     </div>
     <table class="c02-exc-table" id="c02-cfg-exc-list">

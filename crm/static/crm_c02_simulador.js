@@ -9,9 +9,19 @@
   var input = document.getElementById('sim-text');
   var estado = document.getElementById('sim-estado');
   var reset = document.getElementById('sim-reset');
+  var modoSel = document.getElementById('sim-modo');
+  var telefono = document.getElementById('sim-telefono');
   var csrf = app.getAttribute('data-csrf');
 
+  function etiquetaModo(datos) {
+    if (datos && datos.modo === 'real') {
+      return 'Modo real (' + (datos.modelo || 'IA configurada') + ')';
+    }
+    return 'Modo reglas (sin IA externa)';
+  }
+
   function pintar(datos) {
+    if (datos.telefono && telefono) { telefono.value = datos.telefono; }
     body.innerHTML = '';
     (datos.mensajes || []).forEach(function (m) {
       var d = document.createElement('div');
@@ -26,17 +36,22 @@
       body.appendChild(d);
     });
     body.scrollTop = body.scrollHeight;
+    var base = etiquetaModo(datos) + ' · ';
+    if (datos.telefono) { base += 'Número de prueba: ' + datos.telefono + ' · '; }
     if (datos.derivado) {
-      estado.textContent = 'Derivado a una persona: el control quedó en la bandeja humana.';
+      estado.textContent = base + 'Derivado a una persona: el control quedó en la bandeja humana.';
     } else if (datos.mensajes && datos.mensajes.length) {
-      estado.textContent = 'Conversación atendida por el bot · estado: ' + datos.estado;
+      estado.textContent = base + 'Conversación atendida por el bot · estado: ' + datos.estado;
     } else {
-      estado.textContent = 'Sin mensajes todavía.';
+      estado.textContent = base + 'Sin mensajes todavía.';
     }
   }
 
   function enviar(texto, reiniciar) {
-    var cuerpo = reiniciar ? { reiniciar: true } : { texto: texto };
+    var modo = (modoSel && modoSel.value) || 'reglas';
+    var cuerpo = reiniciar ? { reiniciar: true, modo: modo } : { texto: texto, modo: modo };
+    var numero = ((telefono && telefono.value) || '').trim();
+    if (numero) { cuerpo.telefono = numero; }
     return fetch('/api/c02/simulador', {
       method: 'POST',
       credentials: 'same-origin',
