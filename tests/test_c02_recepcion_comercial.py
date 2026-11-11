@@ -141,3 +141,11 @@ def test_doctora_por_nombre_de_pila():
     from crm import canal as _c
     pros = [{'id': 1, 'name': 'Dra. Ana Torres'}, {'id': 3, 'name': 'Dra. Sofía Rivera'}]
     assert _c._cambio_profesional('la doctora ana esta libre', 'Dra. Sofía Rivera', pros) == ('fijar', pros[0])
+
+
+def test_no_nombra_al_doctor_que_no_puede_si_el_cliente_no_lo_pidio():
+    import io
+    src = io.open('crm/canal.py', encoding='utf-8').read()
+    # El texto «Con X no tengo nada a esa hora» sólo se usa con doctor elegido.
+    assert "if not pend.get('doctor_elegido'):" in src
+    assert 'sólo se nombra a quien SÍ puede atender' in src

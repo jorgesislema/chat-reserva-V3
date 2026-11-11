@@ -5344,3 +5344,10 @@ Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los casos reportados (lu
 - Venta: primera respuesta corta (observaciones sólo si se preguntan); el color pedido sale en el resumen y en la alerta de VENTA.
 - Batería: 715 + 2 ajustadas; dirigidas 96/96.
 
+
+## 2026-11-12 — Sólo se nombra a quien puede atender
+
+- Si el cliente no pidió doctor (o la doctora viene del historial), la propuesta nombra SOLO al doctor que tiene el hueco: «Tengo libre … con la Dra. Ana». «Con X no tengo nada» sólo cuando el cliente pidió a X.
+- Colegas ordenados por cercanía a la hora pedida (12:00 ? 13:00 antes que 09:30).
+- Batería total: 721 passed, 4 skipped, 0 failed.
+

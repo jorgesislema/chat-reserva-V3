@@ -2005,9 +2005,12 @@ def _alternativas_colegas(path, profesional_id, compatibles, fecha, hora, serv, 
             if _motivo_no_reservable(path, p['id'], fecha, h, dur) is None:
                 out.append((h, p))
                 break
-        if len(out) >= max(1, int(limite or 2)):
-            break
-    return out
+    try:
+        _base_m = int(str(hora)[:2]) * 60 + int(str(hora)[3:5])
+        out.sort(key=lambda par: abs(int(par[0][:2]) * 60 + int(par[0][3:5]) - _base_m))
+    except (TypeError, ValueError):
+        pass
+    return out[:max(1, int(limite or 2))]
 
 def _proximo_dia_mismo_doctor(path, profesional_id, fecha, hora, serv, dias=7):
     """Primer hueco del MISMO doctor en los dias siguientes (misma hora o la
@@ -2058,6 +2061,20 @@ def _proponer_colega(path, pend, trato, fecha, hora, serv, compatibles,
     if not _alt:
         return None
     hora_c, pro_c = _alt[0]
+    if not pend.get('doctor_elegido'):
+        # El cliente no pidió a nadie: sólo se nombra a quien SÍ puede atender.
+        texto_col = _frase(
+            trato,
+            'Tengo libre el %s a las %s para %s con %s. ¿Te lo reservo?' % (
+                _fecha_larga(fecha), hora_c, serv['name'], _con_articulo(pro_c['name'])),
+            'Tengo libre el %s a las %s para %s con %s. ¿Se lo reservo?' % (
+                _fecha_larga(fecha), hora_c, serv['name'], _con_articulo(pro_c['name'])))
+        return _resp('reservar', texto_col, need_datos=True,
+                     pending={**pend, 'fecha': fecha, 'hora': hora_c,
+                              'profesional_id': pro_c['id'],
+                              'profesional_nombre': pro_c['name'],
+                              'confirmar_reserva': True,
+                              'propuesta_texto': texto_col})
     texto_col = _frase(
         trato,
         'Con %s no tengo nada a esa hora, pero tengo libre el %s a las %s '
@@ -4303,7 +4320,10 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                                          or pend.get('profesional_nombre'))
                     if prof_nombrado:
                         pend['es_recurrente'] = True
-                        pend['doctor_elegido'] = True
+                        if _extract_professional(body or '', contexto):
+                            # Sólo cuenta como elegido si el cliente lo nombró;
+                            # la doctora del historial no obliga a nada.
+                            pend['doctor_elegido'] = True
                     if 'es_recurrente' not in pend and not pend.get('pregunto_retorno'):
                         return _resp('reservar',
                                      _con_eco(pend, _prefijo_disponibilidad(pend)
@@ -4817,11 +4837,11 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                     nombre_prof = pend.get('profesional_nombre') or 'el profesional'
                     texto_alt = _frase(
                         trato,
-                        'A las %s no alcanzamos. Tengo libre el %s a las %s '
+                        'A las %s no hay espacio. Tengo libre el %s a las %s '
                         'para %s con %s. ¿Te sirve?' % (
                             hora, _fecha_larga(fecha), primera,
                             serv['name'], _con_articulo(nombre_prof)),
-                        'A las %s no alcanzamos. Tengo libre el %s a las %s '
+                        'A las %s no hay espacio. Tengo libre el %s a las %s '
                         'para %s con %s. ¿Le sirve?' % (
                             hora, _fecha_larga(fecha), primera,
                             serv['name'], _con_articulo(nombre_prof)))
