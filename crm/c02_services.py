@@ -3043,6 +3043,11 @@ def _catalog_search(path, query, limit=4, solo_publicados=True,
         s = _ud.normalize('NFKD', (s or '').lower())
         return ''.join(c for c in s if not _ud.combining(c))
 
+    # Faltas frecuentes al escribir rápido: «kid»→«kit», «blankeamiento»→
+    # «blanqueamiento» (k por qu), «sepillo»→«cepillo».
+    q = re.sub(r'\bkids?\b', 'kit', q)
+    q = re.sub(r'(?<=[a-z])k(?=[ei])', 'qu', q)
+    q = re.sub(r'\bsepill', 'cepill', q)
     words = [w for w in re.split(r'\W+', _f(q)) if len(w) > 2 and w not in _STOP]
     # Sinónimos coloquiales seguros: «chequeo» es la valoración inicial.
     _SINONIMOS_CATALOGO = {'chequeo': 'valoracion', 'chequeos': 'valoracion',
@@ -3078,8 +3083,14 @@ def _catalog_search(path, query, limit=4, solo_publicados=True,
     def _coincide(texto, palabra):
         # Palabra completa («anual» NO casa con «manual», «bla» NO casa con
         # «blanqueamiento»): evita respuestas con el artículo equivocado.
-        return any(re.search(r'\b%s\b' % re.escape(v), texto)
-                   for v in variantes(palabra))
+        if any(re.search(r'\b%s\b' % re.escape(v), texto)
+               for v in variantes(palabra)):
+            return True
+        # Misma raíz larga: «blanqueamiento» ~ «blanqueador» (7+ letras,
+        # 7 iniciales iguales), nunca palabras cortas.
+        if len(palabra) >= 8:
+            return bool(re.search(r'\b%s' % re.escape(palabra[:7]), texto))
+        return False
 
     for r in rows:
         # El «kind» genérico («servicio») no debe hacer coincidir cualquier
@@ -3088,6 +3099,10 @@ def _catalog_search(path, query, limit=4, solo_publicados=True,
                                     r['aliases'] or '', r['attributes_json'] or ''))
         score = sum(1 for w in words if _coincide(text, _f(w)))
         if score:
+            # Lo que coincide en el NOMBRE pesa más que lo del detalle:
+            # «kit de blanqueamiento» → «Kit blanqueador casero».
+            nombre_f = _f(r['name'] or '')
+            score += 0.5 * sum(1 for w in words if _coincide(nombre_f, _f(w)))
             d = dict(r)
             d['score'] = score
             d['aprox'] = False

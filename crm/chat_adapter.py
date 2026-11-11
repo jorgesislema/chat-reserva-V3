@@ -526,8 +526,11 @@ class AdaptadorSimulado(ChatAdapter):
                 # cliente que pregunta existencias casi siempre habla de un
                 # producto («¿cuántos cepillos quedan?»).
                 if top.get('stock_na') and any(
-                        not t.get('stock_na') for t in catalog):
-                    top = next(t for t in catalog if not t.get('stock_na'))
+                        not t.get('stock_na') and (t.get('score') or 0) > 0 for t in catalog):
+                    # Sólo se salta a un producto que COINCIDE con lo escrito
+                    # (nunca a uno traído sólo por parecido vectorial).
+                    top = next(t for t in catalog
+                               if not t.get('stock_na') and (t.get('score') or 0) > 0)
                 _exacto = next((t for t in catalog
                                 if _plegar(t.get('name') or '')
                                 and _plegar(t.get('name') or '') in _plegar(q)), None)

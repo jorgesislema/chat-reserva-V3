@@ -149,3 +149,13 @@ def test_no_nombra_al_doctor_que_no_puede_si_el_cliente_no_lo_pidio():
     # El texto «Con X no tengo nada a esa hora» sólo se usa con doctor elegido.
     assert "if not pend.get('doctor_elegido'):" in src
     assert 'sólo se nombra a quien SÍ puede atender' in src
+
+
+def test_kid_de_blankeamiento_encuentra_el_kit():
+    from crm.c02_services import _catalog_search
+    import sqlite3, tempfile, shutil, os
+    d = tempfile.mkdtemp()
+    db = os.path.join(d, 'x.db')
+    shutil.copy('demo_comercial.db', db)
+    res = _catalog_search(db, 'tiene kid de blankeamiento', solo_publicados=True)
+    assert res and res[0]['name'] == 'Kit blanqueador casero', [r['name'] for r in res]

@@ -967,7 +967,8 @@ def _verbo_compra(texto: str) -> bool:
     return bool(re.search(
         r'\b(quiero|queria|querr[ií]a|compro|comprar|comprame|llevo|llevar|'
         r'dame|deme|aparta|apartame|reserva(me)?lo|encarga|encargame|pide|'
-        r'pideme|adquirir|lo quiero|la quiero)\b', t))
+        r'pideme|adquirir|lo quiero|la quiero|denmelo|demelo|damelo|dénmelo|'
+        r'me lo llevo|lo llevo|lo compro|la compro|me interesa)\b', t))
 
 
 def _cambio_profesional(texto: str, actual_nombre, compatibles):
@@ -5964,6 +5965,10 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
         cantidad = pending.get('cantidad')
     if re.search(r'\b(los dos|las dos|ambos|ambas)\b', bajo) and not _cantidad_compra(body or ''):
         cantidad = 2
+    if not cantidad and re.search(r'(melo|mela|\blo quiero|\bla quiero|\blo llevo|\blo compro|'
+                                  r'\bla compro|\bme lo llevo)\b', bajo):
+        # «Dénmelo», «lo quiero»: es uno. No se pregunta «¿cuántas?».
+        cantidad = 1
     if not cantidad and (_senal_entrega(body or '') or _parece_direccion(body or '')):
         # El cliente está respondiendo cómo lo quiere recibir, no cuántos:
         # se cotiza 1 unidad (se dice en el resumen) en vez de bloquear el
