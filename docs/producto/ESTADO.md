@@ -5335,3 +5335,12 @@ Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los casos reportados (lu
 - Simulador: `refrescar_arena` trae en cada mensaje (si la base cambió) catálogo, precios, doctores, horarios, agenda real, información y configuración, conservando la conversación de prueba.
 - Batería total: 716 passed + 1 ajustada (entorno del buzón).
 
+
+## 2026-11-11 (noche, 3) — Doctor correcto y horario real
+
+- «Sí» a «¿ya se ha atendido?» = paciente que vuelve ? «¿Recuerda el nombre del doctor que lo atiende, o prefiere cualquier doctor disponible?».
+- Nadie libre a la hora pedida: se elige al doctor que trabaja ese día y tiene el hueco más cercano dentro de SU horario (antes podía proponer a quien no atiende ese día).
+- «La doctora Ana» basta (nombre de pila); «con el doctor» fija al único doctor; «está bien / de acuerdo / dale» confirman.
+- Venta: primera respuesta corta (observaciones sólo si se preguntan); el color pedido sale en el resumen y en la alerta de VENTA.
+- Batería: 715 + 2 ajustadas; dirigidas 96/96.
+

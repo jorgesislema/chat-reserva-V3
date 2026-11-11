@@ -154,7 +154,7 @@ def transicion(estado: str, evento: str) -> Optional[str]:
 CLAVES_CONOCIDAS = frozenset({
     '_eco_dado', 'cantidad', 'cita_id', 'citas_pendientes', 'clave',
     'confirmar_cancelar', 'confirmar_compra', 'confirmar_reserva',
-    'conocido', 'item_nombre', 'preg_trat', 'preg_dia', 'preg_doctor', 'doctor_elegido', 'pide_referencia', 'precio_domicilio', 'prof_repetido', 'venta_manual',
+    'conocido', 'item_nombre', 'preg_trat', 'preg_dia', 'preg_doctor', 'doctor_elegido', 'pide_referencia', 'precio_domicilio', 'variante', 'prof_repetido', 'venta_manual',
     'consulta_generica', 'datos_contacto', 'direccion', 'es_recurrente', 'espera_datos_cancel',
     'espera_datos_reagendar', 'extra', 'fallos_seguidos', 'fecha', 'hora',
     'intencion', 'item_code', 'lead_cita_id', 'modo', 'nombre',

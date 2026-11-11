@@ -66,7 +66,7 @@ def test_doctora_nombrada_se_conserva_en_la_propuesta(crm):
 def test_turno_con_dia_y_hora_entra_a_reserva(crm):
     _servicio(crm.config['DATABASE'], 'Limpieza dental')
     _servicio(crm.config['DATABASE'], 'Revisión general')
-    _paso(crm, 'buenos días un turno con el doctor para el viernes a las 15:00', 'r1')
+    _paso(crm, 'buenos días un turno para el viernes a las 15:00', 'r1')
     assert 'atendido antes' in _ultimo(crm)
 
 
@@ -111,3 +111,33 @@ def test_reclamo_con_faltas_pide_paciente_y_doctor(crm):
 def test_emergencia_pide_nombre_del_paciente(crm):
     _paso(crm, 'ayer me sacaron el diente, sangra mucho y me duele', 'r1')
     assert 'nombre del paciente' in _ultimo(crm)
+
+
+def test_si_ya_me_atendi_pregunta_doctor_o_cualquiera(crm):
+    _servicio(crm.config['DATABASE'], 'Limpieza dental')
+    _servicio(crm.config['DATABASE'], 'Revisión general')
+    _paso(crm, 'buenas una cita para mañana a las 10:00', 'r1')
+    _paso(crm, 'si', 'r2')
+    txt = _ultimo(crm)
+    assert 'cualquier doctor disponible' in txt, txt
+
+
+def test_con_el_doctor_fija_al_unico_doctor(crm):
+    _servicio(crm.config['DATABASE'], 'Limpieza dental')
+    _servicio(crm.config['DATABASE'], 'Revisión general')
+    _paso(crm, 'tiene cita para mañana a las 10:00 con el doctor', 'r1')
+    txt = _ultimo(crm)
+    assert 'Dr. Luis' in txt and 'Dra. Ana' not in txt, txt
+
+
+def test_esta_bien_confirma():
+    from crm import canal as _c
+    assert _c._confirma_si('esta bien')
+    assert _c._confirma_si('Está bien, gracias')
+    assert not _c._confirma_si('no gracias')
+
+
+def test_doctora_por_nombre_de_pila():
+    from crm import canal as _c
+    pros = [{'id': 1, 'name': 'Dra. Ana Torres'}, {'id': 3, 'name': 'Dra. Sofía Rivera'}]
+    assert _c._cambio_profesional('la doctora ana esta libre', 'Dra. Sofía Rivera', pros) == ('fijar', pros[0])

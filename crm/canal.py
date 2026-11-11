@@ -994,6 +994,11 @@ def _cambio_profesional(texto: str, actual_nombre, compatibles):
                       if _claves_profesional(p.get('name'))
                       and all(c in toks_texto
                               for c in _claves_profesional(p.get('name')))]
+        if not por_nombre:
+            # Sólo el nombre de pila («la doctora Ana»), si es único.
+            por_nombre = [p for p in (compatibles or [])
+                          if _claves_profesional(p.get('name'))
+                          and _claves_profesional(p.get('name'))[0] in toks_texto]
         if len(por_nombre) == 1:
             menc = por_nombre[0]
     if menc is not None:
@@ -2692,6 +2697,28 @@ def _profesional_libre(path, compatibles, fecha=None):
     return min(cargas, key=lambda par: par[0])[1]
 
 
+def _doctor_hueco_cercano(path, compatibles, fecha, hora, duracion):
+    """Doctor con el hueco libre más cercano a la hora pedida, respetando su
+    horario, su almuerzo y sus citas (vía ``_alternativas``). None si nadie."""
+    try:
+        base = int(str(hora)[:2]) * 60 + int(str(hora)[3:5])
+    except (TypeError, ValueError):
+        return None
+    mejor = None
+    for p in compatibles or []:
+        if fecha and _libra_dia(path, p['id'], fecha):
+            continue
+        for h in (_alternativas(path, p['id'], fecha, hora, limite=1,
+                                duracion_min=duracion) or []):
+            try:
+                dif = abs(int(h[:2]) * 60 + int(h[3:5]) - base)
+            except (TypeError, ValueError):
+                continue
+            if mejor is None or dif < mejor[0]:
+                mejor = (dif, p)
+    return mejor[1] if mejor else None
+
+
 def _texto_lista_profesionales(compatibles, trato: str = 'usted') -> str:
     lineas = '\n'.join('%d. %s' % (i, p['name'])
                        for i, p in enumerate(compatibles, 1))
@@ -4196,6 +4223,13 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             mencionado = _extract_professional(body or '', contexto)
             if mencionado:
                 pend['profesional_nombre'] = mencionado
+                pend['doctor_elegido'] = True
+            else:
+                # «Con el doctor»: si el género identifica a uno solo, es él.
+                _g1 = _profesional_por_genero_unico(body or '', _profesionales_activos(path, contexto))
+                if _g1 is not None:
+                    pend['profesional_nombre'] = _g1['name']
+                    pend['doctor_elegido'] = True
 
         # Paciente conocido: si el número ya tiene citas atendidas se dice con
         # quién se atiende y se propone desde SU calendario. Desde un número
@@ -4287,7 +4321,7 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                             r'\b(primera vez|primera(?! hora)|nunca|no he (?:ido|venido|estado)|'
                             r'no conozco|es mi primera|primera cita)\b', bajo_ret))
                         solo_no = bool(re.fullmatch(r'\s*no[\s.!,]*', bajo_ret))
-                        if senal_rec and not primera and not solo_no:
+                        if (senal_rec or _confirma_si(body or '')) and not primera and not solo_no:
                             es_rec = True
                         elif primera or solo_no or bajo_ret:
                             es_rec = False
@@ -4485,10 +4519,10 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
             if pend.get('es_recurrente') and not pending.get('preg_doctor'):
                 return _resp('reservar', _con_eco(pend, prefijo_cambio + _nota_historial(path, phone) + _frase(
                     trato,
-                    '¿Con qué doctor te has atendido antes? Si no lo recuerdas, '
-                    'dímelo y busco el primer turno libre.',
-                    '¿Con qué doctor se ha atendido antes? Si no lo recuerda, '
-                    'dígamelo y busco el primer turno libre.')),
+                    '¿Recuerdas el nombre del doctor que te atiende, o prefieres '
+                    'que te atienda cualquier doctor disponible?',
+                    '¿Recuerda el nombre del doctor que lo atiende, o prefiere '
+                    'que lo atienda cualquier doctor disponible?')),
                     need_datos=True, pending={**pend, 'preg_doctor': True})
             if not (fecha and hora):
                 # Sin doctor elegido: primero el dia y la hora; luego se asigna
@@ -4505,7 +4539,17 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                 _dispo2 = [p for p in compatibles
                            if _motivo_no_reservable(path, p['id'], fecha, hora,
                                                     serv['duration_min']) is None] or compatibles
-            _elegido2 = _profesional_libre(path, _dispo2, fecha) or _dispo2[0]
+            _libres_ya = [p for p in _dispo2
+                          if _motivo_no_reservable(path, p['id'], fecha, hora,
+                                                   serv['duration_min']) is None]
+            if _libres_ya:
+                _elegido2 = _profesional_libre(path, _libres_ya, fecha) or _libres_ya[0]
+            else:
+                # Nadie libre a esa hora: se elige a quien trabaja ese día y
+                # tiene el hueco más cercano dentro de SU horario.
+                _elegido2 = _doctor_hueco_cercano(path, compatibles, fecha, hora,
+                                                  serv['duration_min']) \
+                    or _profesional_libre(path, compatibles, fecha) or compatibles[0]
             profesional_id = _elegido2['id']
             pend['profesional_nombre'] = _elegido2['name']
             pend.pop('preg_doctor', None)
@@ -5452,7 +5496,11 @@ def _confirma_si(t: str) -> bool:
     t = (t or '').strip().lower()
     if not t:
         return False
-    first = re.sub(r'[^a-záéíóúñ ]', '', t).split()[0] if ' ' in t else t
+    limpio = re.sub(r'[^a-záéíóúñ ]', '', t).strip()
+    if re.match(r'(est[aá] bien|esta bien|de acuerdo|perfecto|listo|dale|claro|'
+                r'bueno|correcto|me sirve|me parece bien)\b', limpio):
+        return True
+    first = limpio.split()[0] if limpio else ''
     return first in ('si', 'sí', 'confirmo', 'ok', 'vale', 'dalo', 'adelante')
 
 
@@ -5731,6 +5779,11 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
     idempotente. Al confirmar se crea la alerta del equipo y se pausa la IA.
     """
     bajo = _normalizar(body or '')
+    _color = re.search(r'\b(rojo|roja|azul|morado|morada|verde|negro|negra|blanco|blanca|'
+                       r'rosado|rosada|rosa|amarillo|amarilla|celeste|lila|gris)\b', bajo)
+    if _color:
+        # Color pedido: se anota para el resumen y para quien prepara el pedido.
+        pending = {**pending, 'variante': _color.group(1)}
     productos = _comercio.productos_publicados(path)
     if not productos:
         return _resp('comprar', _frase(
@@ -5967,8 +6020,11 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
                     aviso_datos = ' Datos: %s' % datos_cli['bruto'][:160]
                 svc.conv_raise_alert(path, conversation_id=conv_id,
                                      reason='por_revision', priority='normal',
-                                     message='VENTA: Pedido %s, preparar factura y artículo.%s'
-                                             % (res.get('codigo'), aviso_datos),
+                                     message='VENTA: Pedido %s, preparar factura y artículo%s.%s'
+                                             % (res.get('codigo'),
+                                                (' (color: %s)' % pending['variante'])
+                                                if pending.get('variante') else '',
+                                                aviso_datos),
                                      evidence=(body or '')[:160])
                 svc.conv_set_egress_paused(path, conv_id, True)
             total_txt = _moneda.formatear_importe(
@@ -6136,6 +6192,9 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
             'No pude cotizarlo (%s). ¿Quiere que lo consulte con el equipo?'
             % (cot.get('message') or 'sin datos')), pending={**pending, 'intencion': 'comprar'})
     snap = dict(cot)
+    if pending.get('variante'):
+        snap['item_nombre'] = '%s (%s)' % (snap.get('item_nombre') or item['name'],
+                                           pending['variante'])
     puede_confirmar = not cot.get('pendiente_envio')
     if cot.get('pendiente_envio'):
         # Envio por confirmar: no se deja al cliente en un callejon. Se toman

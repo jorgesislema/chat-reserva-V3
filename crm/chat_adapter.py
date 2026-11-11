@@ -597,8 +597,10 @@ class AdaptadorSimulado(ChatAdapter):
                     detalle = str(top.get('details') or '').strip()
                     if detalle:
                         txt += f' {detalle.rstrip(".")}.'
+                    # Las observaciones (precio por mayor, promos) sólo si se
+                    # preguntan: la primera respuesta va corta y al grano.
                     notas = str(top.get('public_notes') or '').strip()
-                    if notas:
+                    if notas and re.search(r'docena|mayor|promo|descuento|oferta|varios|paquete', q):
                         txt += f' {notas.rstrip(".")}.'
                     # Campos estructurados: presentación, color, alérgenos,
                     # advertencias y datos de tratamiento cargados en la ficha.
