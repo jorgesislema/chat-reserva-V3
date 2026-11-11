@@ -55,3 +55,6 @@ CONFIGURACION-*.xlsx
 
 docs/producto/entregas/BOT-EVAL-01/EVIDENCIAS/**/resultados.json
 
+
+.wrangler/
+
