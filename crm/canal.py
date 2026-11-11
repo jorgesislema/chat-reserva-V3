@@ -1964,12 +1964,22 @@ def _respuesta_alternativas(pend, trato, fecha, hora, opciones, serv):
         _nota = _nota_conocido(pend, trato)
         _doc = pend.get('profesional_nombre')
         _con = (' con %s' % _con_articulo(_doc)) if _doc else ''
-        texto = _nota + _frase(
-            trato,
-            'Uy, a las %s del %s ya está ocupado. Tengo libre a las %s para %s%s. '
-            '¿Te lo reservo?' % (hora, _fecha_larga(fecha), cand, serv['name'], _con),
-            'Uy, a las %s del %s ya está ocupado. Tengo libre a las %s para %s%s. '
-            '¿Se lo reservo?' % (hora, _fecha_larga(fecha), cand, serv['name'], _con))
+        if pend.get('propuesta_bot'):
+            # La hora la propuso el bot («por la mañana»): no se dice que «su»
+            # hora está ocupada; se ofrece directo el primer hueco real.
+            texto = _nota + _frase(
+                trato,
+                'Tengo libre el %s a las %s para %s%s. ¿Te lo reservo?' % (
+                    _fecha_larga(fecha), cand, serv['name'], _con),
+                'Tengo libre el %s a las %s para %s%s. ¿Se lo reservo?' % (
+                    _fecha_larga(fecha), cand, serv['name'], _con))
+        else:
+            texto = _nota + _frase(
+                trato,
+                'Uy, a las %s del %s ya está ocupado. Tengo libre a las %s para %s%s. '
+                '¿Te lo reservo?' % (hora, _fecha_larga(fecha), cand, serv['name'], _con),
+                'Uy, a las %s del %s ya está ocupado. Tengo libre a las %s para %s%s. '
+                '¿Se lo reservo?' % (hora, _fecha_larga(fecha), cand, serv['name'], _con))
         return _resp('reservar', texto, need_datos=True,
                      pending={**pend, 'fecha': fecha, 'hora': cand,
                               'confirmar_reserva': True,
