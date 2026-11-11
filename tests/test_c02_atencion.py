@@ -396,7 +396,7 @@ def test_campana_en_todas_las_pantallas(crm):
     assert b'/static/crm_c02_atencion.js' in r.data
 
 
-def test_js_campana_no_sonido_y_fallo_honesto():
+def test_js_campana_sonido_solo_nuevas_y_fallo_honesto():
     """El JS del indicador cumple: sin sonido, sin destellos (reduced-motion),
     fallo honesto «No se pudo actualizar» y contador de conversaciones únicas."""
     import pathlib
@@ -406,5 +406,8 @@ def test_js_campana_no_sonido_y_fallo_honesto():
     assert 'conversaciones requieren atención' in js
     assert 'No se pudo actualizar' in js
     assert 'prefers-reduced-motion' not in js or 'reduced' in js
-    assert '.play()' not in js and 'Audio' not in js and 'sound' not in js
+    # Sonido (pedido del negocio 2026-11-11): sólo ante atenciones NUEVAS y
+    # con opción de silenciar; nunca un audio en bucle.
+    assert 'avisarNuevas' in js and 'atencion_sonido' in js
+    assert '.play()' not in js and 'loop' not in js
     assert 'total_pendientes' in js

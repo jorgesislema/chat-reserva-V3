@@ -5319,3 +5319,12 @@ Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los casos reportados (lu
 - Base demo: copia en `backups/demo_comercial-antes-notas-internas-20261111.db`; borrados 5 fragmentos internos (evaluación previa, «sin regaños», «el bot nunca…»); publicado el Cepillo suave; índice vectorial reconstruido.
 - Batería total: 705 passed + 1 ajustada (texto de retiro) ? ventas 11/11.
 
+
+## 2026-11-11 (noche) — Primeros pasos, menú simple y aviso con sonido
+
+- Pestaña «Primeros pasos» (admin): 6 pasos con estado real (negocio, doctores, catálogo publicado y borradores, información, simulador, WhatsApp) y enlace al Excel de configuración. Aviso «Primeros pasos: N de 6» arriba mientras falte algo.
+- Menú: 5 pestañas (Conversaciones, Agenda, Catálogo, Simulador, Ventas) + «Más opciones» con el resto (nada se quitó).
+- Campana: sonido sólo ante atenciones NUEVAS (3 tonos alta, 2 normal), botón Sonido/Silencio (localStorage), número en el título de la pestaña y notificación del sistema si la pestaña está oculta y hay permiso.
+- Pruebas: `tests/test_inicio_y_menu.py` (5) y test de campana actualizado. Batería total: 711 passed, 4 skipped.
+- WhatsApp: claves en .env; falta URL pública https para `/webhook` (túnel cloudflared) y el worker.
+

@@ -11,7 +11,10 @@
    - GET puro: abrir la campana NO resuelve (la resolución es un acto explícito
      del operador en la bandeja). Persiste al recargar y refleja los cambios de
      otra pestaña porque siempre se relee el estado de la base.
-   - Sin sonido. Sin animaciones si el usuario pide prefers-reduced-motion.
+   - Aviso con sonido (2026-11-11) SOLO ante una atención NUEVA: tres tonos
+     para prioridad alta (emergencia, reclamo), dos para normal (venta,
+     revisión). Se puede silenciar; la preferencia queda en el navegador.
+   - Sin animaciones si el usuario pide prefers-reduced-motion.
    - El panel NO expone mensajes privados: sólo motivo, prioridad, tiempo de
      espera, cliente y responsable; cada fila abre la conversación en la bandeja. */
 (function () {
@@ -44,6 +47,63 @@
     ultimo_exito: null   // copia del último estado bueno conocido
   };
   var abierto = false;
+
+  // ---- Sonido ante atenciones nuevas ----
+  var conocidas = null;          // claves ya vistas (null = primera carga)
+  var audioCtx = null;
+  function sonidoActivo() {
+    try { return localStorage.getItem('atencion_sonido') !== 'off'; } catch (e) { return true; }
+  }
+  function desbloquearAudio() {
+    // Los navegadores exigen un clic antes de sonar: se prepara en el primero.
+    try {
+      if (!audioCtx) {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (Ctx) audioCtx = new Ctx();
+      }
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { audioCtx = null; }
+  }
+  function tono(alta) {
+    if (!sonidoActivo()) return;
+    desbloquearAudio();
+    if (!audioCtx) return;
+    var veces = alta ? 3 : 2;
+    var frec = alta ? 880 : 660;
+    for (var i = 0; i < veces; i++) {
+      var t0 = audioCtx.currentTime + i * 0.35;
+      var osc = audioCtx.createOscillator();
+      var gan = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = frec;
+      gan.gain.setValueAtTime(0.0001, t0);
+      gan.gain.exponentialRampToValueAtTime(0.3, t0 + 0.02);
+      gan.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.25);
+      osc.connect(gan); gan.connect(audioCtx.destination);
+      osc.start(t0); osc.stop(t0 + 0.27);
+    }
+  }
+  function avisarNuevas(lista) {
+    var claves = {};
+    lista.forEach(function (c) {
+      (c.alerts || [{ reason: 'x' }]).forEach(function (a) {
+        claves[c.conversation_id + ':' + (a.reason || '')] = c.prioridad_max === 'alta';
+      });
+    });
+    if (conocidas === null) { conocidas = claves; return; }
+    var nuevas = Object.keys(claves).filter(function (k) { return !(k in conocidas); });
+    conocidas = claves;
+    if (!nuevas.length) return;
+    var alta = nuevas.some(function (k) { return claves[k]; });
+    tono(alta);
+    try {
+      if (window.Notification && Notification.permission === 'granted' && document.hidden) {
+        new Notification(alta ? 'Atención urgente' : 'Nueva atención',
+                         { body: 'Hay ' + nuevas.length + ' conversación(es) nueva(s) para atender.' });
+      }
+    } catch (e) { /* sin notificaciones del sistema */ }
+  }
+  var tituloBase = document.title;
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -173,6 +233,8 @@
     estado.total_pendientes = (j && j.total_pendientes != null) ? j.total_pendientes : estado.pendientes.length;
     estado.total_en_atencion = (j && j.total_en_atencion != null) ? j.total_en_atencion : estado.en_atencion.length;
     estado.total_global = estado.total_pendientes + estado.total_en_atencion;
+    avisarNuevas(estado.pendientes);
+    document.title = (estado.total_pendientes ? '(' + estado.total_pendientes + ') ' : '') + tituloBase;
     estado.ultimo_exito = {
       pendientes: estado.pendientes, en_atencion: estado.en_atencion,
       total_pendientes: estado.total_pendientes, total_en_atencion: estado.total_en_atencion
@@ -227,6 +289,28 @@
     prio.hidden = true;
     btn.appendChild(prio);
     root.appendChild(btn);
+
+    var mute = document.createElement('button');
+    mute.type = 'button';
+    mute.className = 'ghost bell-sonido';
+    function pintarMute() {
+      var on = sonidoActivo();
+      mute.textContent = on ? '🔊 Sonido' : '🔇 Silencio';
+      mute.setAttribute('aria-pressed', on ? 'true' : 'false');
+      mute.setAttribute('aria-label', on ? 'Sonido de avisos activado. Pulse para silenciar.'
+                                          : 'Avisos en silencio. Pulse para activar el sonido.');
+    }
+    pintarMute();
+    mute.addEventListener('click', function () {
+      try { localStorage.setItem('atencion_sonido', sonidoActivo() ? 'off' : 'on'); } catch (e) {}
+      pintarMute();
+      if (sonidoActivo()) { desbloquearAudio(); tono(false); }
+      try {
+        if (window.Notification && Notification.permission === 'default') Notification.requestPermission();
+      } catch (e) {}
+    });
+    root.appendChild(mute);
+    document.addEventListener('click', desbloquearAudio, { once: true });
 
     var panel = el('div', 'bell-panel');
     panel.hidden = true;

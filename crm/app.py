@@ -217,6 +217,73 @@ def _telefono_prueba(valor):
     return limpio, None
 
 
+def pasos_inicio(path: str) -> list:
+    """Asistente de inicio: qué falta para que el bot atienda bien.
+
+    Cada paso: ``{'clave','titulo','hecho','detalle','enlace','accion'}``.
+    Sólo lee la base y el entorno (nombres de variables, nunca valores).
+    """
+    import glob as _glob
+    pasos = []
+    try:
+        from crm.business_config import effective_settings as _eff
+        st = _eff(path) or {}
+    except Exception:  # noqa: BLE001 - sin configuración se marca pendiente
+        st = {}
+    with connect(path) as conn:
+        def _n(sql):
+            try:
+                return int(conn.execute(sql).fetchone()[0] or 0)
+            except sqlite3.Error:
+                return 0
+        doctores = _n('SELECT COUNT(*) FROM crm_professionals WHERE active=1')
+        servicios = _n("SELECT COUNT(*) FROM crm_catalog_items WHERE kind='servicio' "
+                       "AND publish_state='publicado' AND active=1")
+        productos = _n("SELECT COUNT(*) FROM crm_catalog_items WHERE kind='producto' "
+                       "AND publish_state='publicado' AND active=1")
+        borradores = _n("SELECT COUNT(*) FROM crm_catalog_items WHERE publish_state!='publicado' "
+                        "AND active=1")
+        docs = _n("SELECT COUNT(*) FROM crm_kb_documents WHERE state='publicado'")
+        mensajes = _n('SELECT COUNT(*) FROM crm_wa_messages')
+    horarios = st.get('negocio_horarios')
+    pasos.append({'clave': 'negocio', 'titulo': 'Datos y horario del negocio',
+                  'hecho': bool(str(st.get('negocio_nombre') or '').strip()) and bool(horarios),
+                  'detalle': 'Nombre, horario, saludo y trato (usted o tú).',
+                  'enlace': '/?tab=negocio', 'accion': 'Completar'})
+    pasos.append({'clave': 'doctores', 'titulo': 'Doctores',
+                  'hecho': doctores > 0,
+                  'detalle': '%d activos. Cargue su horario y almuerzo.' % doctores,
+                  'enlace': '/?tab=team', 'accion': 'Agregar doctores'})
+    pasos.append({'clave': 'catalogo', 'titulo': 'Tratamientos y productos con precio',
+                  'hecho': servicios > 0,
+                  'detalle': ('%d tratamientos y %d productos publicados.%s Puede subirlos '
+                              'con el Excel de configuración.' % (
+                                  servicios, productos,
+                                  (' %d en borrador: el bot no los ve.' % borradores)
+                                  if borradores else '')),
+                  'enlace': '/?tab=catalog', 'accion': 'Abrir catálogo',
+                  'extra': '/api/comercio/plantilla/configuracion'})
+    pasos.append({'clave': 'informacion', 'titulo': 'Información para el bot',
+                  'hecho': docs > 0,
+                  'detalle': '%d documentos publicados (políticas, preguntas frecuentes).' % docs,
+                  'enlace': '/?tab=docs', 'accion': 'Agregar información'})
+    probado = bool(_glob.glob(str(path) + '.simulador-*.db'))
+    pasos.append({'clave': 'simulador', 'titulo': 'Probar en el simulador',
+                  'hecho': probado,
+                  'detalle': 'Pida un turno y compre un producto como si fuera un cliente.',
+                  'enlace': '/?tab=simulador', 'accion': 'Probar'})
+    claves = all((os.getenv(k) or '').strip() for k in
+                 ('WHATSAPP_ACCESS_TOKEN', 'WHATSAPP_PHONE_ID', 'WHATSAPP_VERIFY_TOKEN'))
+    pasos.append({'clave': 'whatsapp', 'titulo': 'Conectar WhatsApp',
+                  'hecho': claves and mensajes > 0,
+                  'detalle': ('Claves listas. Falta una dirección pública (https) para el '
+                              'webhook /webhook y recibir el primer mensaje.' if claves and not mensajes
+                              else 'Conectado: ya llegan mensajes.' if claves
+                              else 'Faltan las claves de WhatsApp en el archivo .env.'),
+                  'enlace': '/?tab=inbox', 'accion': 'Ver conversaciones'})
+    return pasos
+
+
 def _arena_simulador(origen: str, user_id=None):
     """Copia y teléfono de prueba AISLADOS por operador (punto 7 del informe).
 
@@ -656,8 +723,9 @@ def create_app(test_config=None):
     @protected()
     def home():
         tab = request.args.get('tab', 'overview')
-        if tab in ('team', 'users', 'accounts', 'audit', 'sync', 'analytics') and g.user['role'] != 'admin':
+        if tab in ('team', 'users', 'accounts', 'audit', 'sync', 'analytics', 'inicio') and g.user['role'] != 'admin':
             abort(403)
+        pasos = pasos_inicio(app.config['DATABASE']) if g.user['role'] == 'admin' else []
         search = request.args.get('q', '').strip()[:100]
         stage = request.args.get('stage', '')
         doctor_filter = request.args.get('professional', '')
@@ -701,6 +769,7 @@ def create_app(test_config=None):
             sync_queue=sync_queue, sync_professionals=sync_professionals,
             conversion=round(100 * funnel.get('Ganado', 0) / total, 1) if total else 0,
             q=search, stage=stage, professional_filter=doctor_filter, logs=logs, today=today,
+            pasos=pasos, pasos_hechos=sum(1 for p in pasos if p['hecho']),
    analitica=_analitica(app.config['DATABASE']) if tab == 'analytics' else None)
 
     @app.post('/users')
