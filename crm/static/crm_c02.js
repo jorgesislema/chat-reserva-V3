@@ -687,7 +687,7 @@
               return;
             }
             dlg.close();
-            flash('Artículo guardado como borrador. Pulse «Publicar» en la fila para que el bot lo vea.', 'ok');
+            flash('Artículo guardado. Si ya estaba publicado, el bot ve el cambio al instante; si es nuevo, pulse «Publicar» en la fila.', 'ok');
             reload();
             return;
           }

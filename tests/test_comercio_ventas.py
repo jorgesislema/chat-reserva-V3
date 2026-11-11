@@ -110,7 +110,8 @@ def test_compra_retiro_crea_pedido_y_deriva(tmp_path):
     assert pedidos[0]['total_cents'] == 1300
     textos = _textos(path)
     assert any('quedó registrado' in t for t, _ in textos)
-    assert any('Paga al recibir' in t for t, _ in textos)
+    # Retiro en local: se paga al retirar (no «al recibir»).
+    assert any('paga al retirarlo' in t for t, _ in textos)
     conv = svc.conv_by_key(path, TELEFONO)
     assert svc.conv_egress_paused(path, conv['id']) is True
     assert svc.conv_alerts(path, include_resolved=False)

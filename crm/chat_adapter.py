@@ -588,7 +588,12 @@ class AdaptadorSimulado(ChatAdapter):
                            if int(stockinfo or 0) > 0 else
                            f'En este momento no tenemos {top["name"]} disponible.')
                     if precio:
-                        txt += f' {precio}.'
+                        txt += f' En el local: {precio}.'
+                        _dom_s = _moneda.formatear_importe(
+                            top.get('price_domicilio_cents') if top.get('price_domicilio_cents')
+                            not in (None, '') else top.get('price_cents'), top.get('currency'))
+                        if _dom_s:
+                            txt += f' A domicilio: {_dom_s} (incluye la entrega).'
                     detalle = str(top.get('details') or '').strip()
                     if detalle:
                         txt += f' {detalle.rstrip(".")}.'

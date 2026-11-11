@@ -5691,7 +5691,8 @@ def _texto_resumen_compra(snap: dict, trato: str) -> str:
     else:
         if snap.get('modo') == 'domicilio':
             lineas.append('Envío a domicilio: %s.' % _imp(snap.get('envio') or 0))
-        lineas.append('Total: %s. ¿Lo confirmas?' % _imp(snap.get('total') or 0))
+        lineas.append(_frase(trato, 'Total: %s. ¿Lo confirmas?', 'Total: %s. ¿Lo confirma?')
+                      % _imp(snap.get('total') or 0))
     return ' '.join(lineas)
 
 
@@ -5975,12 +5976,18 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
             return {'intencion': 'comprar',
                     'texto': _frase(
                         trato,
-                        'Listo, tu pedido %s quedó registrado por %s. '
-                        'Pagas al recibir. El equipo coordinará la entrega por este chat.'
-                        % (res.get('codigo'), total_txt),
-                        'Listo, su pedido %s quedó registrado por %s. '
-                        'Paga al recibir. El equipo coordinará la entrega por este chat.'
-                        % (res.get('codigo'), total_txt)),
+                        'Listo, tu pedido %s quedó registrado por %s. %s %s'
+                        % (res.get('codigo'), total_txt,
+                           'Lo retiras en el local y pagas al retirarlo; el equipo te avisa cuando esté listo.'
+                           if pending.get('modo') == 'retiro' else
+                           'Pagas al recibir. El equipo coordinará la entrega por este chat.',
+                           _despedida_hora(path)),
+                        'Listo, su pedido %s quedó registrado por %s. %s %s'
+                        % (res.get('codigo'), total_txt,
+                           'Lo retira en el local y paga al retirarlo; el equipo le avisa cuando esté listo.'
+                           if pending.get('modo') == 'retiro' else
+                           'Paga al recibir. El equipo coordinará la entrega por este chat.',
+                           _despedida_hora(path))),
                     'necesita_datos': False,
                     'pending': {'intencion': 'comprar', 'pedido_id': res.get('pedido_id'),
                                 'pedido_codigo': res.get('codigo')},

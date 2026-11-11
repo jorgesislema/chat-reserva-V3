@@ -5310,3 +5310,12 @@ Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los casos reportados (lu
 - Nombre del comprador sin «+»/«de» sueltos.
 - Batería total: 706 passed, 4 skipped, 0 failed.
 
+
+## 2026-11-11 (tarde, 2) — Precio local/domicilio visible y notas internas
+
+- Causa: el Cepillo suave (USD 6,50 / 7,00) estaba en BORRADOR: editar un artículo publicado lo sacaba del bot. Ahora editar uno publicado lo deja publicado (`catalog_update(publish=None)` conserva el estado).
+- El bot muestra «En el local» y «A domicilio (incluye la entrega)» al responder un producto.
+- Retiro en local: «paga al retirarlo», no «al recibir». Trato usted coherente en «¿Lo confirma?».
+- Base demo: copia en `backups/demo_comercial-antes-notas-internas-20261111.db`; borrados 5 fragmentos internos (evaluación previa, «sin regaños», «el bot nunca…»); publicado el Cepillo suave; índice vectorial reconstruido.
+- Batería total: 705 passed + 1 ajustada (texto de retiro) ? ventas 11/11.
+

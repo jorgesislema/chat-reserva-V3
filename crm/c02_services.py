@@ -224,7 +224,7 @@ def catalog_create(path, *, name, kind='servicio', professional_id=None, created
 
 
 def catalog_update(path, *, item_id, expected_revision, field, value, actor=None,
-                   reason=None, publish=False, role='user'):
+                   reason=None, publish=None, role='user'):
     """Actualiza un campo de celda o de detalle con control de versión optimista.
 
     ``field`` es el nombre de una columna editable del artículo. Guardar un valor
@@ -257,6 +257,10 @@ def catalog_update(path, *, item_id, expected_revision, field, value, actor=None
         if item['current_revision'] != expected:
             return _err(VERSION_CONFLICT,
                         'El registro cambió mientras editaba; recargue para no sobrescribir cambios.')
+        if publish is None:
+            # Editar un artículo YA publicado (precio, detalle) no lo saca del
+            # bot: sigue publicado. Sólo un borrador sigue en borrador.
+            publish = item['publish_state'] == 'publicado'
 
         # Normalización del valor según el campo (whitelist ya validada arriba).
         if field == 'name':
