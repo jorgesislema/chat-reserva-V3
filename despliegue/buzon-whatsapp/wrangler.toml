@@ -1,0 +1,10 @@
+name = "buzon-whatsapp"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+# Base D1 del buzón. Crear con:  npx wrangler d1 create buzon-whatsapp
+# y pegar aquí el database_id que muestra el comando.
+[[d1_databases]]
+binding = "DB"
+database_name = "buzon-whatsapp"
+database_id = "PEGAR_AQUI_EL_ID"

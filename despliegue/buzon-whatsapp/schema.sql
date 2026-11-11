@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS buzon (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  recibido INTEGER NOT NULL,
+  cuerpo_b64 TEXT NOT NULL,
+  firma TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS buzon_recibido ON buzon (recibido);

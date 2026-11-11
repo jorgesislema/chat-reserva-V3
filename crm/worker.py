@@ -161,6 +161,17 @@ def ejecutar(path=None, *, nombre=None, parada=None, pasadas_recover=30,
                 if rec.get('abandonadas') or rec.get('inciertas'):
                     log.warning('Recuperación de colgados: %s', rec)
 
+            # 1b) Buzón en la nube (red sin dirección pública): se recogen los
+            #     mensajes que Meta dejó en el Worker de Cloudflare.
+            if (os.getenv('WHATSAPP_BUZON_URL') or '').strip():
+                try:
+                    from crm import buzon_whatsapp
+                    bz = buzon_whatsapp.drenar(path)
+                    if bz.get('mensajes') or bz.get('rechazados'):
+                        log.info('Buzón WhatsApp: %s', bz)
+                except Exception:  # noqa: BLE001 - el buzón nunca tumba el worker
+                    log.exception('No se pudo leer el buzón de WhatsApp')
+
             # 2) Entradas: webhook → cola → flujo de reservas → outbox.
             res = procesar_lote(path, nombre, motor, contexto={},
                                 intervalo=loop_s, hooks={})

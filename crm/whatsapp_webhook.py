@@ -93,13 +93,23 @@ def webhook_whatsapp():
     if not isinstance(payload, dict):
         return jsonify(error={'code': 'invalid_json'}), 400
 
+    procesar_payload(current_app.config['DATABASE'], payload)
+    # Ack sólo tras persistir (y encolar) todos los mensajes del lote.
+    return Response('ok', status=200)
+
+
+def procesar_payload(db_path: str, payload: dict) -> dict:
+    """Procesa un lote de Meta YA VERIFICADO (firma correcta).
+
+    Lo usan el webhook directo y el buzón en la nube (``crm.buzon_whatsapp``):
+    mismo camino, misma idempotencia por ID externo.
+    """
     batch = _parse_batch(payload)
 
     # Avisos de estado (sent/delivered/read/failed) de mensajes SALIENTES:
     # actualizan el outbox por wamid de forma idempotente y estable frente a
     # eventos repetidos o fuera de orden. Siempre se ack 200 (Meta reintenta
     # durante días si no acusamos).
-    db_path = current_app.config['DATABASE']
     for st in batch['statuses']:
         if st['external_id'] and st['status']:
             svc.outbox_webhook_status(
@@ -108,8 +118,7 @@ def webhook_whatsapp():
                 recipient_id=st['recipient_id'] or None)
 
     # Mensajes entrantes: persistencia durable con idempotencia por ID externo.
-    if not batch['messages']:
-        return Response('ok', status=200)
+    nuevos = 0
 
     for msg in batch['messages']:
         result = svc.wa_ingest(
@@ -122,9 +131,8 @@ def webhook_whatsapp():
         )
         if result['ok'] and not result.get('handled') == 'duplicate':
             svc.wa_mark_acked(db_path, result['message_id'])
-
-    # Ack sólo tras persistir (y encolar) todos los mensajes del lote.
-    return Response('ok', status=200)
+            nuevos += 1
+    return {'mensajes': nuevos, 'estados': len(batch['statuses'])}
 
 
 @wa_webhooks.errorhandler(Exception)
