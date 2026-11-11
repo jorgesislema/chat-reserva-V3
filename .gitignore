@@ -58,3 +58,4 @@ docs/producto/entregas/BOT-EVAL-01/EVIDENCIAS/**/resultados.json
 
 .wrangler/
 
+*.db.sync
