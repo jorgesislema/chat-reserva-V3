@@ -68,7 +68,10 @@ def test_lote_repetido_no_duplica(crm):
     assert _mensajes(db) == 1
 
 
-def test_sin_configuracion_no_llama_a_la_red(crm):
+def test_sin_configuracion_no_llama_a_la_red(crm, monkeypatch):
+    for k in ('WHATSAPP_BUZON_URL', 'WHATSAPP_BUZON_TOKEN', 'WHATSAPP_APP_SECRET'):
+        monkeypatch.delenv(k, raising=False)
+
     def _no(*a, **k):
         raise AssertionError('no debe llamar')
     res = buzon_whatsapp.drenar(crm.config['DATABASE'], url='', token='', secreto='', http=_no)

@@ -5328,3 +5328,10 @@ Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los casos reportados (lu
 - Pruebas: `tests/test_inicio_y_menu.py` (5) y test de campana actualizado. Batería total: 711 passed, 4 skipped.
 - WhatsApp: claves en .env; falta URL pública https para `/webhook` (túnel cloudflared) y el worker.
 
+
+## 2026-11-11 (noche, 2) — El simulador ve todo el negocio
+
+- WhatsApp real queda en pausa: Meta no entrega mensajes reales a una app sin publicar, y publicar exige verificación del negocio. Buzón Cloudflare listo (`despliegue/buzon-whatsapp`) para cuando se verifique.
+- Simulador: `refrescar_arena` trae en cada mensaje (si la base cambió) catálogo, precios, doctores, horarios, agenda real, información y configuración, conservando la conversación de prueba.
+- Batería total: 716 passed + 1 ajustada (entorno del buzón).
+

@@ -284,6 +284,65 @@ def pasos_inicio(path: str) -> list:
     return pasos
 
 
+# Tablas que son de la conversación de prueba (se quedan en la copia). Todo lo
+# demás es el negocio y se trae fresco de la base real.
+_TABLAS_DE_LA_PRUEBA = frozenset({
+    'crm_conversations', 'crm_conversation_messages', 'crm_wa_messages',
+    'crm_wa_delivery_events', 'crm_operations', 'crm_outbox', 'crm_human_alerts',
+    'crm_claims', 'crm_c02_chat_memory', 'crm_c02_chat_conversations',
+    'crm_audit', 'crm_login_attempts', 'crm_migrations', 'crm_sync_leases',
+    'comercio_cotizaciones', 'comercio_pedidos', 'comercio_pedido_lineas',
+    'comercio_reservas_stock', 'comercio_incidencias',
+    'sqlite_sequence',
+})
+
+
+def refrescar_arena(origen: str, arena: str) -> bool:
+    """Trae a la copia del simulador TODO el negocio vigente (catálogo,
+    precios, doctores, horarios, agenda real, información, configuración),
+    conservando la conversación de prueba. Sólo actúa si la base cambió desde
+    la última vez. Devuelve True si refrescó.
+    """
+    marca = Path(str(arena) + '.sync')
+    try:
+        mtime = str(os.path.getmtime(origen))
+    except OSError:
+        return False
+    try:
+        if marca.exists() and marca.read_text(encoding='utf-8') == mtime:
+            return False
+    except OSError:
+        pass
+    with sqlite3.connect(arena) as conn:
+        conn.execute('ATTACH DATABASE ? AS base', (str(origen),))
+        try:
+            tablas_base = {r[0] for r in conn.execute(
+                "SELECT name FROM base.sqlite_master WHERE type='table'")}
+            tablas_arena = {r[0] for r in conn.execute(
+                "SELECT name FROM main.sqlite_master WHERE type='table'")}
+            conn.execute('PRAGMA foreign_keys=OFF')
+            for t in sorted((tablas_base & tablas_arena) - _TABLAS_DE_LA_PRUEBA):
+                if t.startswith('sqlite_'):
+                    continue
+                cols_b = [r[1] for r in conn.execute('PRAGMA base.table_info("%s")' % t)]
+                cols_a = {r[1] for r in conn.execute('PRAGMA main.table_info("%s")' % t)}
+                cols = [c for c in cols_b if c in cols_a]
+                if not cols:
+                    continue
+                lista = ', '.join('"%s"' % c for c in cols)
+                conn.execute('DELETE FROM main."%s"' % t)
+                conn.execute('INSERT INTO main."%s" (%s) SELECT %s FROM base."%s"'
+                             % (t, lista, lista, t))
+            conn.commit()
+        finally:
+            conn.execute('DETACH DATABASE base')
+    try:
+        marca.write_text(mtime, encoding='utf-8')
+    except OSError:
+        pass
+    return True
+
+
 def _arena_simulador(origen: str, user_id=None):
     """Copia y teléfono de prueba AISLADOS por operador (punto 7 del informe).
 
@@ -2060,6 +2119,20 @@ def create_app(test_config=None):
             # La arena necesita su propia copia del índice vectorial; si no,
             # todo el simulador cae a sólo-texto sin avisar.
             _copiar_indice_arena(origen, arena)
+            try:
+                Path(str(arena) + '.sync').write_text(
+                    str(os.path.getmtime(origen)), encoding='utf-8')
+            except OSError:
+                pass
+        else:
+            # El simulador ve SIEMPRE el negocio vigente (precios, doctores,
+            # horarios, agenda real) sin perder la conversación en curso.
+            try:
+                refrescar_arena(origen, arena)
+            except sqlite3.Error:
+                app.logger.exception('No se pudo refrescar la copia del simulador; se rehace')
+                with sqlite3.connect(origen) as src, sqlite3.connect(arena) as dst:
+                    src.backup(dst)
         texto = (cuerpo.get('texto') or '').strip()[:400]
         if texto:
             _c02.wa_ingest(arena, external_id='sim-' + uuid4().hex,
