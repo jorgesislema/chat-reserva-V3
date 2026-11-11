@@ -118,6 +118,7 @@ POR_REVISION = (
 # igualarse a una emergencia (motivo propio 'reclamo', prioridad alta).
 RECLAMOS = (
     'reclamo', 'queja', 'quejo', 'me quejo', 'voy a quejarme', 'quejarme',
+    'ladron', 'ladrones', 'rateros', 'sinverguenzas', 'me robaron', 'robo',
     'reclamo formal', 'denuncia', 'gerente', 'hablar con gerencia',
     'solicito hablar con gerencia', 'cobro', 'cobrarme', 'me cobraron',
     'me cobró', 'me cobro', 'factura', 'facturaron', 'cobro indebido',
@@ -165,6 +166,8 @@ _REESCRITURAS = {
     'amanesi': 'amaneci', 'inchada': 'hinchada', 'inchado': 'hinchado',
     'inchadas': 'hinchadas', 'inchados': 'hinchados', 'quero': 'quiero',
     'restauracion': 'restauracion', 'kontesten': 'contesten',
+    'boy': 'voy', 'sirbio': 'sirvio', 'cobreron': 'cobraron', 'cobrron': 'cobraron',
+    'puieron': 'pusieron', 'pucieron': 'pusieron', 'ladrnes': 'ladrones',
 }
 
 PRIORIDAD_POR_MOTIVO = {'peligro_inmediato': 'alta', 'emergencia': 'alta',
@@ -614,15 +617,17 @@ AVISO_POR_MOTIVO = {
     },
     'emergencia': {
         'tu': ('Déjame revisar tu caso con el doctor y me comunico en unos '
-               'minutos para que pueda revisarlo.'),
+               'minutos. ¿Me dices el nombre del paciente para que el doctor '
+               'haga el seguimiento?'),
         'usted': ('Déjeme revisar su caso con el doctor y me comunico en unos '
-                  'minutos para que pueda revisarlo.'),
+                  'minutos. ¿Me dice el nombre del paciente para que el doctor '
+                  'haga el seguimiento?'),
     },
     'reclamo': {
-        'tu': ('Lamento lo ocurrido. He dejado tu caso al equipo. ¿Me dices tu '
-               'nombre y el del profesional que te atendió para completarlo?'),
-        'usted': ('Lamento lo ocurrido. He dejado su caso al equipo. ¿Me dice su '
-                  'nombre y el del profesional que le atendió para completarlo?'),
+        'tu': ('Lamento lo ocurrido. He dejado tu caso al equipo. ¿Me dices el '
+               'nombre del paciente y del doctor que te atendió para completarlo?'),
+        'usted': ('Lamento lo ocurrido. He dejado su caso al equipo. ¿Me dice el '
+                  'nombre del paciente y del doctor que le atendió para completarlo?'),
     },
     'humano_explicito': {
         'tu': ('De acuerdo. He dejado tu solicitud al equipo; te responderán por '
@@ -631,8 +636,10 @@ AVISO_POR_MOTIVO = {
                   'por aquí cuando puedan.'),
     },
     'por_revision': {
-        'tu': 'Hemos registrado tu caso y el equipo lo va a revisar.',
-        'usted': 'Hemos registrado su caso y el equipo lo va a revisar.',
+        'tu': ('Hemos registrado tu caso y el equipo lo va a revisar. ¿Me dices '
+               'el nombre del paciente y del doctor que te atendió?'),
+        'usted': ('Hemos registrado su caso y el equipo lo va a revisar. ¿Me dice '
+                  'el nombre del paciente y del doctor que le atendió?'),
     },
 }
 
@@ -1033,6 +1040,15 @@ def _extract_datetime(texto: str, hoy: Optional[date] = None) -> tuple[Optional[
     fecha = None
     hora = None
 
+    # «16;00», «16,00», «16 h 00» son 16:00; «16 horas»/«16 h» son «a las 16».
+    t = re.sub(r'\b(\d{1,2})\s*[;,]\s*(\d{2})\b', r'\1:\2', t)
+    t = re.sub(r'\b(\d{1,2})\s*h\s+(\d{2})\b', r'\1:\2', t)
+    t = re.sub(r'\b(?:a\s+las?\s+|alas?\s+)?(\d{1,2})\s*(?:horas|hrs|hs|h)\b(?!\s*\d)', r'a las \1', t)
+    _solo = re.fullmatch(r'\s*(\d{1,2})(?::(\d{2}))?\s*', t)
+    if _solo and (_solo.group(2) or 7 <= int(_solo.group(1)) <= 23):
+        # (1-6 sueltos son opciones de una lista, no horas.)
+        # Respuesta suelta a «¿a qué hora?»: «16» o «16:00».
+        t = 'a las %s' % (_solo.group(1) + (':' + _solo.group(2) if _solo.group(2) else ''))
     mt = re.search(r'(\d{1,2})[:.h](\d{2})', t)
     if mt:
         h = int(mt.group(1))
@@ -2329,7 +2345,8 @@ def _fusionar_datos_contacto(previos: dict, texto: str, phone: str) -> dict:
         datos['telefono'] = phone
     limpio = re.sub(r'(?i)\b(c[eé]dula|cedula|ci|tel[eé]fono|telefono|celular|'
                     r'whatsapp|mi nombre es|me llamo|nombre|soy|numero|n[uú]mero)\b', ' ', bruto)
-    limpio = re.sub(r'[\d,.;:\-/]+', ' ', limpio)
+    limpio = re.sub(r'[\d,.;:\-/+#()]+', ' ', limpio)
+    limpio = re.sub(r'(?i)\s+\b(de|del|y|con|mi)\s*$', '', limpio.strip())
     limpio = re.sub(r'\s+', ' ', limpio).strip()
     if (not datos.get('nombre') and len(limpio) >= 3 and re.search(r'[A-Za-zÁÉÍÓÚáéíóúñÑ]{2,}', limpio)
             and not re.fullmatch(r'(?i)(si|sí|no|ok|vale|listo|este|mismo|igual)', limpio)):
@@ -5982,9 +5999,18 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
     elif re.search(r'\b(retiro|retira|retirar|retirarlo|retirarla|recojo|recoger|recogerlo|local|tienda|paso por|paso a)\b', bajo):
         modo = 'retiro'
     if not modo:
+        _mon_m = item.get('currency') or 'USD'
+        _loc_m = _moneda.formatear_importe(item.get('price_cents'), _mon_m) or ''
+        _dom_m = _moneda.formatear_importe(
+            item.get('price_domicilio_cents') if item.get('price_domicilio_cents')
+            not in (None, '') else item.get('price_cents'), _mon_m) or ''
+        _precios_m = ('En el local: %s c/u. A domicilio: %s c/u (incluye la entrega). '
+                      % (_loc_m, _dom_m)) if _loc_m else ''
+        if _loc_m and _loc_m == _dom_m and re.search(r'precio|cuesta|cuestan|mismo|vale', bajo):
+            _precios_m = 'Sí, es el mismo precio: %s c/u en el local o a domicilio. ' % _loc_m
         return _resp('comprar', _frase(
-            trato, '¿Lo retiras en el local o te lo enviamos a domicilio?',
-            '¿Lo retira en el local o se lo enviamos a domicilio?'),
+            trato, _precios_m + '¿Lo retiras en el local o te lo enviamos a domicilio?',
+            _precios_m + '¿Lo retira en el local o se lo enviamos a domicilio?'),
             need_datos=True,
             pending={**pending, 'intencion': 'comprar', 'item_code': item['code'],
                      'cantidad': cantidad, 'ultimos_items': [item['code']]})
@@ -6113,7 +6139,11 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
                     'clave': cot['clave'], 'confirmar_compra': False,
                     'venta_manual': True, 'ultimos_items': [item['code']]}
         _dom_c = item.get('price_domicilio_cents')
-        if modo == 'domicilio' and _dom_c not in (None, ''):
+        if _dom_c in (None, ''):
+            # Precios finales (con impuestos): sin precio a domicilio cargado,
+            # a domicilio vale lo mismo que en el local.
+            _dom_c = item.get('price_cents')
+        if modo == 'domicilio' and _dom_c not in (None, '') and not _PREGUNTAR_ZONA:
             # El articulo tiene precio con entrega: se dice, sin «por confirmar».
             _mon = item.get('currency') or 'USD'
             _fmt = lambda c: _moneda.formatear_importe(c, _mon) or ''  # noqa: E731

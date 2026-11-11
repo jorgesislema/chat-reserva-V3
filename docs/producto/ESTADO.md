@@ -5301,3 +5301,12 @@ Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los casos reportados (lu
 - Venta: el producto del hilo manda (Â«deme el cepilloÂ»); listas con precio y elecciÃ³n por nÃºmero (Â«el 2Â» no son 2 unidades); se pide punto de referencia; la referencia no cambia el modo; con precio a domicilio cargado se dice el total con entrega.
 - Producto pedido inexistente no se sustituye (crema blanqueadora â‰  tiras): se ofrecen alternativas de la misma familia. Servicio en vez de stock: precio, duraciÃ³n y oferta de turno.
 - BaterÃ­a total: 703 passed, 4 skipped, 0 failed.
+
+## 2026-11-11 (tarde) — Horas, precios finales y nombres
+
+- Horas: «16;00», «16,00», «16 horas» y «16» suelto (7-23) se entienden; 1-6 sueltos siguen siendo opciones.
+- Precios finales: sin precio a domicilio cargado vale el del local; el embudo muestra local y domicilio y el total, sin «por confirmar» (salvo con zonas activas).
+- Emergencia pide el nombre del paciente; reclamo y calza caída piden paciente y doctor. Reclamos con faltas («ladrones», «boy a demandar»).
+- Nombre del comprador sin «+»/«de» sueltos.
+- Batería total: 706 passed, 4 skipped, 0 failed.
+

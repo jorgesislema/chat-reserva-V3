@@ -92,3 +92,22 @@ def test_producto_pedido_no_se_sustituye_por_otro():
     pal = ca._palabras_de_nombre('tienen crema blanqueadora', cands)
     assert pal == ['crema', 'blanqueadora']
     assert not any(all(ca._nombre_tiene(t, w) for w in pal) for t in cands)
+
+
+def test_hora_con_punto_y_coma_y_numero_suelto():
+    from datetime import date
+    from crm import canal as _c
+    assert _c._extract_datetime('16;00', date(2026, 11, 11))[1] == '16:00'
+    assert _c._extract_datetime('16', date(2026, 11, 11))[1] == '16:00'
+    assert _c._extract_datetime('a las 16 horas', date(2026, 11, 11))[1] == '16:00'
+
+
+def test_reclamo_con_faltas_pide_paciente_y_doctor(crm):
+    _paso(crm, 'ladrones la calza que me puieron se cayo y no sirbio los boy a demandar', 'r1')
+    txt = _ultimo(crm)
+    assert 'paciente' in txt and 'doctor' in txt, txt
+
+
+def test_emergencia_pide_nombre_del_paciente(crm):
+    _paso(crm, 'ayer me sacaron el diente, sangra mucho y me duele', 'r1')
+    assert 'nombre del paciente' in _ultimo(crm)
