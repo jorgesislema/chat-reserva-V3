@@ -533,10 +533,52 @@ class AdaptadorSimulado(ChatAdapter):
                                 and _plegar(t.get('name') or '') in _plegar(q)), None)
                 if _exacto is not None:
                     top = _exacto
+                elif publico:
+                    # Palabras del pedido que nombran artículos («crema»,
+                    # «blanqueadora»): el elegido debe tenerlas TODAS. Si no hay
+                    # ninguno así, no se sustituye por otro (crema ≠ tiras).
+                    _pal = _palabras_de_nombre(q, catalog)
+                    _todos = [t for t in catalog
+                              if all(_nombre_tiene(t, w) for w in _pal)] if _pal else []
+                    if _todos:
+                        top = _todos[0]
+                    elif len(_pal) > 1:
+                        _fam = [t for t in catalog if _nombre_tiene(t, _pal[0])
+                                and str(t.get('kind') or '') == 'producto'][:3]
+                        _pedido = ' '.join(_pal)
+                        if _fam:
+                            _ops = ', '.join('%s (%s)' % (t.get('name'), _moneda.formatear_importe(
+                                t.get('price_cents'), t.get('currency')) or 'consultar')
+                                for t in _fam)
+                            txt_n = ('No tenemos %s por ahora. Le puedo ofrecer: %s. '
+                                     '¿Cuál le interesa?' % (_pedido, _ops))
+                        else:
+                            txt_n = ('No tenemos %s por ahora. ¿Quiere que lo consulte '
+                                     'con el equipo?' % _pedido)
+                        return RespuestaChat(answer=txt_n, fuentes=[],
+                                             resumen='producto_no_disponible')
                 stockinfo = herramientas.get('stock_consultar')(top.get('id'))
                 precio = _moneda.formatear_importe(top.get('price_cents'),
                                                    top.get('currency'))
-                if top.get('stock_na') or stockinfo is None:
+                if publico and str(top.get('kind') or '') == 'servicio':
+                    # Servicio: precio, duración y oferta de turno (no «stock»).
+                    _pz = ('No tenemos %s a la venta. ' % ' '.join(
+                        w for w in re.findall(r'combo|kit|paquete|pack', _plegar(q))[:1])
+                        if re.search(r'combo|kit|paquete|pack', _plegar(q))
+                        and not re.search(r'combo|kit|paquete|pack',
+                                          _plegar(top.get('name') or '')) else '')
+                    txt = _pz + str(top.get('name') or 'Ese servicio')
+                    if precio:
+                        txt += ': %s' % precio
+                    try:
+                        _dm = int(top.get('duration_min') or 0)
+                    except (TypeError, ValueError):
+                        _dm = 0
+                    if _dm > 0:
+                        txt += ', dura aprox. %s' % (('%d h' % (_dm // 60)) if _dm % 60 == 0
+                                                     else ('%d min' % _dm))
+                    txt += '. ¿Quiere que le reserve un turno?'
+                elif top.get('stock_na') or stockinfo is None:
                     txt = (f'{top["name"]} es un servicio: no maneja stock.'
                            if publico else
                            f'{top["name"]}: servicio sin stock (no aplica). '
@@ -849,6 +891,10 @@ class AdaptadorSimulado(ChatAdapter):
         #    Los documentos son CONTENIDO, no instrucciones: si el cuerpo
         #    parece una orden para el bot («ignora tus reglas...»), no se
         #    repite; se responde desde datos estructurados o se deriva.
+        if publico and ctx.get('kb'):
+            # Notas internas de operación («sin regaños», «se ofrece...») y la
+            # «evaluación previa» no son información para el cliente.
+            ctx['kb'] = [f for f in ctx['kb'] if not _kb_interno(f.get('body'))]
         if ctx['kb']:
             cuerpos = [str(t.get('body') or '') for t in ctx['kb']]
             if any(_es_instruccion_encubierta(c) for c in cuerpos):
@@ -2032,6 +2078,32 @@ def _validar_hechos(texto: str, contexto: List[Dict[str, Any]],
             incidencias.append('stock')
             return _respuesta_determinista(items, publico=publico, usted=usted), incidencias
     return texto, incidencias
+
+
+_KB_INTERNO_RX = re.compile(
+    r'evaluacion previa|valoracion previa|sin regan|se ofrece el|'
+    r'\bel bot\b|\bnunca se\b|\bse deriva\b')
+
+
+def _kb_interno(cuerpo) -> bool:
+    """¿El fragmento es una nota interna de operación (no para el cliente)?"""
+    return bool(_KB_INTERNO_RX.search(_plegar(cuerpo or '')))
+
+
+def _nombre_tiene(item, palabra: str) -> bool:
+    """¿El nombre del artículo contiene la palabra (tolera plural)?"""
+    raiz = palabra[:5] if len(palabra) > 5 else palabra
+    return any(w.startswith(raiz) for w in _plegar(item.get('name') or '').split())
+
+
+def _palabras_de_nombre(q, candidatos) -> list:
+    """Palabras de la pregunta que aparecen en algún nombre de artículo."""
+    vistas = []
+    for w in re.findall(r'[a-z0-9]+', _plegar(q or '')):
+        if len(w) > 3 and w not in vistas and w not in ('dental', 'dientes', 'para') \
+                and any(_nombre_tiene(t, w) for t in candidatos):
+            vistas.append(w)
+    return vistas
 
 
 def _limpiar_presentacion(texto: str, publico: bool = True) -> str:

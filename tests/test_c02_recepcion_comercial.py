@@ -61,3 +61,34 @@ def test_doctora_nombrada_se_conserva_en_la_propuesta(crm):
     txt = _ultimo(crm)
     assert 'Dra. Ana' in txt and 'Dr. Luis' not in txt, txt
     assert 'Indique el número' not in txt
+
+
+def test_turno_con_dia_y_hora_entra_a_reserva(crm):
+    _servicio(crm.config['DATABASE'], 'Limpieza dental')
+    _servicio(crm.config['DATABASE'], 'Revisión general')
+    _paso(crm, 'buenos días un turno con el doctor para el viernes a las 15:00', 'r1')
+    assert 'atendido antes' in _ultimo(crm)
+
+
+def test_soy_nuevo_no_pregunta_doctor(crm):
+    _servicio(crm.config['DATABASE'], 'Limpieza dental')
+    _servicio(crm.config['DATABASE'], 'Revisión general')
+    _paso(crm, 'Hola', 'r1')
+    _paso(crm, 'soy nuevo', 'r2')
+    txt = _ultimo(crm).lower()
+    assert 'doctor' not in txt and 'hora' in txt, txt
+
+
+def test_notas_internas_de_conocimiento_no_llegan_al_cliente():
+    from crm import chat_adapter as ca
+    assert ca._kb_interno('Requiere evaluación previa del doctor.')
+    assert ca._kb_interno('El turno pasado ya no existe: se ofrece el hueco libre sin regaños.')
+    assert not ca._kb_interno('Atendemos de lunes a sábado.')
+
+
+def test_producto_pedido_no_se_sustituye_por_otro():
+    from crm import chat_adapter as ca
+    cands = [{'name': 'Tiras blanqueadoras'}, {'name': 'Crema dental'}]
+    pal = ca._palabras_de_nombre('tienen crema blanqueadora', cands)
+    assert pal == ['crema', 'blanqueadora']
+    assert not any(all(ca._nombre_tiene(t, w) for w in pal) for t in cands)

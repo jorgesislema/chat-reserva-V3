@@ -5291,3 +5291,13 @@ Luz verde al usuario: reiniciar 8052 + Ctrl+F5 y probar los casos reportados (lu
 - Pruebas del flujo clásico: fixture autouse `_flujo_clasico_recepcion` (RECEPCION_DIRECTA=False) en 7 módulos. El flujo nuevo se prueba en `test_c02_recepcion_comercial.py` (6/6).
 - Batería total: 698 passed, 4 skipped, 1 failed (prueba propia sin servicio sembrado; corregida y re-ejecutada 6/6). Sin commit/push.
 - Datos: en `demo_comercial.db` los doctores tienen `horario_json` vacío, así que atienden en el horario del negocio (solo cuenta el almuerzo). «Kit de ortodoncia» está en borrador.
+
+## 2026-11-11 — Correcciones del simulador (pruebas del negocio)
+
+- «Un turno con el doctor para el viernes a las 15:00» y «¿tiene el turno?» entran a reserva (antes volcaban horario o conocimiento).
+- «Soy nuevo / es nuevo» = primera vez: no se pregunta el doctor.
+- Conocimiento público: se filtran notas internas («evaluación previa», «sin regaños», «se ofrece…»).
+- Tras reservar se pide el nombre del paciente («¿A nombre de quién dejo la cita?»).
+- Venta: el producto del hilo manda («deme el cepillo»); listas con precio y elección por número («el 2» no son 2 unidades); se pide punto de referencia; la referencia no cambia el modo; con precio a domicilio cargado se dice el total con entrega.
+- Producto pedido inexistente no se sustituye (crema blanqueadora ≠ tiras): se ofrecen alternativas de la misma familia. Servicio en vez de stock: precio, duración y oferta de turno.
+- Batería total: 703 passed, 4 skipped, 0 failed.

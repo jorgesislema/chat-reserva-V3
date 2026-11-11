@@ -706,7 +706,11 @@ class MotorSimulado(MotorCanal):
             r'(quiero|quisiera|querr[ií]a|necesito|podr[ií]a|puedo|me gustar[ií]a|'
             r'agendar|agéndame|reservar|resérvame|pedir|sacar|separar|'
             r'tomar)\s+(una\s+|mi\s+)?(cita|turno)', t)
-        if re.search(r'\b(tiene|tienen|hay|queda|quedan)\s+(un\s+|alg[uú]n\s+)?(turno|cita)', t):
+        if re.search(r'\b(tiene|tienen|hay|queda|quedan)\s+(un\s+|el\s+|alg[uú]n\s+)?(turno|cita)', t):
+            pide_cita = True
+        if re.search(r'\b(un|una|mi|el)\s+(turno|cita)\b', t) and not re.search(
+                r'cu[aá]nto|cuesta|precio|cancel|anul|reagend|reprogram', t):
+            # «Un turno con el doctor para el viernes a las 15:00».
             pide_cita = True
         # «Es mi chequeo anual» sin verbo de petición: el chequeo es motivo
         # de reserva por sí solo (nunca pregunta de precio sin «cuánto»).
@@ -2290,6 +2294,15 @@ def _extraer_datos_contacto(texto: str, phone: str, direccion_previa: str = '') 
     return datos
 
 
+def _tiene_referencia(texto: str) -> bool:
+    """¿La direccion trae un punto de referencia para el repartidor?"""
+    return bool(re.search(
+        r'\b(frente|junto|cerca|lado|esquina|diagonal|referencia|detras|atras|'
+        r'casa|edificio|porton|tienda|parque|iglesia|escuela|colegio|color|piso|'
+        r'dpto|departamento|conjunto|manzana|mz|villa|local|bloque|torre)\b',
+        _normalizar(texto or '')))
+
+
 def _fusionar_datos_contacto(previos: dict, texto: str, phone: str) -> dict:
     """Acumula nombre, telefono y cedula a lo largo de varios mensajes.
 
@@ -2364,9 +2377,11 @@ def _venta_manual(path, phone, body, conv_id, trato, pending) -> dict:
                 'el envío por este chat. ¡Gracias por tu compra! %s'
                 % (datos.get('nombre'), item, modo, _despedida_hora(path)),
                 'Listo, %s. Dejé registrada su compra de %s (%s). Una persona '
-                'del equipo preparará su factura y el artículo, y le confirmará '
-                'el envío por este chat. ¡Gracias por su compra! %s'
-                % (datos.get('nombre'), item, modo, _despedida_hora(path))),
+                'del equipo preparará su factura y el artículo, y le %s '
+                'por este chat. ¡Gracias por su compra! %s'
+                % (datos.get('nombre'), item, modo,
+                   'coordinará la entrega' if pending.get('precio_domicilio')
+                   else 'confirmará el envío', _despedida_hora(path))),
             'necesita_datos': False, 'pending': {}, 'ok': True, 'extra': {},
             'paused': True, 'aviso_sistema': True, 'code': None, 'estado': None}
 
@@ -2401,6 +2416,8 @@ def _norm_primera(t: str) -> str:
     """«No es la primera vez» significa que YA se atendio; se normaliza a un
     texto sin ambiguedad y se corrige la errata «ves»."""
     t = re.sub(r'\bprimera v[eé][sz]\b', 'primera vez', t or '')
+    t = re.sub(r'\b(soy|es|somos)\s+(un\s+|una\s+)?(paciente\s+|cliente\s+)?nuev[oa]s?\b',
+               'primera vez', t)
     t = re.sub(r'\bno es (?:mi |la )?primera vez\b', 'ya me atendi antes', t)
     t = re.sub(r'\bno es (?:mi |la )?primera\b', 'ya me atendi antes', t)
     return t
@@ -3975,7 +3992,8 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
     if _gestion is None and pending.get('intencion') != 'reservar' \
             and 'pedido' not in _norm_corto and re.search(
                 r'reservar|agendar|agendame|reservame|separame|'
-                r'quiero (una |mi )?cita|necesito (una )?cita',
+                r'quiero (una |un |mi )?(cita|turno)|necesito (una |un )?(cita|turno)|'
+                r'\bun turno\b|tiene (el |un )?turno',
                 _norm_corto):
         # Entrar a reserva DESDE otro hilo (típico: consulta → «quiero
         # reservar...»): se confirma con el motor y se conserva día/hora
@@ -4844,8 +4862,8 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
         return _resp('reservar',
                      res['message'] + _aviso_llegada(path, trato) + _frase(
                          trato,
-                         ' ¿La cita es para ti? Si es para otra persona, dime su nombre.',
-                         ' ¿La cita es para usted? Si es para otra persona, dígame su nombre.'),
+                         ' ¿A nombre de quién dejo la cita? Dime el nombre del paciente.',
+                         ' ¿A nombre de quién dejo la cita? Dígame el nombre del paciente.'),
                      need_datos=False,
                      pending={'intencion': 'paciente',
                               'cita_id': res['appointment_id']},
@@ -5751,7 +5769,7 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
     # Referencias («ese», «los dos», «el otro») sobre lo ya ofrecido.
     ultimos = pending.get('ultimos_items') or []
     from crm.chat_adapter import _pregunta_atributo, _familia_atributo, _texto_atributo
-    if ultimos and _pregunta_atributo(body):
+    if ultimos and _pregunta_atributo(body) and not pending.get('pide_referencia'):
         candidatos = [p for p in productos if p['code'] in ultimos]
         familia = _familia_atributo(body)
         if candidatos:
@@ -5764,27 +5782,44 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
                          pending={**pending})
     item = None
     mencionados = _menciona_producto(body or '', productos)
+    if len(mencionados) > 1 and (pending.get('producto_id') or pending.get('item_code')):
+        # «Deme el cepillo» tras hablar del Cepillo medio: es ese, no se
+        # vuelve a listar la familia.
+        _pin_m = next((p for p in mencionados
+                       if str(p.get('id')) == str(pending.get('producto_id') or '')
+                       or p.get('code') == pending.get('item_code')), None)
+        if _pin_m is not None:
+            mencionados = [_pin_m]
     if mencionados:
         if len(mencionados) == 1:
             item = mencionados[0]
         else:
-            opciones = ', '.join('%d. %s' % (i + 1, p['name'])
-                                 for i, p in enumerate(mencionados[:4]))
+            # Con precio, hasta 6: el cliente elige por número sin repreguntar.
+            _lista = mencionados[:6]
+            opciones = ', '.join('%d. %s (%s)' % (
+                i + 1, p['name'],
+                _moneda.formatear_importe(p.get('price_cents'), p.get('currency')) or 'consultar')
+                for i, p in enumerate(_lista))
             return _resp('comprar', _frase(
                 trato,
-                'Tenemos varias opciones: %s. ¿Cuál quieres?' % opciones,
-                'Tenemos varias opciones: %s. ¿Cuál quiere?' % opciones),
+                'Tenemos varias opciones: %s. ¿Cuál quieres? Responde con el número.' % opciones,
+                'Tenemos varias opciones: %s. ¿Cuál quiere? Responda con el número.' % opciones),
                 need_datos=True,
                 pending={**pending, 'intencion': 'comprar',
-                         'ultimos_items': [p['code'] for p in mencionados[:4]]})
+                         'ultimos_items': [p['code'] for p in _lista]})
     elif re.search(r'\b(ese|esa|este|esta|eso)\b', bajo) and ultimos:
         item = next((p for p in productos if p['code'] == ultimos[0]), None)
     elif re.search(r'\b(el otro|la otra|mejor .*otro)\b', bajo) and len(ultimos) > 1:
         item = next((p for p in productos if p['code'] == ultimos[1]), None)
+    _por_opcion = False
     if item is None and ultimos:
         num = _opcion_numerica(body or '')
+        if num is None:
+            _m_op = re.search(r'\b(?:el|la|numero|opcion)\s+(\d{1,2})\b', _normalizar(body or ''))
+            num = int(_m_op.group(1)) if _m_op else None
         if num and 1 <= num <= len(ultimos):
             item = next((p for p in productos if p['code'] == ultimos[num - 1]), None)
+            _por_opcion = item is not None
     if re.search(r'\b(los dos|las dos|ambos|ambas)\b', bajo) and ultimos \
             and item is None:
         item = next((p for p in productos if p['code'] == ultimos[0]), None)
@@ -5817,6 +5852,10 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
             need_datos=True,
             pending={**pending, 'intencion': 'comprar'})
     cantidad = _cantidad_compra(body or '') or pending.get('cantidad')
+    if _por_opcion and not re.search(r'\d+\s*(unidad|unidades|piezas|cajas|u\b)',
+                                     _normalizar(body or '')):
+        # «El 2» elige la opción 2 de la lista; no son dos unidades.
+        cantidad = pending.get('cantidad')
     if cantidad and _parece_direccion(body or '') and not re.search(
             r'\b\d{1,2}\s*(cepillo|cepillos|unidad|unidades|pieza|piezas|u\b|caja|cajas)',
             _normalizar(body or '')):
@@ -5935,7 +5974,10 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
                 trato, 'De acuerdo, no he registrado ningún pedido.',
                 'De acuerdo, no he registrado ningún pedido.'), pending={})
     modo = pending.get('modo')
-    if re.search(r'\b(domicilio|env[ií]o|casa|delivery|llev\w*)\b', bajo):
+    if pending.get('pide_referencia') or (modo and (pending.get('direccion') or '').strip()):
+        # La referencia («frente a la tienda») no cambia el modo ya elegido.
+        pass
+    elif re.search(r'\b(domicilio|env[ií]o|casa|delivery|llev\w*)\b', bajo):
         modo = 'domicilio'
     elif re.search(r'\b(retiro|retira|retirar|retirarlo|retirarla|recojo|recoger|recogerlo|local|tienda|paso por|paso a)\b', bajo):
         modo = 'retiro'
@@ -5948,6 +5990,9 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
                      'cantidad': cantidad, 'ultimos_items': [item['code']]})
     zona_codigo, direccion = pending.get('zona_codigo'), pending.get('direccion') or ''
     if modo == 'domicilio':
+        if pending.get('pide_referencia') and direccion.strip() and (body or '').strip():
+            direccion = '%s (referencia: %s)' % (direccion.strip(), (body or '').strip()[:160])
+            pending = {**pending, 'direccion': direccion, 'pide_referencia': False}
         if not direccion.strip():
             posible = (body or '').strip()
             if (_parece_direccion(posible) or (pending.get('pregunto_direccion')
@@ -5955,6 +6000,19 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
                     and len(posible) > 4 \
                     and 'domicilio' not in _normalizar(posible):
                 direccion = posible
+                if not _tiene_referencia(direccion):
+                    return _resp('comprar', _frase(
+                        trato,
+                        'Anotado. ¿Me das un punto de referencia para la entrega? '
+                        '(por ejemplo: frente al parque, casa azul)',
+                        'Anotado. ¿Me da un punto de referencia para la entrega? '
+                        '(por ejemplo: frente al parque, casa azul)'),
+                        need_datos=True,
+                        pending={**pending, 'intencion': 'comprar',
+                                 'item_code': item['code'], 'cantidad': cantidad,
+                                 'modo': modo, 'direccion': direccion,
+                                 'pide_referencia': True,
+                                 'ultimos_items': [item['code']]})
             else:
                 # Si pregunta cuánto cuesta el envío, dar las tarifas antes de
                 # pedir la dirección: sólo lo pedido, sin rodeos.
@@ -5998,8 +6056,8 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
                                  'modo': modo, 'pregunto_direccion': True,
                                  'ultimos_items': [item['code']]})
                 return _resp('comprar', _frase(
-                    trato, '¿A qué dirección lo enviamos?%s' % detalle,
-                    '¿A qué dirección lo enviamos?%s' % detalle),
+                    trato, '¿A qué dirección lo enviamos? Incluye un punto de referencia.%s' % detalle,
+                    '¿A qué dirección lo enviamos? Incluya un punto de referencia.%s' % detalle),
                     need_datos=True,
                     pending={**pending, 'intencion': 'comprar', 'item_code': item['code'],
                              'cantidad': cantidad, 'modo': modo, 'pregunto_direccion': True,
@@ -6054,8 +6112,21 @@ def _dialogo_compra(path, phone, body, conv, conv_id, trato, pending, contexto) 
                     'zona_codigo': zona_codigo, 'direccion': direccion,
                     'clave': cot['clave'], 'confirmar_compra': False,
                     'venta_manual': True, 'ultimos_items': [item['code']]}
+        _dom_c = item.get('price_domicilio_cents')
+        if modo == 'domicilio' and _dom_c not in (None, ''):
+            # El articulo tiene precio con entrega: se dice, sin «por confirmar».
+            _mon = item.get('currency') or 'USD'
+            _fmt = lambda c: _moneda.formatear_importe(c, _mon) or ''  # noqa: E731
+            _res_txt = _frase(
+                trato,
+                'Te resumo: %d × %s a domicilio: %s c/u (incluye la entrega). Total: %s.',
+                'Le resumo: %d × %s a domicilio: %s c/u (incluye la entrega). Total: %s.') % (
+                    cantidad, item['name'], _fmt(_dom_c), _fmt(int(_dom_c) * int(cantidad)))
+            _pend_vm['precio_domicilio'] = True
+        else:
+            _res_txt = _texto_resumen_compra(snap, trato)
         return _resp('comprar',
-                     _texto_resumen_compra(snap, trato) + ' '
+                     _res_txt + ' '
                      + _texto_pide_datos(trato, _pend_vm,
                                          _datos_compra_faltantes(_pend_vm)),
                      need_datos=True, pending=_pend_vm)
