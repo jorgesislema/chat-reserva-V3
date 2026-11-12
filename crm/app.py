@@ -297,6 +297,17 @@ _TABLAS_DE_LA_PRUEBA = frozenset({
 })
 
 
+def _hora_local(sello, zona: str) -> str:
+    """HH:MM en la zona del negocio (la base guarda la hora en UTC)."""
+    try:
+        dt = datetime.fromisoformat(str(sello))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ZoneInfo(zona)).strftime('%H:%M')
+    except Exception:  # noqa: BLE001 - sin sello válido no se muestra hora
+        return (str(sello or ''))[11:16]
+
+
 import threading as _threading
 _LOCK_ARENAS = _threading.Lock()  # un refresco a la vez (varios clics seguidos)
 
@@ -2211,7 +2222,7 @@ def create_app(test_config=None):
             modelo=info_modo['modelo'],
             mensajes=[{'dir': 'out' if m['direction'] == 'outbound' else 'in',
                       'autor': m['author_type'],
-                       'texto': m['body'], 'hora': (m['created_at'] or '')[11:16]}
+                       'texto': m['body'], 'hora': _hora_local(m['created_at'], zona)}
                       for m in mensajes])
 
     # --- Plantillas WhatsApp (declaración local; aprobación = Meta) ---

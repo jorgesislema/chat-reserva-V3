@@ -3048,6 +3048,9 @@ def _catalog_search(path, query, limit=4, solo_publicados=True,
     q = re.sub(r'\bkids?\b', 'kit', q)
     q = re.sub(r'(?<=[a-z])k(?=[ei])', 'qu', q)
     q = re.sub(r'\bsepill', 'cepill', q)
+    # Nombres de uso diario: «pasta de dientes» es la crema dental.
+    q = re.sub(r'\bpastas?\s+(de\s+dientes|dental(es)?|dentrifica|dent[ií]frica)\b', 'crema dental', q)
+    q = re.sub(r'\bpasta\b', 'crema', q)
     words = [w for w in re.split(r'\W+', _f(q)) if len(w) > 2 and w not in _STOP]
     # Sinónimos coloquiales seguros: «chequeo» es la valoración inicial.
     _SINONIMOS_CATALOGO = {'chequeo': 'valoracion', 'chequeos': 'valoracion',

@@ -517,6 +517,34 @@ class AdaptadorSimulado(ChatAdapter):
                                          resumen='aclaracion_vectorial')
         if any(k in q for k in ('stock', 'disponible', 'disponibilidad',
                                 'quedan', 'queda', 'tiene', 'tienen', 'hay')) \
+                and not pide_importe and not es_agenda and publico \
+                and len([p for p in re.split(r'\s+y\s+|,', q) if p.strip()]) > 1:
+            # Dos productos en un mensaje («cepillo y pasta de dientes»): se
+            # responde cada uno, con su precio en local y a domicilio.
+            lineas, vistos_p = [], set()
+            for parte in [p for p in re.split(r'\s+y\s+|,', q) if p.strip()][:3]:
+                cands = [t for t in (herramientas.get('catalogo_buscar_stock')(parte) or [])
+                         if str(t.get('kind') or '') == 'producto'
+                         and (t.get('score') or 0) > 0 and t.get('id') not in vistos_p]
+                if not cands:
+                    continue
+                t = cands[0]
+                vistos_p.add(t.get('id'))
+                loc = _moneda.formatear_importe(t.get('price_cents'), t.get('currency'))
+                dom = _moneda.formatear_importe(
+                    t.get('price_domicilio_cents') if t.get('price_domicilio_cents')
+                    not in (None, '') else t.get('price_cents'), t.get('currency'))
+                lineas.append('%s: %s en el local, %s a domicilio' % (t.get('name'), loc, dom))
+                fuentes.append(Fuente(tipo='catalog_item', id=str(t.get('id') or ''),
+                                      nombre=t.get('name') or '',
+                                      version=str(t.get('current_revision') or '1'),
+                                      procedencia=t.get('code') or ''))
+            if len(lineas) > 1:
+                return RespuestaChat(
+                    answer='Sí, tenemos: ' + '; '.join(lineas) + '. ¿Cuál desea llevar?',
+                    fuentes=fuentes, resumen='stock_varios')
+        if any(k in q for k in ('stock', 'disponible', 'disponibilidad',
+                                'quedan', 'queda', 'tiene', 'tienen', 'hay')) \
                 and not pide_importe and not es_agenda:
             catalog = herramientas.get('catalogo_buscar_stock')(q) or []
             if catalog:

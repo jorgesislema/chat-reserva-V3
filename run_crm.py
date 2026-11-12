@@ -5,8 +5,17 @@ Administración: flask --app crm.app:create_app.
 El puerto (por defecto 8050), el host (por defecto 127.0.0.1) y el modo multi-hilo
 (por defecto activo) pueden cambiarse con CRM_HOST, CRM_PORT y CRM_THREADED para
 entornos de prueba aislados."""
+import faulthandler
 import os
+from pathlib import Path
+
 from crm.app import create_app
+
+# Si el proceso se cierra de golpe (fallo nativo), queda el rastro aquí.
+_LOGS = Path(__file__).resolve().parent / 'logs'
+_LOGS.mkdir(exist_ok=True)
+faulthandler.enable(file=open(_LOGS / 'cierre_inesperado.log', 'a', encoding='utf-8'),
+                    all_threads=True)
 
 if __name__ == '__main__':
     host = os.getenv('CRM_HOST', '127.0.0.1')

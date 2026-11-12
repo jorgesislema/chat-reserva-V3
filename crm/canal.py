@@ -1818,9 +1818,13 @@ def _alternativas(path, profesional_id, fecha, hora, limite=3, duracion_min=30):
         _deltas = sorted([m for m in range(-600, 601, 30) if m],
                          key=lambda m: (abs(m), m < 0)) if RECEPCION_DIRECTA \
             else [60, -60, 120, -120, 180]
+        _ahora_l = _dt.now(zona).replace(tzinfo=None)
         for delta in _deltas:
             cand = base + _td(minutes=delta)
             if cand.date() != base.date():
+                continue
+            if cand <= _ahora_l + _td(minutes=15):
+                # Nunca se ofrece una hora que ya pasó (o a punto de pasar).
                 continue
             fin_local = cand + _td(minutes=duracion)
             ini = cand.replace(tzinfo=zona).astimezone(_tz.utc)
