@@ -713,7 +713,8 @@ class MotorSimulado(MotorCanal):
             r'(quiero|quisiera|querr[ií]a|necesito|podr[ií]a|puedo|me gustar[ií]a|'
             r'agendar|agéndame|reservar|resérvame|pedir|sacar|separar|'
             r'tomar)\s+(una\s+|mi\s+)?(cita|turno)', t)
-        if re.search(r'\b(tiene|tienen|hay|queda|quedan)\s+(un\s+|el\s+|alg[uú]n\s+)?(turno|cita)', t):
+        if re.search(r'\b(tiene|tienen|tienes|hay|queda|quedan|dispone|dispones|disponen)\s+'
+                     r'(de\s+)?(un\s+|el\s+|alg[uú]n\s+|unos?\s+)?(turnos?|citas?|espacios?)', t):
             pide_cita = True
         if re.search(r'\b(un|una|mi|el)\s+(turno|cita)\b', t) and not re.search(
                 r'cu[aá]nto|cuesta|precio|cancel|anul|reagend|reprogram', t):
@@ -2255,7 +2256,8 @@ def _parte_dia(texto: str) -> Optional[str]:
     t = re.sub(r'\blamanana\b', 'la mañana', t)
     if re.search(r'\b(por|en|de|a)\s+(la\s+)?(manana|mañana)\b', t):
         return 'manana'
-    if re.search(r'\b(por|en|de|a)\s+(la\s+)?(tarde|noche)\b', t):
+    if re.search(r'\b(por|en|de|a|para)\s+(la\s+)?(tarde|noche)\b', t):
+        # («para la tarde» sí es parte del día; «para mañana» es otro día.)
         return 'tarde'
     if re.search(r'\b(lunes|martes|miercoles|miércoles|jueves|viernes|'
                  r'sabado|sábado|domingo|hoy)\s+(la\s+)?(tarde|noche|'
@@ -4555,6 +4557,22 @@ def _run_dialog(path, phone, body, conv, motor, contexto, op_id,
                     '¿Recuerda el nombre del doctor que lo atiende, o prefiere '
                     'que lo atienda cualquier doctor disponible?')),
                     need_datos=True, pending={**pend, 'preg_doctor': True})
+            if not (fecha and hora):
+                # Lo que ya se sabe no se vuelve a preguntar: «por la tarde»
+                # o un segundo «sí» sin hora → se propone el primer hueco real.
+                _parte_x = _parte_dia(body or '') or pend.get('parte_dia')
+                if not fecha and (_parte_x or pending.get('preg_doctor')):
+                    from datetime import timedelta as _tdx
+                    fecha = ((_hoy_dialogo(contexto) or datetime.now(timezone.utc).date())
+                             + _tdx(days=1)).isoformat()
+                    pend['fecha'] = fecha
+                if fecha and not hora and (_parte_x or pending.get('preg_doctor')):
+                    _ap_x, _ci_x = _ventana_dia(path, fecha)
+                    _cand_x = (_ap_x if _parte_x != 'tarde' else '15:00') or _ap_x
+                    if _cand_x and (not _ci_x or _cand_x < _ci_x):
+                        hora = _cand_x
+                        pend['hora'] = hora
+                        pend['propuesta_bot'] = True
             if not (fecha and hora):
                 # Sin doctor elegido: primero el dia y la hora; luego se asigna
                 # a quien este libre en ese momento (no antes).

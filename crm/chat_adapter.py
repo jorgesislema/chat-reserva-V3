@@ -2092,7 +2092,8 @@ def _validar_hechos(texto: str, contexto: List[Dict[str, Any]],
 
 _KB_INTERNO_RX = re.compile(
     r'evaluacion previa|valoracion previa|sin regan|se ofrece el|'
-    r'\bel bot\b|\bnunca se\b|\bse deriva\b')
+    r'\bel bot\b|\bnunca se\b|\bse deriva\b|\bse sugiere\b|\bse reserva el\b|'
+    r'\bse recomienda derivar\b')
 
 
 def _kb_interno(cuerpo) -> bool:

@@ -297,6 +297,10 @@ _TABLAS_DE_LA_PRUEBA = frozenset({
 })
 
 
+import threading as _threading
+_LOCK_ARENAS = _threading.Lock()  # un refresco a la vez (varios clics seguidos)
+
+
 def refrescar_arena(origen: str, arena: str) -> bool:
     """Trae a la copia del simulador TODO el negocio vigente (catálogo,
     precios, doctores, horarios, agenda real, información, configuración),
@@ -313,7 +317,8 @@ def refrescar_arena(origen: str, arena: str) -> bool:
             return False
     except OSError:
         pass
-    with sqlite3.connect(arena) as conn:
+    with _LOCK_ARENAS, sqlite3.connect(arena, timeout=30) as conn:
+        conn.execute('PRAGMA busy_timeout=30000')
         conn.execute('ATTACH DATABASE ? AS base', (str(origen),))
         try:
             tablas_base = {r[0] for r in conn.execute(
